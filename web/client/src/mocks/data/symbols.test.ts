@@ -4,7 +4,7 @@ import { SYMBOL_SEEDS } from './symbols';
 
 /** 后端模拟报价源的起始价（内部文档）。测试在 web/client 目录下运行 */
 function backendCsv(): Map<string, { price: string; spread: string }> {
-  const text = readFileSync(join(process.cwd(), '../../backend/src/main/resources/simulated-prices.csv'), 'utf8');
+  const text = readFileSync(join(process.cwd(), '../../quote-app/src/main/resources/simulated-prices.csv'), 'utf8');
   const rows = text.split('\n').filter((l) => l.trim() && !l.startsWith('#') && !l.startsWith('code,'));
   return new Map(rows.map((l) => {
     const [code, price, spread] = l.trim().split(',');
@@ -13,7 +13,7 @@ function backendCsv(): Map<string, { price: string; spread: string }> {
 }
 
 describe('原型品种表', () => {
-  it('起始价和点差与后端模拟报价源 simulated-prices.csv 完全一致（改一边必须同时改另一边）', () => {
+  it('起始价和点差与报价服务模拟源 simulated-prices.csv 完全一致（改一边必须同时改另一边）', () => {
     const csv = backendCsv();
     expect([...csv.keys()].sort()).toEqual(SYMBOL_SEEDS.map((s) => s.info.code).sort());
     for (const s of SYMBOL_SEEDS) {

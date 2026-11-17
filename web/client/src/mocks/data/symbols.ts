@@ -1,6 +1,6 @@
 /**
  * 第一版 50 个品种（内部文档 第 3.6 节）。
- * 起始价、点差和后端模拟报价源 backend/src/main/resources/simulated-prices.csv 相同（2026-10-16 的市价，来源见 内部文档），仅作示意；杠杆上限按 A-03 沿用现有第一档；
+ * 起始价、点差和报价服务模拟源 quote-app/src/main/resources/simulated-prices.csv 相同（2026-10-16 的市价，来源见 内部文档），仅作示意；杠杆上限按 A-03 沿用现有第一档；
  * 合约大小按 A-01：外汇 100,000、黄金 100 盎司、白银 5,000 盎司、原油 1,000 桶、指数和加密 1、股票 1 股。
  */
 import type { SymbolCategory, SymbolInfo } from '../../api/types';
