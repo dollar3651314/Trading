@@ -61,7 +61,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [serverErr, setServerErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
   // 后端返回的字段错误（VALIDATION_FAILED 的 fields），显示在对应输入框下面；改了这个字段就清掉
   const [serverFields, setServerFields] = useState<Errs<'whitelistId' | 'amount'>>({});
   const errs: Errs<'whitelistId' | 'amount' | 'kyc'> = validateWithdraw({ whitelistId: wid, amount }, info, whitelist, new Date(now));
@@ -103,11 +103,11 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
   const doSubmit = async () => {
     setBusy(true);
     try {
-      await submitWithdraw({ whitelistId: wid, amount: amount.trim() });
+      const created = await submitWithdraw({ whitelistId: wid, amount: amount.trim() });
       setConfirm(false);
       setAmount('');
       setSubmitted(false);
-      setDone(true);
+      setDone(created.id);
       toast.show({ tone: 'success', title: t('withdraw.submitted'), body: t('withdraw.submittedBody', { h: info.coolingHours }) });
       onDone();
     } catch (e) {
@@ -135,7 +135,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
     <>
       {done && (
         <div className="notice ok wd-done" role="status">
-          <b>{t('withdraw.submitted')}</b>
+          <b>{t('withdraw.doneTitle', { id: done })}</b>
           <p className="small">{t('withdraw.doneBody', { h: info.coolingHours })}</p>
         </div>
       )}
