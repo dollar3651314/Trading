@@ -57,7 +57,7 @@ TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer trading-me
 #   杀掉还在等的后台命令（导出、导入、等锁）和容器里的 mysqldump；删登记的临时文件（明文 SQL）和临时容器；
 #   演练中途被打断时把停掉的 Trading 应用拉起来；trading off 停完 Trading 前被打断时按原样恢复 Trading、停完后被打断时照样启动 TopUP
 CLEAN_PATHS=(); CLEAN_CONTAINERS=(); OFF_START_TOPUP=""; OFF_RESTORE_TRADING=""; INSTALL_HINT=""; DRILL_RESTART_PENDING=""; DRILL_MEMGUARD_WAS_ON=""
-BG_PID=""; DUMP_RUNNING=""
+BG_PID=""; DUMP_RUNNING=""; OFF_TOPUP_FIRST_FAILED=""
 on_exit() {
   local rc=$? c p
   # 清理时不能因为任何一步出错就停下（set +e）；终端可能已经断了（远程连接窗口关掉），提示写不出去也照样往下做（say 不报错、忽略 SIGPIPE），
@@ -76,16 +76,23 @@ on_exit() {
   if [ -n "$DRILL_RESTART_PENDING" ]; then log "（恢复演练被打断：重新启动 Trading 的应用）"; drill_restart_apps 1; fi
   if [ -n "$OFF_RESTORE_TRADING" ]; then OFF_RESTORE_TRADING=""; log "（trading off 没做完：Trading 按原样恢复、定时器打开，TopUP 不启动）"; off_restore_trading; fi
   # TopUP：正在启动时被打断的，bash 会等那条 topup start 做完才到这里；做成了（有标记文件）就不再启动，没做成再启动一次
+  local topup_failed=""
   if [ -n "$OFF_START_TOPUP" ]; then
     if [ -f "$STATE/topup-started.$$" ]; then
       log "（trading off 被打断：TopUP 已经启动好了）"
     else
-      log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; restart_topup
+      if [ -n "$OFF_TOPUP_FIRST_FAILED" ]; then log "（第一次 topup start 没成功，再试一次）"; else log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; fi
+      if ! restart_topup; then
+        topup_failed=1
+        log "✗ topup start 两次都没成功：Trading 已全停、TopUP 没起来，测试服务器现在没有服务。看 sudo topup status，截图给主会话"
+      fi
     fi
     OFF_START_TOPUP=""
   fi
   rm -f "$STATE/topup-started.$$"
   if [ -n "$INSTALL_HINT" ] && [ "$rc" -ne 0 ]; then say "（安装没做完。如果 TopUP 停着、要先恢复它，运行 sudo trading off；改好后再运行同一条安装命令）"; fi
+  # TopUP 两次都没起来：本来要以 0 结束的也改成 1（在退出收尾里 exit 只决定退出码，不会再进收尾）
+  if [ -n "$topup_failed" ] && [ "$rc" -eq 0 ]; then exit 1; fi
   return 0
 }
 trap on_exit EXIT
@@ -1013,6 +1020,8 @@ off_restore_trading() {
 cmd_off() {
   need_root
   say "== 切回 TopUP（Trading 停下，数据保留；一般 2–5 分钟）"
+  # 以前的进程留下的启动标记（进程号可能被重用）先删
+  rm -f "$STATE"/topup-started.*
   # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删
   docker rm -f trading-restore-drill > /dev/null 2>&1 || true
   # 先拿和 trading update 同一把锁、再停定时器：等锁时被打断，Trading 和定时器都还是原样；拿到锁以后自动更新也不会再把 Trading 拉起来
@@ -1046,7 +1055,7 @@ cmd_off() {
   fi
   log "trading off"
   # 启动成功才清掉"要启动 TopUP"的标记：没成功（或启动中被打断）时退出收尾会再启动一次
-  if restart_topup; then OFF_START_TOPUP=""; else say "  退出前再试一次 topup start"; fi
+  if restart_topup; then OFF_START_TOPUP=""; else OFF_TOPUP_FIRST_FAILED=1; say "  退出前再试一次 topup start"; fi
 }
 
 main() {
