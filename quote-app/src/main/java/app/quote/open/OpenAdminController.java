@@ -186,7 +186,7 @@ class OpenAdminController {
 
   @PostMapping("/internal/open/keys/{keyId}/disable")
   ResponseEntity<Object> disable(@PathVariable String keyId) {
-    if (keys.find(keyId).isEmpty()) return ResponseEntity.status(404).body(Map.of("code", "NOT_FOUND", "message", "没有这个 Key"));
+    if (keys.findInDb(keyId).isEmpty()) return ResponseEntity.status(404).body(Map.of("code", "NOT_FOUND", "message", "没有这个 Key"));
     boolean changed = keys.disable(keyId);
     stream.dropKey(keyId);
     return ResponseEntity.ok(Map.of("disabled", true, "changed", changed));
@@ -195,7 +195,7 @@ class OpenAdminController {
   @PutMapping("/internal/open/keys/{keyId}/limits")
   ResponseEntity<Object> limits(@PathVariable String keyId, @RequestBody LimitsBody b) {
     try {
-      Limits before = keys.find(keyId).map(ApiKeys.Key::limits).orElse(null);
+      Limits before = keys.findInDb(keyId).map(ApiKeys.Key::limits).orElse(null);
       ApiKeys.Key k = keys.setLimits(keyId, limits(b));
       return ResponseEntity.ok(Map.of("before", before, "after", k.limits()));
     } catch (IllegalArgumentException e) {

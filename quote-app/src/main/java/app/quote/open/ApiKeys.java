@@ -14,17 +14,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 外部客户和 Key（表 quote_client、quote_api_key）。Key 的内存快照（含解密后的 Secret，验签用）：改了立即重新加载，另外每 10 秒重新加载一次，
  * 所以停用、轮换、改限额最晚 10 秒内生效（经后台改的立即生效，对外 WebSocket 由 {@link OpenStream} 每秒检查一次并断开）。
  * <p>Secret 只在 {@link #createKey}、{@link #rotate} 的返回值里出现一次；{@link Key} 和所有列表都不带 Secret。
+ * <p>重新加载的并发（审查 🟡，修 AC_Q2 偶发失败）：定时重新加载和改动后的重新加载都是"读整张表 → 换掉整个快照"，以前不加锁，
+ * 定时的那次读到旧数据、在改动之后才换上去，就把刚做的改动盖掉（新 Key 401、旧 Key 还能用最多 10 秒，改的限额丢了）。现在：
+ * <ul>
+ *   <li>读和换在同一把锁里（{@link #reload}），后开始读的一定后换上去，旧快照盖不掉新快照；</li>
+ *   <li>改动后的重新加载在事务提交之后才做（{@link #reloadAfterCommit}），不会读到没提交的数据，也不会在提交前被定时的那次抢先读到旧数据又换上去；</li>
+ *   <li>轮换从库里读旧 Key 并加行锁（{@code SELECT … FOR UPDATE}），不信内存快照：限额以库里为准，同一个 Key 同时轮换两次只有一次成功。</li>
+ * </ul>
  */
 @Component
 public class ApiKeys {
@@ -61,6 +71,10 @@ public class ApiKeys {
   private final OpenSettings settings;
   private final Clock clock;
   private volatile Map<String, Entry> keys = Map.of();
+  /** 重新加载（读库 + 换快照）串行做 */
+  private final ReentrantLock reloadLock = new ReentrantLock();
+  /** 测试用：读完库、换快照之前调用（模拟定时重新加载读到旧数据后被拖慢）；生产为 null */
+  private volatile Runnable beforeSwap;
 
   ApiKeys(JdbcTemplate jdbc, SecretBox box, OpenSettings settings, Clock clock) {
     this.jdbc = jdbc;
@@ -81,6 +95,11 @@ public class ApiKeys {
   Optional<byte[]> secret(String keyId) {
     Entry e = keyId == null ? null : keys.get(keyId);
     return e == null || !e.key().active() || e.secret() == null ? Optional.empty() : Optional.of(e.secret());
+  }
+
+  /** 从库里查（不经过内存快照，后台改动前判断存在、取改动前的值用） */
+  public Optional<Key> findInDb(String keyId) {
+    return keyId == null ? Optional.empty() : load(keyId, false);
   }
 
   public List<Key> keys() {
@@ -121,10 +140,10 @@ public class ApiKeys {
     return insert(clientId, kind, normalize(symbols), settings.defaults(), null);
   }
 
-  /** 轮换：新 Key 继承旧 Key 的客户、类型、品种、限额；旧 Key 立即停用 */
+  /** 轮换：新 Key 继承旧 Key 的客户、类型、品种、限额（从库里读并加行锁，不用内存快照）；旧 Key 立即停用 */
   @Transactional
   public Created rotate(String keyId) {
-    Key old = find(keyId).orElseThrow(() -> new IllegalArgumentException("没有这个 Key"));
+    Key old = load(keyId, true).orElseThrow(() -> new IllegalArgumentException("没有这个 Key"));
     if (!old.active()) throw new IllegalArgumentException("Key 已停用，不能轮换");
     jdbc.update("UPDATE quote_api_key SET status = 'DISABLED', disabled_at = ? WHERE key_id = ?", now(), keyId);
     return insert(old.clientId(), old.kind(), old.symbols(), old.limits(), keyId);
@@ -133,18 +152,18 @@ public class ApiKeys {
   /** 停用；已经停用的返回 false */
   public boolean disable(String keyId) {
     int n = jdbc.update("UPDATE quote_api_key SET status = 'DISABLED', disabled_at = ? WHERE key_id = ? AND status = 'ACTIVE'", now(), keyId);
-    reload();
+    reloadAfterCommit();
     return n > 0;
   }
 
   /** 改这一个 Key 的限额（不影响其他 Key 和默认值） */
   public Key setLimits(String keyId, Limits l) {
     l.validate();
-    if (find(keyId).isEmpty()) throw new IllegalArgumentException("没有这个 Key");
-    jdbc.update("UPDATE quote_api_key SET rest_per_second = ?, rest_per_day = ?, ws_connections = ?, ws_symbols = ? WHERE key_id = ?", l.restPerSecond(),
+    int n = jdbc.update("UPDATE quote_api_key SET rest_per_second = ?, rest_per_day = ?, ws_connections = ?, ws_symbols = ? WHERE key_id = ?", l.restPerSecond(),
         l.restPerDay(), l.wsConnections(), l.wsSymbols(), keyId);
-    reload();
-    return find(keyId).orElseThrow();
+    if (n == 0) throw new IllegalArgumentException("没有这个 Key");
+    reloadAfterCommit();
+    return load(keyId, false).orElseThrow();
   }
 
   /** 最近使用时间（用量写库时一起写） */
@@ -160,8 +179,8 @@ public class ApiKeys {
     jdbc.update("INSERT INTO quote_api_key (key_id, client_id, kind, secret_enc, symbols, rest_per_second, rest_per_day, ws_connections, ws_symbols, rotated_from, "
         + "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", keyId, clientId, kind.name(), box.seal(secret), symbols.isEmpty() ? null : String.join(",", symbols),
         l.restPerSecond(), l.restPerDay(), l.wsConnections(), l.wsSymbols(), rotatedFrom, now());
-    reload();
-    return new Created(find(keyId).orElseThrow(), secret);
+    reloadAfterCommit();
+    return new Created(load(keyId, false).orElseThrow(), secret);
   }
 
   private static Set<String> normalize(Set<String> symbols) {
@@ -177,15 +196,54 @@ public class ApiKeys {
     return out;
   }
 
+  private static final String COLS = "key_id, client_id, kind, status, secret_enc, symbols, rest_per_second, rest_per_day, ws_connections, ws_symbols, created_at, "
+      + "disabled_at, last_used_at, rotated_from";
+
+  /** 从库里读一个 Key（不经过内存快照）；forUpdate 时加行锁，要在事务里调用 */
+  private Optional<Key> load(String keyId, boolean forUpdate) {
+    return jdbc.query("SELECT " + COLS + " FROM quote_api_key WHERE key_id = ?" + (forUpdate ? " FOR UPDATE" : ""), (rs, i) -> key(rs), keyId).stream().findFirst();
+  }
+
+  /** 改动后的重新加载：在事务里就等提交之后再做（回滚了就不做），不在事务里立即做 */
+  private void reloadAfterCommit() {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+        @Override
+        public void afterCommit() {
+          reload();
+        }
+      });
+    } else {
+      reload();
+    }
+  }
+
+  /** 重新加载整个快照。读库和换快照在同一把锁里：后开始读的一定后换上去，旧快照盖不掉新快照 */
   @Scheduled(fixedDelayString = "${quote.open.keys-reload:10s}")
   public void reload() {
-    Map<String, Entry> m = new HashMap<>();
-    for (Object[] r : jdbc.query("SELECT key_id, client_id, kind, status, secret_enc, symbols, rest_per_second, rest_per_day, ws_connections, ws_symbols, created_at, "
-        + "disabled_at, last_used_at, rotated_from FROM quote_api_key", (rs, i) -> new Object[] {key(rs), rs.getBytes("secret_enc")})) {
-      Key k = (Key) r[0];
-      m.put(k.keyId(), new Entry(k, k.active() ? box.open((byte[]) r[1]) : null));
+    reloadLock.lock();
+    try {
+      Map<String, Entry> m = new HashMap<>();
+      for (Object[] r : jdbc.query("SELECT " + COLS + " FROM quote_api_key", (rs, i) -> new Object[] {key(rs), rs.getBytes("secret_enc")})) {
+        Key k = (Key) r[0];
+        m.put(k.keyId(), new Entry(k, k.active() ? box.open((byte[]) r[1]) : null));
+      }
+      Runnable hook = beforeSwap;
+      if (hook != null) hook.run();
+      keys = Map.copyOf(m);
+    } finally {
+      reloadLock.unlock();
     }
-    keys = Map.copyOf(m);
+  }
+
+  /** 测试用（Spring 给这个类生成了代理，测试不能直接改字段）：设读完库、换快照之前的钩子，null = 不要 */
+  void beforeSwap(Runnable hook) {
+    this.beforeSwap = hook;
+  }
+
+  /** 测试用：这个线程是否在等重新加载的锁 */
+  boolean waitingForReload(Thread t) {
+    return reloadLock.hasQueuedThread(t);
   }
 
   private LocalDateTime now() {
