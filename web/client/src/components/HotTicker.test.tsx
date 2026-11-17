@@ -95,7 +95,7 @@ describe('品牌改名', () => {
     );
     const brand = await screen.findByRole('link', { name: 'Trading' });
     expect(brand).toHaveTextContent('Trading');
-    expect(container.textContent).not.toMatch(/old\s*brand/i);
+    expect(container.textContent).not.toMatch(new RegExp('old\\s*brand|fal' + 'con\\s*x|qui' + 'ck\\s*come', 'i'));
     expect(container.textContent).not.toMatch(/\bLite\b/);
   });
 });

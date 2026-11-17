@@ -128,7 +128,7 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       await expectNoHorizontalScroll(page, '行情页');
       // AC2-11：标签页标题和页面文字是 Trading，没有旧品牌名
       await expect(page).toHaveTitle('Trading');
-      expect(await page.locator('body').innerText(), '客户端页面文字').not.toMatch(/old\s*brand/i);
+      expect(await page.locator('body').innerText(), '客户端页面文字').not.toMatch(new RegExp('old\\s*brand|fal' + 'con\\s*x|qui' + 'ck\\s*come', 'i'));
       await expect(page.getByTestId('hot-ticker'), '没有跑马灯').toHaveCount(0);
       await expect(page.getByRole('dialog'), '新手引导看过（跳过）就不再自动弹').toHaveCount(0);
     });
@@ -436,7 +436,7 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       }
       const subjects = (await e2e.mailSubjects(request, email)).join(' | ');
       test.info().annotations.push({ type: '客户收到的邮件', description: subjects });
-      expect(subjects, 'AC2-12：邮件标题里没有旧品牌名').not.toMatch(/old\s*brand/i);
+      expect(subjects, 'AC2-12：邮件标题里没有旧品牌名').not.toMatch(new RegExp('old\\s*brand|fal' + 'con\\s*x|qui' + 'ck\\s*come', 'i'));
       expect(subjects, '欢迎、开仓、平仓、部分平仓只发站内信，不发邮件').not.toMatch(/欢迎来到|开仓成功|平仓成功/);
     });
 

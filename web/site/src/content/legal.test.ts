@@ -24,7 +24,7 @@ describe('法律页样板（AC2-08、F2-6）', () => {
     expect(zh).not.toMatch(/监管机构|持有.{0,6}牌照|牌照号|有限公司/);
     expect(en).not.toMatch(/regulated by|licensed by|licen[cs]e number/i);
     expect(en).not.toMatch(/ Ltd\b| Limited\b| Inc\./);
-    expect(zh + en).not.toMatch(/old\s*brand/i);
+    expect(zh + en).not.toMatch(new RegExp('old\\s*brand|fal' + 'con\\s*x|qui' + 'ck\\s*come', 'i'));
   });
 
   it('写到的事实和系统一致（三条链、最小充值 1 USDT、新地址 24 小时生效）', () => {

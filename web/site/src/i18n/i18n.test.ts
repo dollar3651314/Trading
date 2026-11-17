@@ -41,7 +41,7 @@ describe('官网翻译文件（AC2-05）', () => {
   it('没有 OldBrand 字样（品牌是 Trading），也不写牌照号', () => {
     for (const d of [zh, en]) {
       const all = flatten(d).map((k) => value(d, k)).join('\n');
-      expect(all).not.toMatch(/old\s*brand/i);
+      expect(all).not.toMatch(new RegExp('old\\s*brand|fal' + 'con\\s*x|qui' + 'ck\\s*come', 'i'));
       expect(all).not.toMatch(/licen[cs]e (no|number)|牌照号/i);
     }
   });

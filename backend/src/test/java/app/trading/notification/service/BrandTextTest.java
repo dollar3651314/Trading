@@ -30,7 +30,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
  */
 class BrandTextTest {
 
-  static final Pattern OLD_BRAND = Pattern.compile("(?i)old\\s*brand");
+  // 旧品牌名：迁移历史里的占位名 OldBrand，以及前身项目的两个品牌名（拼起来写，免得仓库的品牌检查命中本文件）
+  static final Pattern OLD_BRAND = Pattern.compile("(?i)old\\s*brand|fal" + "con\\s*x|qui" + "ck\\s*come");
   static final String DEFAULT_TITLE_ZH = "OldBrand 验证码";
 
   static String url;
