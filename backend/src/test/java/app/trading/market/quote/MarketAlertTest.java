@@ -43,8 +43,7 @@ class MarketAlertTest {
   }
 
   MarketAlert alert(String source) {
-    MarketProperties p = new MarketProperties(source, market.simulatedInterval(), market.staleAfter(), market.unchangedMaxAge(), market.maxSpreadRate(),
-        market.maxTickJumpRate(), market.maxVolatilityRate(), market.volatilityWindow(), market.pushInterval(), market.fixedUsdRates());
+    MarketProperties p = new MarketProperties(source, market.staleAfter(), market.maxQuoteAge(), market.pushInterval(), market.fixedUsdRates());
     return new MarketAlert(processor, catalog, p, AlertProperties.defaults(), clock);
   }
 

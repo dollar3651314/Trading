@@ -16,4 +16,8 @@
   <select id="holidays" resultType="app.trading.market.config.SymbolMapper$HolidayRow">
     SELECT symbol, trade_date FROM market_holiday WHERE trade_date &gt;= #{since}
   </select>
+
+  <select id="simStartPrices" resultType="app.trading.market.config.SymbolMapper$SimPriceRow">
+    SELECT code, sim_start_price FROM market_symbol WHERE enabled = 1 AND sim_start_price IS NOT NULL
+  </select>
 </mapper>

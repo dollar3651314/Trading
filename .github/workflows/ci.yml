@@ -4,8 +4,8 @@
 # 第 0 批（从前身项目搬代码）：照搬前身项目的检查——
 #   basic：项目索引检查、品牌和内部信息检查、密钥扫描（gitleaks）
 #   web-client / web-admin / web-site：lint、单元测试、构建、真实构建不含模拟层、构建产物没有旧品牌名、依赖安全检查
-#   backend：Maven 父工程 mvn verify（backend = trading-app、quote-app 模块壳），真实 MySQL 8.4、Redis 7
-#   e2e：Playwright 端到端（后端 e2e profile，外部服务全用替身）
+#   backend：Maven 父工程 mvn verify（quote-protocol、quote-app 报价进程、backend = trading-app），真实 MySQL 8.4、Redis 7
+#   e2e：Playwright 端到端（报价服务 + 交易后端两个进程，e2e profile，外部服务全用替身）
 #   main-ancestor：staging 上"main 是不是祖先"
 # 没搬的：合约和本地链归集（自带钱包不要了）；部署形态端到端和推镜像（部署目录第 4 批测试环境时再搬）。
 # PR 上按改动路径决定跑哪些 job（changes），没跑的显示"跳过"，ci-ok 把"跳过"当作通过；push 和手动运行时全部都跑。
@@ -55,6 +55,7 @@ jobs:
               - 'pom.xml'
               - 'backend/**'
               - 'quote-app/**'
+              - 'quote-protocol/**'
             e2e:
               - 'e2e/*'
               - 'e2e/tests/**'
@@ -157,6 +158,8 @@ jobs:
       FX_DB_URL: jdbc:mysql://127.0.0.1:3306/trading_test
       FX_DB_USERNAME: root
       FX_DB_PASSWORD: ci_only_not_a_secret
+      # 报价进程（quote-app）测试用的库：同一个 MySQL 容器上另建一个
+      FX_QUOTE_DB_URL: jdbc:mysql://127.0.0.1:3306/trading_quote_test?createDatabaseIfNotExist=true
       FX_REDIS_HOST: 127.0.0.1
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
@@ -171,7 +174,7 @@ jobs:
         run: mvn -B -ntp verify
 
   # 端到端（Playwright）：真实接口模式构建的三个前端 + 后端（profile e2e，外部依赖用替身）+ MySQL、Redis 容器。
-  # 主流程：注册 → 充值（链替身）→ 下单 → 止盈止损 → 平仓 → 提现，后台审核；官网用例。失败时上传 trace、截图、录像和后端日志。
+  # 主流程：注册 → 充值（链替身）→ 下单 → 止盈止损 → 平仓 → 提现，后台审核；官网用例。失败时上传 trace、截图、录像和两个进程的日志。
   e2e:
     needs: changes
     if: needs.changes.outputs.e2e == 'true'
@@ -243,7 +246,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           if [ "$PW_CACHED" = true ]; then npx playwright install-deps chromium; else npx playwright install --with-deps chromium; fi
-      - name: 启动后端（profile e2e）
+      - name: 启动报价服务和后端（profile e2e）
         run: bash e2e/start-backend.sh
       - name: 端到端测试
         working-directory: e2e
@@ -257,10 +260,13 @@ jobs:
             e2e/playwright-report/
             e2e/test-results/
             e2e/logs/backend.log
+            e2e/logs/quote.log
           retention-days: 14
-      - name: 停止后端
+      - name: 停止后端和报价服务
         if: always()
-        run: kill "$(cat e2e/logs/backend.pid)" 2> /dev/null || true
+        run: |
+          kill "$(cat e2e/logs/backend.pid)" 2> /dev/null || true
+          kill "$(cat e2e/logs/quote.pid)" 2> /dev/null || true
 
   # 改动只能经 staging 进 main：PR 目标或推送分支是 staging 时，main 必须是它的祖先，不是就报红并列出差的提交
   main-ancestor:

@@ -15,9 +15,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 端到端测试推动报价（S19，只在 profile e2e 下存在；e2e 配置里报价源是模拟源）。
- * 报价照常经过 {@link QuoteProcessor}（交易时段、质量守卫、加点、推送、撮合），只是价格由测试指定，用来触发止盈止损。
- * 没有打开模拟报价源时（{@code trading.market.source} 不是 simulated）推动报价返回 404。
+ * 端到端测试推动报价（S19，只在 profile e2e 下存在；e2e 里连着模拟模式的报价服务）。
+ * 推动转给报价服务的 {@code /internal/e2e/move}（第 2 批拆进程后模拟源在报价服务里），报价照常经过报价服务（交易时段、质量守卫）、
+ * 内部 WebSocket、{@link QuoteProcessor}（加点、推送、撮合），只是价格由测试指定，用来触发止盈止损。
+ * 没连报价服务（{@code trading.market.source} 不是 remote）或报价服务不是模拟模式时返回 404。
  */
 @RestController
 @Profile(E2eGuard.PROFILE)
@@ -25,10 +26,10 @@ class E2eMarket {
 
   record Move(String symbol, BigDecimal bid) {}
 
-  private final ObjectProvider<SimulatedQuoteSource> source;
+  private final ObjectProvider<RemoteQuotes> source;
   private final QuoteProcessor processor;
 
-  E2eMarket(ObjectProvider<SimulatedQuoteSource> source, QuoteProcessor processor) {
+  E2eMarket(ObjectProvider<RemoteQuotes> source, QuoteProcessor processor) {
     this.source = source;
     this.processor = processor;
   }
@@ -43,14 +44,14 @@ class E2eMarket {
   @PostMapping("/api/e2e/market/move")
   ResponseEntity<Map<String, Object>> move(@RequestBody Move m) {
     if (m == null || m.symbol() == null || m.bid() == null || m.bid().signum() <= 0) return ResponseEntity.badRequest().build();
-    SimulatedQuoteSource s = source.getIfAvailable();
+    RemoteQuotes s = source.getIfAvailable();
     if (s == null) return ResponseEntity.notFound().build();
-    return s.moveTo(m.symbol(), m.bid())
-        .map(q -> {
+    return s.client().e2eMove(m.symbol(), m.bid())
+        .map(n -> {
           Map<String, Object> out = new LinkedHashMap<>();
-          out.put("symbol", q.symbol());
-          out.put("rawBid", q.bid().toPlainString());
-          out.put("rawAsk", q.ask().toPlainString());
+          out.put("symbol", n.path("symbol").asString());
+          out.put("rawBid", n.path("rawBid").asString());
+          out.put("rawAsk", n.path("rawAsk").asString());
           return ResponseEntity.ok(out);
         })
         .orElse(ResponseEntity.notFound().build());

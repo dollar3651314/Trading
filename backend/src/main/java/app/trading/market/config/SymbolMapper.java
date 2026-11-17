@@ -16,7 +16,12 @@ interface SymbolMapper {
 
   List<HolidayRow> holidays(@Param("since") java.time.LocalDate since);
 
+  /** 启用的、填了模拟起始价的品种（同步给报价服务） */
+  List<SimPriceRow> simStartPrices();
+
   record SessionRow(String symbol, int dayOfWeek, int openMinute, int closeMinute) {}
 
   record HolidayRow(String symbol, LocalDate tradeDate) {}
+
+  record SimPriceRow(String code, java.math.BigDecimal simStartPrice) {}
 }
