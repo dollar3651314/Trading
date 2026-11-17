@@ -63,15 +63,28 @@ on_exit() {
   # 清理时不能因为任何一步出错就停下（set +e）；终端可能已经断了（远程连接窗口关掉），提示写不出去也照样往下做（say 不报错、忽略 SIGPIPE），
   # 每一步都写进日志
   set +e
-  trap - INT TERM HUP
-  trap '' PIPE
+  # 收尾时再来的 Ctrl-C、窗口断开、kill 一律忽略，免得收尾做到一半被打断（收尾里起的命令也继承这个忽略）
+  trap '' HUP TERM INT PIPE
   if [ -n "$BG_PID" ]; then kill -TERM "$BG_PID" 2> /dev/null; wait "$BG_PID" 2> /dev/null; BG_PID=""; fi
-  if [ -n "$DUMP_RUNNING" ]; then DUMP_RUNNING=""; log "（被打断：清理 mysql 容器里的 mysqldump）$(kill_container_dumps)" > /dev/null 2>&1; fi
+  if [ -n "$DUMP_RUNNING" ]; then
+    DUMP_RUNNING=""
+    log "（被打断：正在清理 mysql 容器里的 mysqldump，最多 30 秒）"
+    log "（被打断：$(kill_container_dumps)）"
+  fi
   for c in "${CLEAN_CONTAINERS[@]}"; do docker rm -f "$c" > /dev/null 2>&1; done
   for p in "${CLEAN_PATHS[@]}"; do rm -rf "$p"; done
   if [ -n "$DRILL_RESTART_PENDING" ]; then log "（恢复演练被打断：重新启动 Trading 的应用）"; drill_restart_apps 1; fi
   if [ -n "$OFF_RESTORE_TRADING" ]; then OFF_RESTORE_TRADING=""; log "（trading off 没做完：Trading 按原样恢复、定时器打开，TopUP 不启动）"; off_restore_trading; fi
-  if [ -n "$OFF_START_TOPUP" ]; then OFF_START_TOPUP=""; log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; restart_topup; fi
+  # TopUP：正在启动时被打断的，bash 会等那条 topup start 做完才到这里；做成了（有标记文件）就不再启动，没做成再启动一次
+  if [ -n "$OFF_START_TOPUP" ]; then
+    if [ -f "$STATE/topup-started.$$" ]; then
+      log "（trading off 被打断：TopUP 已经启动好了）"
+    else
+      log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; restart_topup
+    fi
+    OFF_START_TOPUP=""
+  fi
+  rm -f "$STATE/topup-started.$$"
   if [ -n "$INSTALL_HINT" ] && [ "$rc" -ne 0 ]; then say "（安装没做完。如果 TopUP 停着、要先恢复它，运行 sudo trading off；改好后再运行同一条安装命令）"; fi
   return 0
 }
@@ -88,6 +101,8 @@ run_bg() {
   BG_PID=""
   return "$rc"
 }
+# 等待时长的说法：不到 1 分钟写秒，否则写分钟
+dur() { if [ "$1" -lt 60 ]; then printf '%s 秒' "$1"; else printf '%s 分钟' "$(($1 / 60))"; fi; }
 # 输出写不出去（终端断了、/dev/full）不算错，不影响后面的步骤
 say() { printf '%s\n' "$*" 2> /dev/null || true; }
 log() { mkdir -p "$TR_DIR/logs"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF"; say "$*"; }
@@ -716,8 +731,8 @@ cmd_backup() {
   local wait_s=${BACKUP_LOCK_WAIT:-360}
   exec 8> "$STATE/backup.lock"
   if ! flock -n 8; then
-    say "  另一份备份正在做，最多等 $((wait_s / 60)) 分钟（不用操作）" >&2
-    if ! run_bg flock -w "$wait_s" 8; then exec 8>&-; backup_fail "另一份备份 $((wait_s / 60)) 分钟还没做完"; return 1; fi
+    say "  另一份备份正在做，最多等 $(dur "$wait_s")（不用操作）" >&2
+    if ! run_bg flock -w "$wait_s" 8; then exec 8>&-; backup_fail "另一份备份 $(dur "$wait_s") 还没做完"; return 1; fi
   fi
   sweep_stale
   local rc=0
@@ -859,8 +874,8 @@ drill_cleanup() {
 # 演练前停过 Trading 的应用（手动运行时）就重新启动，恢复内存守护，放开自动更新的锁
 drill_restart_apps() {
   [ -n "$1" ] || return 0
-  DRILL_RESTART_PENDING=""
-  compose up -d > /dev/null 2>&1 || true
+  # compose up 忽略 HUP、INT（窗口断了也做完）；成功才清掉标记，没成功退出收尾会再拉一次
+  if ( trap '' HUP INT; exec "${COMPOSE[@]}" up -d ) > /dev/null 2>&1; then DRILL_RESTART_PENDING=""; fi
   if wait_healthy "$(current_tag)"; then ok "Trading 的应用已重新启动"; else bad "Trading 的应用重新启动后没通过健康检查（sudo trading status）"; fi
   if [ -n "${DRILL_MEMGUARD_WAS_ON:-}" ]; then systemctl start trading-memguard.timer > /dev/null 2>&1 || true; DRILL_MEMGUARD_WAS_ON=""; fi
   exec 7>&-
@@ -957,11 +972,19 @@ stop_topup_and_check_mem() {
   ok "TopUP 已停、80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"
 }
 
+# 启动 TopUP。topup start 忽略 HUP、INT（窗口断了、Ctrl-C 都不会把它打断在半路；被忽略的信号它改不回来）；
+# 成功后写标记文件 state/topup-started.<进程号>，退出收尾看这个文件决定要不要再启动一次。
+# 不把锁的文件描述符带给 TopUP（它起的进程要是一直在，锁就一直放不掉）
 restart_topup() {
   [ -x "$TOPUP_BIN" ] || return 0
+  local mark="$STATE/topup-started.$$"
+  rm -f "$mark"
   say "  启动 TopUP（topup start，它自己再查内存和健康检查）"
-  # 不把锁的文件描述符带给 TopUP（它起的进程要是一直在，锁就一直放不掉）
-  if "$TOPUP_BIN" start > /dev/null 2>&1 7>&- 8>&- 9>&-; then ok "TopUP 已启动"; else bad "topup start 没成功（看 sudo topup status，截图给主会话）"; return 1; fi
+  if ( trap '' HUP INT; "$TOPUP_BIN" start > /dev/null 2>&1 7>&- 8>&- 9>&- && : > "$mark" ); then
+    ok "TopUP 已启动"; log "TopUP 已启动（topup start）" > /dev/null
+  else
+    bad "topup start 没成功（看 sudo topup status，截图给主会话）"; log "topup start 没成功" > /dev/null; return 1
+  fi
 }
 
 cmd_on() {
@@ -995,9 +1018,9 @@ cmd_off() {
   # 先拿和 trading update 同一把锁、再停定时器：等锁时被打断，Trading 和定时器都还是原样；拿到锁以后自动更新也不会再把 Trading 拉起来
   exec 9> "$STATE/update.lock"
   if ! flock -n 9; then
-    say "  自动更新正在进行，最多等 $((OFF_LOCK_WAIT / 60)) 分钟（不用操作）"
+    say "  自动更新正在进行，最多等 $(dur "$OFF_LOCK_WAIT")（不用操作）"
     if ! run_bg flock -w "$OFF_LOCK_WAIT" 9; then
-      bad "自动更新 $((OFF_LOCK_WAIT / 60)) 分钟还没做完，这次没切换：Trading 照常跑、定时器没动、TopUP 不启动。过几分钟再运行 sudo trading off"
+      bad "自动更新 $(dur "$OFF_LOCK_WAIT") 还没做完，这次没切换：Trading 照常跑、定时器没动、TopUP 不启动。过几分钟再运行 sudo trading off"
       exit 1
     fi
   fi
@@ -1022,8 +1045,8 @@ cmd_off() {
     ok "Trading 本来就停着"
   fi
   log "trading off"
-  OFF_START_TOPUP=""
-  restart_topup
+  # 启动成功才清掉"要启动 TopUP"的标记：没成功（或启动中被打断）时退出收尾会再启动一次
+  if restart_topup; then OFF_START_TOPUP=""; else say "  退出前再试一次 topup start"; fi
 }
 
 main() {
