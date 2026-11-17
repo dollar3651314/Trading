@@ -1,6 +1,7 @@
 /**
- * 提现（效果图 M4）：KYC 检查、白名单地址、金额限制（一次显示全部错误）、
- * 2 小时冷静期可撤销、≥3,000 审核后延迟 6 小时、提现记录的全部状态。
+ * 提现（效果图 M4，第 1 批原型 P2）：KYC 检查、白名单地址、金额限制（单笔 ≤ 5,000、当日累计 < 30,000，一次显示全部错误）、
+ * 2 小时冷静期可撤销、≥3,000 审核后延迟 6 小时；两道审：Trading 审核通过后还要人工放款（TopUP），表单上和提交成功提示都写明处理时段（TY-2、AC-W12）；
+ * 提现记录显示付款编号、当前在哪一道审核、每一步的时间。
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +22,8 @@ import { useServerEvent } from '../../hooks/useServerEvent';
 import { cmp, dec, div, isDecimalString, mul, sub, toFixed, ZERO } from '../../lib/decimal';
 import { formatAmount, formatCountdown, formatDateTime, shortAddress } from '../../lib/format';
 import { dailyRemaining, hasErrors, validateWithdraw, type FieldErrors as Errs } from '../../lib/validators';
+import { statusLabel } from './withdrawStatus';
+import { Timeline } from './withdrawView';
 
 function KycBanner({ info }: { info: WithdrawInfo }) {
   const { t } = useTranslation();
@@ -58,6 +61,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [serverErr, setServerErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   // 后端返回的字段错误（VALIDATION_FAILED 的 fields），显示在对应输入框下面；改了这个字段就清掉
   const [serverFields, setServerFields] = useState<Errs<'whitelistId' | 'amount'>>({});
   const errs: Errs<'whitelistId' | 'amount' | 'kyc'> = validateWithdraw({ whitelistId: wid, amount }, info, whitelist, new Date(now));
@@ -103,6 +107,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
       setConfirm(false);
       setAmount('');
       setSubmitted(false);
+      setDone(true);
       toast.show({ tone: 'success', title: t('withdraw.submitted'), body: t('withdraw.submittedBody', { h: info.coolingHours }) });
       onDone();
     } catch (e) {
@@ -128,7 +133,20 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
 
   return (
     <>
+      {done && (
+        <div className="notice ok wd-done" role="status">
+          <b>{t('withdraw.submitted')}</b>
+          <p className="small">{t('withdraw.doneBody', { h: info.coolingHours })}</p>
+        </div>
+      )}
       <section className="card">
+        <div className="notice info wd-two" role="note">
+          <b>{t('withdraw.twoReviewTitle')}</b>
+          <p className="small">
+            {t('withdraw.twoReviewHours')}
+            {t('withdraw.twoReviewNight')}
+          </p>
+        </div>
         <div className="wd-wl-link">
           <Link to="/assets/whitelist" className="small">
             {t('withdraw.manageWhitelist', { n: whitelist.length, max: info.maxWhitelist })}
@@ -201,9 +219,13 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
             <b>3</b>
             {t('withdraw.step3')}
           </li>
-          <li>
+          <li className="hl">
             <b>4</b>
             {t('withdraw.step4')}
+          </li>
+          <li>
+            <b>5</b>
+            {t('withdraw.step5')}
           </li>
         </ol>
         <p className="pnote">{t('withdraw.processNote', { amount: formatAmount(info.largeAmount, { dp: 0 }), h: info.largeDelayHours })}</p>
@@ -246,7 +268,10 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
             <dd className="num">{receive ? formatAmount(receive) : '—'} USDT</dd>
           </div>
         </dl>
-        <p className="muted small">{t('withdraw.confirmNote', { h: info.coolingHours })}</p>
+        <p className="muted small">
+          {t('withdraw.confirmNote', { h: info.coolingHours })}
+          {t('withdraw.twoReviewNight')}
+        </p>
       </ConfirmDialog>
     </>
   );
@@ -299,6 +324,7 @@ function Records() {
       case 'delayed':
         return t('withdraw.rec.delayed', { time: formatDateTime(w.delayEndsAt, { short: true }) });
       case 'broadcasting':
+        return w.payoutNo ? t('withdraw.rec.payoutNo', { no: w.payoutNo }) : t('withdraw.rec.paying');
       case 'completed':
         return w.txHash ? t('withdraw.rec.tx', { hash: shortAddress(w.txHash) }) : '';
       case 'failedRefunded':
@@ -315,6 +341,9 @@ function Records() {
       <div className="card-head">
         <h2>{t('withdraw.records')}</h2>
         {s.data && <span className="muted small">{t('withdraw.recordsTotal', { total: s.total })}</span>}
+        <Link to="/assets/records" className="more small">
+          {t('records.viewAll')}
+        </Link>
       </div>
       {s.error && !s.data ? (
         <ErrorState error={s.error} onRetry={s.reload} compact />
@@ -331,7 +360,7 @@ function Records() {
                 <li key={w.id}>
                   <div className="a">
                     <b className="num">{formatAmount(w.amount)}</b>
-                    <span className={`st st-${STATUS_TONE[w.status]}`}>{t(`withdraw.status.${w.status}`)}</span>
+                    <span className={`st st-${STATUS_TONE[w.status]}`}>{statusLabel(t, w)}</span>
                     {canCancel && (
                       <button type="button" className="btn btn-danger-outline btn-xs op" onClick={() => setCancel(w)}>
                         {t('withdraw.cancel')}
@@ -344,6 +373,7 @@ function Records() {
                     </span>
                     <span className="num">{detail(w)}</span>
                   </div>
+                  <Timeline w={w} />
                 </li>
               );
             })}

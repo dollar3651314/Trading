@@ -96,6 +96,10 @@ export default function Assets() {
               <Icon name="withdraw" size={16} strokeWidth={2.2} />
               {t('assets.withdraw')}
             </button>
+            <button type="button" onClick={() => navigate('/assets/records')}>
+              <Icon name="list" size={16} strokeWidth={2.2} />
+              {t('assets.records')}
+            </button>
             <button type="button" onClick={() => navigate('/assets/ledger')}>
               <Icon name="list" size={16} strokeWidth={2.2} />
               {t('assets.ledger')}

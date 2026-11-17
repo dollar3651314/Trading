@@ -23,6 +23,7 @@ const Assets = lazy(() => import('./pages/assets/Assets'));
 const Ledger = lazy(() => import('./pages/assets/Ledger'));
 const Withdraw = lazy(() => import('./pages/assets/Withdraw'));
 const Whitelist = lazy(() => import('./pages/assets/Whitelist'));
+const Records = lazy(() => import('./pages/assets/Records'));
 const Me = lazy(() => import('./pages/me/Me'));
 const Profile = lazy(() => import('./pages/me/Profile'));
 const Kyc = lazy(() => import('./pages/me/Kyc'));
@@ -75,6 +76,7 @@ export function AppRoutes() {
           <Route path="assets/ledger" element={<Ledger />} />
           <Route path="assets/withdraw" element={<Withdraw />} />
           <Route path="assets/whitelist" element={<Whitelist />} />
+          <Route path="assets/records" element={<Records />} />
           <Route path="me" element={<Me />} />
           <Route path="me/profile" element={<Profile />} />
           <Route path="me/kyc" element={<Kyc />} />

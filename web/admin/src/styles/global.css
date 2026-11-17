@@ -494,3 +494,22 @@ body { overflow-x: hidden; }
 .sweep-field { display: inline-flex; flex-direction: column; gap: 2px; }
 .sweep-default { font-size: 12px; }
 .sweep-notlive { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+
+/* ---------- 第 1 批：两道审、钱包提供方（原型 P4、P6、P7） ---------- */
+.row-danger > td { background: color-mix(in srgb, var(--danger, #dc2626) 8%, transparent) !important; }
+.wd-two, .wd-unknown, .recon-byorder { margin-bottom: 12px; }
+.recon-run { display: flex; justify-content: flex-end; margin: 0 0 12px; }
+.pcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.pcard h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.pcard.cur { border-color: var(--primary, #0e7490); }
+.pcard.bad { border-color: var(--danger, #dc2626); }
+.pcard.off { opacity: 0.75; }
+.pcard .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 8px; font-size: 13px; }
+.pcard .kv dt { color: var(--muted, #6b7280); }
+.pcard .kv dd { margin: 0; }
+.pv-net { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border, #e5e7eb); }
+.pv-net:first-of-type { border-top: 0; }
+.pv-net > span:nth-child(2) { margin-left: auto; }
+.pv-audit { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pv-audit th, .pv-audit td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--border, #e5e7eb); }
+.pv-impact { margin: 8px 0 0; padding-left: 18px; }

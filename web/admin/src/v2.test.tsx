@@ -245,8 +245,9 @@ describe('E6 最后报价时间', () => {
 
 // ---------------- E2 深色主题 ----------------
 describe('E2 深色主题', () => {
-  it('默认跟随系统；选择记在本机；读写存储出错时按跟随系统处理', () => {
-    expect(readThemePref()).toBe('system');
+  // 第 1 批按 TY-7（Amos 11/17：默认都是浅色，客户自己可以调整）改了默认值：原来默认"跟随系统"，现在默认浅色，"跟随系统"仍然可以选
+  it('默认浅色（TY-7）；选择记在本机；读写存储出错时按默认浅色处理', () => {
+    expect(readThemePref()).toBe('light');
     expect(resolveTheme('system', true)).toBe('dark');
     expect(resolveTheme('system', false)).toBe('light');
     expect(resolveTheme('light', true)).toBe('light');
@@ -254,7 +255,8 @@ describe('E2 深色主题', () => {
     expect(localStorage.getItem(THEME_KEY)).toBe('dark');
     expect(readThemePref()).toBe('dark');
     writeThemePref('system');
-    expect(localStorage.getItem(THEME_KEY)).toBeNull();
+    expect(localStorage.getItem(THEME_KEY)).toBe('system');
+    expect(readThemePref()).toBe('system');
     const broken = {
       getItem: () => {
         throw new Error('blocked');
@@ -267,11 +269,11 @@ describe('E2 深色主题', () => {
       },
     };
     vi.stubGlobal('localStorage', broken);
-    expect(readThemePref()).toBe('system');
+    expect(readThemePref()).toBe('light');
     expect(() => writeThemePref('dark')).not.toThrow();
   });
 
-  it('系统是深色时默认深色；右上角切到浅色后根元素跟着变，刷新后保持', async () => {
+  it('系统是深色时也默认浅色（TY-7）；右上角切到深色后根元素跟着变，刷新后保持', async () => {
     const mm = window.matchMedia;
     window.matchMedia = ((q: string) => ({ ...mm(q), matches: q.includes('prefers-color-scheme: dark') ? true : mm(q).matches })) as typeof window.matchMedia;
     try {
@@ -282,12 +284,12 @@ describe('E2 深色主题', () => {
           <ThemeSwitch />
         </ThemeModeProvider>,
       );
-      expect(screen.getByTestId('theme')).toHaveTextContent('dark');
-      expect(document.documentElement.dataset.theme).toBe('dark');
+      expect(screen.getByTestId('theme')).toHaveTextContent('light');
+      expect(document.documentElement.dataset.theme).toBe('light');
       fireEvent.click(screen.getByRole('button', { name: /主题|Theme/ }));
-      fireEvent.click(await screen.findByText('浅色'));
-      await waitFor(() => expect(document.documentElement.dataset.theme).toBe('light'));
-      expect(localStorage.getItem(THEME_KEY)).toBe('light');
+      fireEvent.click(await screen.findByText('深色'));
+      await waitFor(() => expect(document.documentElement.dataset.theme).toBe('dark'));
+      expect(localStorage.getItem(THEME_KEY)).toBe('dark');
       unmount();
       // "刷新"：重新挂载，按保存的选择
       render(
@@ -295,7 +297,7 @@ describe('E2 深色主题', () => {
           <Probe />
         </ThemeModeProvider>,
       );
-      expect(screen.getAllByTestId('theme').at(-1)).toHaveTextContent('light');
+      expect(screen.getAllByTestId('theme').at(-1)).toHaveTextContent('dark');
     } finally {
       window.matchMedia = mm;
     }

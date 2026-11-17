@@ -5,15 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/admin/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex" />
-    <!-- v2 E2：页面脚本加载前先按本机保存的选择或系统设置定好深浅色，避免深色用户先看到白屏一闪（和 src/hooks/useThemeMode.tsx 同一逻辑） -->
+    <!-- v2 E2：页面脚本加载前先按本机保存的选择定好深浅色，避免深色用户先看到白屏一闪（和 src/hooks/useThemeMode.tsx 同一逻辑）；没选过默认浅色（TY-7） -->
     <script>
       (function () {
         var t = 'light';
         try {
           var v = localStorage.getItem('fx-admin-theme');
-          t = v === 'dark' || v === 'light' ? v : window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          t = v === 'dark' || v === 'light' ? v : v === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         } catch (e) {
-          try { t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch (e2) { t = 'light'; }
+          t = 'light';
         }
         document.documentElement.setAttribute('data-theme', t);
         document.documentElement.style.colorScheme = t;

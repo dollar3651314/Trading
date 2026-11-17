@@ -54,6 +54,9 @@ import {
   type WithdrawalQuery,
   type WithdrawalSummary,
   type Withdrawal,
+  PaymentOverview,
+  PaymentProvider,
+  ReconStatus,
 } from '../api/types';
 import { AUTO_RULE_EDIT_PERM, AUTO_RULES, crossRuleProblems, ruleParamProblem } from '../config/autoApprove';
 import { defaultMarkup } from '../config/constants';
@@ -457,15 +460,46 @@ export function reviewKyc(id: string, approve: boolean, reason?: string): Promis
 // ============ 资金 ============
 export function listDeposits(q: DepositQuery): Promise<Page<Deposit>> {
   return respond(
-    () => paginate(db.deposits.filter((d) => (!q.chain || d.chain === q.chain) && (!q.status || d.status === q.status) && matches(q.keyword, d.customerName, d.email, d.txHash, d.customerId, d.id)), q.page, q.pageSize),
+    () =>
+      paginate(
+        db.deposits
+          .map((d, i) => ({ ...d, provider: 'TOPUP', providerRef: `evt_${(0x55821 - i).toString(16)}` }))
+          .filter(
+            (d) =>
+              (!q.chain || d.chain === q.chain) &&
+              (!q.status || d.status === q.status) &&
+              (!q.providerRef || d.providerRef === q.providerRef.trim()) &&
+              (!q.from || (d.creditedAt ?? d.detectedAt) >= q.from.trim()) &&
+              (!q.to || (d.creditedAt ?? d.detectedAt) <= q.to.trim()) &&
+              matches(q.keyword, d.customerName, d.email, d.txHash, d.customerId, d.id),
+          ),
+        q.page,
+        q.pageSize,
+      ),
     { empty: () => emptyPage(q.page, q.pageSize) },
   );
 }
 
 const OPEN_WD = ['cooling', 'pending', 'delayed'];
 
-/** v2 自动审批：出金加上规则判定摘要；自动通过的没有审核人（内部文档 第 3 节） */
-function withAutoReview(w: Withdrawal): Withdrawal {
+/**
+ * 第 1 批两道审（原型 P4）：交给 TopUP 以后的付款编号和付款状态。种子数据里"放款中"的那笔演示"未知"（红色置顶、只能重新查询），
+ * 已完成的是"成功"、失败退回的是"驳回"；审核通过的新单是"待放款审核"。
+ */
+const payouts = new Map<string, Pick<Withdrawal, 'provider' | 'payoutNo' | 'payoutStatus' | 'payoutReason' | 'statusAt'>>();
+function payoutOf(w: Withdrawal): Partial<Withdrawal> {
+  const p = payouts.get(w.id);
+  if (p) return p;
+  const no = `WD-20261014-${w.id.slice(-4)}`;
+  if (w.status === 'broadcasting') return { provider: 'TOPUP', payoutNo: no, payoutStatus: 'unknown', payoutReason: 'TopUP 查不到这笔付款', statusAt: w.submittedAt };
+  if (w.status === 'completed') return { provider: 'TOPUP', payoutNo: no, payoutStatus: 'completed', payoutReason: null, statusAt: w.submittedAt };
+  if (w.status === 'failed') return { provider: 'TOPUP', payoutNo: no, payoutStatus: 'rejected', payoutReason: '地址有风险', statusAt: w.submittedAt };
+  return { provider: null, payoutNo: null, payoutStatus: null, payoutReason: null, statusAt: w.submittedAt };
+}
+
+/** v2 自动审批：出金加上规则判定摘要；自动通过的没有审核人（内部文档 第 3 节）。第 1 批加付款编号和付款状态 */
+function withAutoReview(w0: Withdrawal): Withdrawal {
+  const w = { ...w0, ...payoutOf(w0) };
   const r = auto.reviews.get(w.id);
   if (!r) return { ...w, autoReview: null };
   const summary: AutoReviewSummary = { phase: r.phase, outcome: r.outcome, failed: r.failed, decidedAt: r.decidedAt };
@@ -499,6 +533,24 @@ export function listWithdrawals(q: WithdrawalQuery): Promise<Page<Withdrawal>> {
     },
     { empty: () => emptyPage(q.page, q.pageSize) },
   );
+}
+
+/** 第 1 批：向 TopUP 重新查付款状态。原型里"未知"的那笔查清是成功（勾"下一次操作模拟失败"时还是查不到） */
+export function requeryWithdrawal(id: string): Promise<Withdrawal> {
+  return mutate(() => {
+    requirePerm('withdrawal:review');
+    const w = db.withdrawals.find((x) => x.id === id);
+    if (!w) throw new ApiError('errors.notFound');
+    const p = payoutOf(w);
+    if (!p.payoutNo) throw new ApiError('errors.notFound');
+    if (p.payoutStatus === 'unknown') {
+      w.status = 'completed';
+      w.txHash = '0x' + '9a2c'.repeat(16);
+      payouts.set(id, { provider: 'TOPUP', payoutNo: p.payoutNo, payoutStatus: 'completed', payoutReason: null, statusAt: nowString() });
+    }
+    audit('withdrawal.requery', id, false, null, { payoutStatus: p.payoutStatus ?? null }, { payoutStatus: payoutOf(w).payoutStatus ?? null });
+    return withAutoReview(w);
+  });
 }
 
 export function getWithdrawalSummary(): Promise<WithdrawalSummary> {
@@ -556,8 +608,10 @@ export function approveWithdrawal(id: string): Promise<Withdrawal> {
     w.status = large ? 'delayed' : 'broadcasting';
     w.delayRemainingMinutes = large ? 360 : null;
     w.reviewer = currentAdmin().displayName;
+    // 小额：1 分钟内交 TopUP，状态"待放款审核"，有付款编号（两道审）
+    if (!large) payouts.set(id, { provider: 'TOPUP', payoutNo: `WD-20261014-${id.slice(-4)}`, payoutStatus: 'pending', payoutReason: null, statusAt: nowString() });
     audit('withdrawal.approve', id, false, null, { status: 'pending' }, { status: w.status });
-    return w;
+    return withAutoReview(w);
   });
 }
 
@@ -669,6 +723,79 @@ export function listHotWallets() {
       }),
     { empty: () => [] },
   );
+}
+
+// ---------------- 第 1 批：对账状态、钱包提供方（原型 P6、P7） ----------------
+const reconRun: Omit<ReconStatus, 'open'> = { lastRunAt: '2026-10-14 02:00:41', checked: 126, providerOk: true, providerError: null };
+
+export function getReconStatus(): Promise<ReconStatus> {
+  return respond(() => ({ ...reconRun, open: db.reconItems.filter((r) => r.status === 'open').length }), {
+    empty: () => ({ lastRunAt: null, checked: 0, providerOk: true, providerError: null, open: 0 }),
+  });
+}
+
+export function runRecon(): Promise<{ fresh: number }> {
+  return mutate(() => {
+    requirePerm('recon:resolve');
+    reconRun.lastRunAt = nowString();
+    audit('recon.run', 'now', false, null, {}, { fresh: '0' });
+    return { fresh: 0 };
+  });
+}
+
+const payment: PaymentOverview = {
+  providers: [
+    { code: 'TOPUP', name: 'TopUP', connected: true, current: true, up: true, lastOkAt: '2026-10-14T06:20:01Z', lastCallbackAt: '2026-10-14T06:18:44Z', available: '48230.5', balanceAt: '2026-10-14T06:20:01Z', error: null },
+    { code: 'COBO', name: 'Cobo', connected: false, current: false, up: false, lastOkAt: null, lastCallbackAt: null, available: null, balanceAt: null, error: null },
+    { code: 'FIREBLOCKS', name: 'Fireblocks', connected: false, current: false, up: false, lastOkAt: null, lastCallbackAt: null, available: null, balanceAt: null, error: null },
+  ],
+  networks: [
+    { network: 'ERC20', open: true },
+    { network: 'BSC', open: true },
+    { network: 'TRC20', open: true },
+  ],
+  audits: [],
+};
+
+export function getPayment(): Promise<PaymentOverview> {
+  return respond(() => structuredClone(payment), { empty: () => ({ ...structuredClone(payment), audits: [] }) });
+}
+
+export function checkPayment(): Promise<PaymentProvider> {
+  return mutate(() => {
+    const p = payment.providers.find((x) => x.current)!;
+    p.lastOkAt = new Date().toISOString();
+    return { ...p };
+  });
+}
+
+export function setPaymentNetwork(network: string, open: boolean, reason: string): Promise<void> {
+  return mutate(() => {
+    requirePerm('provider:operate');
+    const r = requireReason(reason);
+    const n = payment.networks.find((x) => x.network === network);
+    if (!n) throw new ApiError('errors.notFound');
+    const before = n.open;
+    n.open = open;
+    payment.audits.unshift({ id: String(payment.audits.length + 1), admin: currentAdmin().displayName, action: open ? 'NETWORK_ON' : 'NETWORK_OFF', detail: network, reason: r, at: nowString() });
+    audit(open ? 'payment.network_on' : 'payment.network_off', network, true, r, { open: before }, { open });
+  });
+}
+
+export function switchPaymentProvider(provider: string, reason: string): Promise<void> {
+  return mutate(() => {
+    requirePerm('provider:operate');
+    const r = requireReason(reason);
+    const p = payment.providers.find((x) => x.code === provider);
+    if (!p) throw new ApiError('errors.notFound');
+    if (!p.connected) throw new ApiError('errors.providerNotConnected');
+    if (p.current) throw new ApiError('errors.providerAlreadyCurrent');
+    const from = payment.providers.find((x) => x.current)!;
+    from.current = false;
+    p.current = true;
+    payment.audits.unshift({ id: String(payment.audits.length + 1), admin: currentAdmin().displayName, action: 'SWITCH_PROVIDER', detail: `${from.code} → ${p.code}`, reason: r, at: nowString() });
+    audit('payment.switch_provider', provider, true, r, { provider: from.code }, { provider: p.code });
+  });
 }
 
 export function resolveRecon(id: string, note: string): Promise<void> {

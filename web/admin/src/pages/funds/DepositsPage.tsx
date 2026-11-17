@@ -1,8 +1,9 @@
 /**
- * 入金记录：链、交易号、确认数、入账状态。只认配置好的 USDT 合约，其他代币标为"未入账（非配置合约）"。
+ * 入金记录（第 1 批原型 P5）：钱包提供方（TopUP）确认到账后回调入账，只显示已入账、已冲正；多"提供方""提供方到账编号"两列，去掉确认数（由 TopUP 决定）。
+ * 按到账时间（到秒）、客户、链、提供方到账编号、交易哈希查。低于 1 USDT 的转账 TopUP 不通知，这里不会出现。
  */
 import { useState } from 'react';
-import { Input, Select, Tooltip, Typography } from 'antd';
+import { Alert, Input, Select, Tooltip, Typography } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { listDeposits } from '../../api';
 import type { Deposit, DepositQuery } from '../../api/types';
@@ -14,7 +15,7 @@ import { DataTable } from '../../components/DataTable';
 import { ChainTag, Pill } from '../../components/Pill';
 import { Amount, Num } from '../../components/Num';
 import { depositTone } from '../../utils/status';
-import { shortHash, shortTime } from '../../utils/display';
+import { fullTime, shortHash, shortTime } from '../../utils/display';
 
 type Filters = Omit<DepositQuery, 'page' | 'pageSize'>;
 
@@ -41,10 +42,21 @@ export function DepositsPage() {
             options={(['confirming', 'credited', 'ignored', 'reversed'] as const).map((s) => ({ value: s, label: t(`depositStatus.${s}`) }))}
           />
         </FilterItem>
+        <FilterItem label={t('deposits.timeRange')}>
+          <span className="range">
+            <Input aria-label={t('deposits.from')} placeholder={t('deposits.timePh')} style={{ width: 170 }} value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value || undefined })} />
+            ~
+            <Input aria-label={t('deposits.to')} placeholder={t('deposits.timePh')} style={{ width: 170 }} value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value || undefined })} />
+          </span>
+        </FilterItem>
+        <FilterItem label={t('deposits.providerRef')} htmlFor="d-ref">
+          <Input id="d-ref" allowClear style={{ width: 170 }} value={draft.providerRef} onChange={(e) => setDraft({ ...draft, providerRef: e.target.value || undefined })} />
+        </FilterItem>
         <FilterItem label={t('funds.user')} htmlFor="d-kw">
           <Input id="d-kw" allowClear style={{ width: 240 }} placeholder={t('deposits.keywordPh')} value={draft.keyword} onChange={(e) => setDraft({ ...draft, keyword: e.target.value })} />
         </FilterItem>
       </FilterBar>
+      <Alert type="info" showIcon message={t('deposits.providerHint')} />
       <DataTable<Deposit>
         rowKey="id"
         loading={list.loading}
@@ -80,19 +92,22 @@ export function DepositsPage() {
               </Tooltip>
             ),
           },
+          { title: t('deposits.provider'), dataIndex: 'provider', render: (v: string | null) => (v === 'TOPUP' ? 'TopUP' : v ?? '—') },
           {
-            title: t('deposits.confirmations'),
-            key: 'conf',
-            align: 'right',
-            render: (_, r) => (
-              <Num className={r.confirmations < r.requiredConfirmations ? 'text-warn' : ''}>
-                {r.confirmations}/{r.requiredConfirmations}
-              </Num>
-            ),
+            title: t('deposits.providerRef'),
+            dataIndex: 'providerRef',
+            render: (v: string | null) =>
+              v ? (
+                <Typography.Text copyable={{ text: v, tooltips: [t('common.copy'), t('common.copied')] }} className="num">
+                  {v}
+                </Typography.Text>
+              ) : (
+                '—'
+              ),
           },
           { title: t('deposits.status'), dataIndex: 'status', render: (v: string) => <Pill tone={depositTone[v]}>{t(`depositStatus.${v}`)}</Pill> },
           { title: t('deposits.detectedAt'), dataIndex: 'detectedAt', render: (v: string) => <Num>{shortTime(v)}</Num> },
-          { title: t('deposits.creditedAt'), dataIndex: 'creditedAt', render: (v: string | null) => (v ? <Num>{shortTime(v)}</Num> : '—') },
+          { title: t('deposits.creditedAt'), dataIndex: 'creditedAt', render: (v: string | null) => (v ? <Num>{fullTime(v)}</Num> : '—') },
         ]}
       />
     </>

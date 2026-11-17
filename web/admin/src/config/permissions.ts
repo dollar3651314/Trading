@@ -22,9 +22,8 @@ export const PERMISSIONS = [
   { code: 'withdrawal:auto_rule_edit', module: 'funds', highRisk: true },
   { code: 'recon:view', module: 'funds', highRisk: false },
   { code: 'recon:resolve', module: 'funds', highRisk: false },
-  { code: 'sweep:view', module: 'funds', highRisk: false },
-  { code: 'sweep:operate', module: 'funds', highRisk: true },
-  { code: 'sweep:config', module: 'funds', highRisk: true },
+  { code: 'provider:view', module: 'funds', highRisk: false },
+  { code: 'provider:operate', module: 'funds', highRisk: true },
   { code: 'task:view', module: 'funds', highRisk: false },
   { code: 'task:retry', module: 'funds', highRisk: false },
 

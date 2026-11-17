@@ -355,7 +355,8 @@
     "frozenWithdraw": "Frozen (withdrawals)",
     "frozenOrders": "Frozen (orders)",
     "showAmounts": "Show amounts",
-    "hideAmounts": "Hide amounts"
+    "hideAmounts": "Hide amounts",
+    "records": "Fund records"
   },
   "deposit": {
     "chooseNetwork": "Choose network",
@@ -365,15 +366,13 @@
       "TRC20": "TRON",
       "BSC": "BNB Chain"
     },
-    "pickFirst": "Choose a network first to see the deposit address and QR code.",
+    "pickFirst": "Choose a network first to see your deposit address and QR code. The address is created the first time you choose a network and never changes.",
     "qrLabel": "{{network}} deposit address QR code",
     "copied": "Address copied",
     "copyFailed": "Copy failed. Please copy the address manually",
-    "sameAddress": "ERC20 and BSC share the same address. Make sure you pick the right network.",
     "warnTitle": "Before you deposit",
     "warnOnly": "Only send USDT on the {{network}} network to this address",
     "warnWrong": "Funds sent on the wrong network or in another token cannot be recovered",
-    "warnConfirm": "Credited after {{n}} block confirmations (about {{m}} min). We will notify you.",
     "warnMin": "Minimum {{min}} USDT per deposit. Smaller amounts will not be credited",
     "records": "Deposit history",
     "recordsEmpty": "No deposits yet",
@@ -385,7 +384,18 @@
       "reversed": "Reversed"
     },
     "notOpenTitle": "Deposits are not open yet",
-    "notOpenHint": "Deposit channels are being prepared. Your deposit address will appear here once they open. Questions? Contact info@example.com"
+    "notOpenHint": "Deposit channels are being prepared. Your deposit address will appear here once they open. Questions? Contact info@example.com",
+    "generated": "{{network}} deposit address created",
+    "generatedBody": "You will always get this address for this network",
+    "generatedTag": "Created",
+    "generating": "Creating your {{network}} deposit address…",
+    "generatingHint": "Usually within 5 seconds. Please keep this page open",
+    "unavailableTitle": "Deposit address unavailable right now. Please try again later",
+    "unavailableOthers": "Networks already created still work: {{list}}. ",
+    "unavailableHint": "Tap \"Retry\" once the wallet service is back.",
+    "warnBelow": "Transfers below {{min}} USDT are not credited and cannot be recovered",
+    "warnNotify": "We will notify you by in-app message, push and email when it arrives",
+    "recordsEmptyHint": "Deposits appear here once credited. Transfers below 1 USDT are not credited and will not appear here."
   },
   "ledger": {
     "filterAll": "All",
@@ -450,28 +460,28 @@
     "receive": "You receive",
     "limits": "Per tx {{min}} – {{max}} · used today",
     "dailyUsed": "Daily limit used",
-    "largeNotice": "Withdrawals ≥{{amount}} USDT are sent {{h}} hours after approval.",
+    "largeNotice": "Withdrawals of {{amount}} USDT or more are sent for payout {{h}} hours after approval.",
     "process": "How it works",
     "step1": "Submit",
     "step2": "{{h}}h cooling-off, cancellable",
-    "step3": "Manual review",
-    "step4": "On-chain transfer",
-    "processNote": "Withdrawals ≥{{amount}} USDT are delayed {{h}} hours after approval and can be cancelled via support in that window. Failed transfers are refunded automatically.",
+    "step3": "Trading review",
+    "step4": "Awaiting payout review (manual)",
+    "processNote": "Withdrawals of {{amount}} USDT or more are sent for payout {{h}} hours after approval; contact support to cancel during the delay. If the payout fails or is declined, the frozen amount is returned to your balance and we will notify you.",
     "submit": "Submit withdrawal",
     "confirmTitle": "Confirm withdrawal",
     "confirm": "Submit",
     "confirmNote": "After submitting there is a {{h}}-hour cooling-off period during which you can cancel.",
     "submitted": "Withdrawal submitted",
-    "submittedBody": "You can cancel within {{h}} hours",
+    "submittedBody": "{{h}}-hour cooling-off, you can cancel. After approval the payout is released manually; after 23:00 (UTC+8) it is processed after 8:00 the next day",
     "records": "Withdrawal history",
     "recordsTotal": "{{total}} records",
     "recordsEmpty": "No withdrawals yet",
     "status": {
       "cooling": "Cooling-off",
       "reviewing": "Under review",
-      "approved": "Approved",
-      "delayed": "Approved · delayed",
-      "broadcasting": "Broadcasting",
+      "approved": "Approved · pending payout",
+      "delayed": "Approved · large-amount delay",
+      "broadcasting": "Paying out",
       "completed": "Completed",
       "failedRefunded": "Failed · refunded",
       "rejected": "Rejected",
@@ -481,12 +491,14 @@
       "coolingLeft": "Review in {{time}}",
       "coolingDone": "Entering review",
       "reviewing": "Waiting for review",
-      "approved": "Waiting to send",
-      "delayed": "Sends around {{time}}",
+      "approved": "Sent for payout within 1 minute",
+      "delayed": "Sent for payout at {{time}}",
       "tx": "Tx {{hash}}",
-      "refunded": "Transfer failed, refunded",
+      "refunded": "Payout failed or declined, refunded to your balance",
       "rejected": "Reason: {{reason}}",
-      "cancelled": "Cancelled, funds returned"
+      "cancelled": "Cancelled, funds returned",
+      "payoutNo": "Payout no. {{no}}",
+      "paying": "Awaiting payout"
     },
     "rejectReason": {
       "addressRisk": "Risky destination address",
@@ -496,7 +508,16 @@
     "cancelTitle": "Cancel withdrawal",
     "cancelConfirm": "Cancel withdrawal",
     "cancelBody": "{{amount}} USDT will be returned to your balance immediately.",
-    "cancelled": "Withdrawal cancelled, funds returned"
+    "cancelled": "Withdrawal cancelled, funds returned",
+    "twoReviewTitle": "Withdrawals go through two reviews",
+    "twoReviewHours": "After Trading approves, the payout is released manually, 8:00–23:00 (UTC+8). ",
+    "twoReviewNight": "After approval the payout is released manually; requests after 23:00 (UTC+8) are processed after 8:00 the next day.",
+    "doneBody": "{{h}}-hour cooling-off, you can cancel. After approval the payout is released manually; requests after 23:00 (UTC+8) are processed after 8:00 the next day. Track every step in your withdrawal history.",
+    "step5": "Paid out",
+    "payout": {
+      "awaitingRelease": "Awaiting payout review",
+      "paying": "Paying out"
+    }
   },
   "whitelist": {
     "title": "Withdrawal whitelist",
@@ -672,7 +693,9 @@
     "validationFailed": "Some fields are invalid. Please check and try again.",
     "badRequest": "The request could not be processed. Please refresh the page and try again.",
     "forbidden": "You are not allowed to do this.",
-    "fileTooLarge": "File too large. Each file must be 2 MB or less."
+    "fileTooLarge": "File too large. Each file must be 2 MB or less.",
+    "walletUnavailable": "Deposit address unavailable right now. Please try again later",
+    "networkClosed": "Deposits on this network are paused"
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",
@@ -707,7 +730,7 @@
     "addressNotActive": "This address is not active yet (24 hours after adding)",
     "amountDigits": "Up to 2 decimals",
     "withdrawMin": "Minimum 10 USDT",
-    "withdrawMaxPerTx": "Maximum 10,000 USDT per withdrawal",
+    "withdrawMaxPerTx": "Maximum 5,000 USDT per withdrawal",
     "withdrawDaily": "Daily total must be below 30,000 USDT",
     "withdrawBalance": "Exceeds available balance",
     "addressTron": "TRC20 addresses start with T and have 34 characters",
@@ -809,5 +832,39 @@
       ],
       "note": "CFDs are leveraged; you can lose all of your margin."
     }
+  },
+  "records": {
+    "title": "Fund records",
+    "viewAll": "All fund records",
+    "steps": "Time of each step",
+    "step": {
+      "cooling": "Submitted",
+      "reviewing": "Cooling-off ended, in review",
+      "approved": "Approved",
+      "delayed": "Approved · large-amount delay",
+      "broadcasting": "Sent for payout (awaiting payout review)",
+      "completed": "Completed",
+      "failedRefunded": "Refunded",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "filterType": "Type",
+    "filterNetwork": "Network",
+    "filterTime": "Time",
+    "kind": {
+      "all": "All",
+      "deposit": "Deposits",
+      "withdraw": "Withdrawals"
+    },
+    "allNetworks": "All networks",
+    "allTime": "All time",
+    "note": "Times are shown in your local time zone, to the second. Records are kept permanently and cannot be deleted. Transfers below 1 USDT are not credited and do not appear here.",
+    "empty": "No fund records yet",
+    "emptyHint": "Every deposit and withdrawal will be recorded here permanently.",
+    "goDeposit": "Deposit",
+    "emptyFiltered": "No records match these filters",
+    "clearFilters": "Clear filters",
+    "creditedAt": "Credited at {{time}}",
+    "txHash": "Tx hash {{hash}}"
   }
 }
