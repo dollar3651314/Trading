@@ -47,7 +47,8 @@ services:
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?缺少 ADMIN_DOMAIN}
       WWW_DOMAIN: ${WWW_DOMAIN:?缺少 WWW_DOMAIN}
       QUOTE_DOMAIN: ${QUOTE_DOMAIN:?缺少 QUOTE_DOMAIN}
-      # 测试环境不让搜索引擎收录（X-Robots-Tag: noindex + robots.txt 全部禁止，测试环境验收 T-2）；生产要让官网被收录时设 "false"
+      # 测试环境官网不让搜索引擎收录（X-Robots-Tag: noindex + robots.txt 全部禁止，测试环境验收 T-2）；生产要让官网被收录时设 "false"。
+      # 这个开关只管官网，客户端、后台、报价子域名在 Nginx 配置里写死永远不收录
       FX_NGINX_NOINDEX: "true"
     volumes:
       # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来

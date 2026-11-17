@@ -18,7 +18,7 @@ ENV FX_NGINX_API_RATE=20r/s \
     FX_NGINX_QUOTE_RATE=20r/s \
     FX_NGINX_QUOTE_BURST=100 \
     FX_NGINX_QUOTE_CONN=50
-# 搜索引擎收录（测试环境验收 T-2，site.conf.template 开头）：默认 true = 不让收录；生产要让官网被收录时在 compose 里设 false
+# 搜索引擎收录（测试环境验收 T-2，site.conf.template 开头）：只管官网（客户端、后台、报价子域名永远不收录）；默认 true = 不让收录，生产要让官网被收录时在 compose 里设 false
 ENV FX_NGINX_NOINDEX=true
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf

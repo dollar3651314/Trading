@@ -44,7 +44,7 @@ check "内存守护定时器在、trading on 会打开它" bash -c 'grep -q "^Ex
 check "trading-web 只挂 Trading 自己的证书目录（不挂整个 /etc/letsencrypt）" jqc '[.services[].volumes[]? | select(.source | startswith("/etc/letsencrypt")) | .source] | sort == ["/etc/letsencrypt/archive/trading","/etc/letsencrypt/live/trading"]'
 # 测试环境验收 T-1：FX_QUOTE_OPEN_DOCS=auto 在"配了任何真实报价源"时也藏文档，测试环境币安默认打开（TD4-11），所以必须写死 true
 check "测试环境开发者文档 /docs/ 能看（FX_QUOTE_OPEN_DOCS 写死 true，不能是 auto）" jqc '.services["quote-app"].environment.FX_QUOTE_OPEN_DOCS == "true"'
-check "测试环境不让搜索引擎收录（trading-web 的 FX_NGINX_NOINDEX 写死 true）" jqc '.services["trading-web"].environment.FX_NGINX_NOINDEX == "true"'
+check "测试环境官网不让搜索引擎收录（trading-web 的 FX_NGINX_NOINDEX 写死 true）" jqc '.services["trading-web"].environment.FX_NGINX_NOINDEX == "true"'
 check "compose 里没有 FX_E2E_ENABLED、e2e profile" bash -c '! grep -Eq "FX_E2E_ENABLED|SPRING_PROFILES_ACTIVE" deploy/kit/docker-compose.yml'
 
 echo "== nginx -t（$NGINX_IMAGE）"
@@ -77,9 +77,11 @@ web() {
   for _ in $(seq 1 30); do docker exec "$net-web" curl -sk -o /dev/null --resolve app.check.invalid:443:127.0.0.1 https://app.check.invalid/ 2> /dev/null && return 0; sleep 0.5; done
   docker logs "$net-web" 2>&1 | tail -20; return 1
 }
-# req 域名前缀 路径 → 状态码、X-Robots-Tag、正文（一行一个）
+# req 域名前缀 路径 → 状态码、X-Robots-Tag、正文（一行一个）；secure 域名前缀 路径 → 响应里还有 security.inc 的 HSTS、X-Frame-Options
+# （防止以后有人在 location 里加 add_header，Nginx 就不再继承 server 级的 add_header）
 req() { docker exec "$net-web" curl -sk -D "/tmp/h" -o "/tmp/b" --resolve "$1.check.invalid:443:127.0.0.1" "https://$1.check.invalid$2" -w '%{http_code}\n' && docker exec "$net-web" sh -c 'grep -i "^x-robots-tag:" /tmp/h | cut -d" " -f2- | tr -d "\r"; echo; cat /tmp/b'; }
 is() { local want=$1; shift; [ "$(req "$@")" = "$want" ]; }
+secure() { req "$@" > /dev/null && docker exec "$net-web" sh -c 'grep -qi "^strict-transport-security: max-age=" /tmp/h && grep -qi "^x-frame-options: DENY" /tmp/h'; }
 has() { local want=$1 out; shift; out=$(req "$@") && grep -qF -- "$want" <<< "$out"; }
 nl=$'\n'
 if web; then
@@ -93,12 +95,23 @@ if web; then
   check "客户端首页带 X-Robots-Tag: noindex" has "noindex, nofollow" app /
   check "官网子页（单页应用回 index.html）带 X-Robots-Tag: noindex" has "noindex, nofollow" www /terms
   check "后台页面带 X-Robots-Tag: noindex" has "noindex, nofollow" ops /admin/
+  for h in app ops www quote; do
+    check "$h /robots.txt 仍带 HSTS、X-Frame-Options（location 里没有覆盖 add_header）" secure "$h" /robots.txt
+  done
+  check "报价子域名 /docs/ 仍带 HSTS、X-Frame-Options" secure quote /docs/
+  check "报价子域名 /v1/** 仍带 HSTS、X-Frame-Options" secure quote /v1/symbols
 else
   check "Nginx 能起来（FX_NGINX_NOINDEX=true）" false
 fi
 if web -e FX_NGINX_NOINDEX=false; then
   check "FX_NGINX_NOINDEX=false：官网 /robots.txt 全部允许、不发 X-Robots-Tag" is "200${nl}${nl}User-agent: *${nl}Allow: /" www /robots.txt
   check "FX_NGINX_NOINDEX=false：官网首页不发 X-Robots-Tag" is "200${nl}${nl}<!doctype html><title>site</title>" www /
+  check "FX_NGINX_NOINDEX=false：官网 /robots.txt 仍带 HSTS、X-Frame-Options" secure www /robots.txt
+  for h in app ops quote; do
+    check "FX_NGINX_NOINDEX=false：$h 照样不收录（/robots.txt 全部禁止、带 X-Robots-Tag）" is "200${nl}noindex, nofollow${nl}${nl}User-agent: *${nl}Disallow: /" "$h" /robots.txt
+  done
+  check "FX_NGINX_NOINDEX=false：客户端首页照样带 X-Robots-Tag" has "noindex, nofollow" app /
+  check "FX_NGINX_NOINDEX=false：报价子域名 /docs/ 照样带 X-Robots-Tag" has "noindex, nofollow" quote /docs/
 else
   check "Nginx 能起来（FX_NGINX_NOINDEX=false）" false
 fi

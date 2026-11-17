@@ -10,13 +10,20 @@
 #   报价    QUOTE_DOMAIN /v1/**（含 WebSocket /v1/ws）、/docs/ → quote-app。/internal/** 和其他一切 404
 # 路径里有分号的一律 400（Spring 忽略分号后面的内容，前缀判断会被绕过；后端 CrossSiteGuard、报价服务 PathGuardFilter 也拒绝）。
 
-# 搜索引擎收录（测试环境验收 T-2）：FX_NGINX_NOINDEX（web.Dockerfile 默认 true，测试环境 docker-compose.yml 也写死 true）
-#   true  → 四个子域名所有响应带 X-Robots-Tag: noindex, nofollow（security.inc），/robots.txt 回"全部禁止"（robots.inc）
-#   false → 不发 X-Robots-Tag，/robots.txt 用前端目录里的文件、没有就回"全部允许"（生产要让官网被收录时由运维设 false）
-# 只有值是 false（Nginx 的 map 不分大小写）才让收录；没设、写错（例如 no、0）一律按不收录处理，宁可不被收录
-map "${FX_NGINX_NOINDEX}" $tr_robots_tag {
+# 搜索引擎收录（测试环境验收 T-2）：
+#   客户端、后台、报价三个子域名**永远不收录**（写死，不看开关）：所有响应带 X-Robots-Tag: noindex, nofollow（security.inc），/robots.txt 回"全部禁止"（robots.inc）
+#   只有官网看 FX_NGINX_NOINDEX（web.Dockerfile 默认 true，测试环境 docker-compose.yml 也写死 true）：
+#     true  → 和上面一样不收录
+#     false → 不发 X-Robots-Tag，/robots.txt 用前端目录里的文件、没有就回"全部允许"（生产要让官网被收录时由运维设 false）
+#   只有值是 false（Nginx 的 map 不分大小写）才让收录；没设、写错（例如 no、0）一律按不收录处理，宁可不被收录
+map "${FX_NGINX_NOINDEX}" $tr_site_robots_tag {
   default "noindex, nofollow";
   "false" "";
+}
+# 按域名：只有官网用上面的开关，其他域名（包括不认识的）一律不收录
+map $host $tr_robots_tag {
+  default "noindex, nofollow";
+  "${WWW_DOMAIN}" $tr_site_robots_tag;
 }
 
 limit_req_zone $binary_remote_addr zone=tr_api:10m rate=${FX_NGINX_API_RATE};
