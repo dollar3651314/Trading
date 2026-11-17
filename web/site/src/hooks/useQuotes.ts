@@ -12,10 +12,12 @@ export interface QuotesState {
   rows: Row[];
   /** 来自模拟报价源：标"示例行情" */
   sample: boolean;
+  /** 第 3 批：生产不显示价格，只列品种名和"登录后查看实时行情" */
+  pricesHidden: boolean;
 }
 
 export function useQuotes(): QuotesState {
-  const [state, setState] = useState<QuotesState>(() => ({ rows: initialRows(DEFAULT_SYMBOLS), sample: false }));
+  const [state, setState] = useState<QuotesState>(() => ({ rows: initialRows(DEFAULT_SYMBOLS), sample: false, pricesHidden: false }));
   const lastOk = useRef(Date.now());
 
   useEffect(() => {
@@ -31,7 +33,7 @@ export function useQuotes(): QuotesState {
         const data = await fetchPublicQuotes();
         if (stopped) return;
         lastOk.current = Date.now();
-        setState((s) => ({ rows: nextRows(s.rows, data), sample: data.sample }));
+        setState((s) => ({ rows: nextRows(s.rows, data), sample: data.sample, pricesHidden: data.pricesHidden === true }));
       } catch {
         if (!stopped && Date.now() - lastOk.current >= UNAVAILABLE_AFTER_MS) setState((s) => ({ ...s, rows: unavailableRows(s.rows) }));
       } finally {

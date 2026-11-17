@@ -20,5 +20,10 @@ export interface PublicQuote {
 export interface PublicQuotes {
   /** 报价来自模拟报价源（测试环境）：页面标"示例行情" */
   sample: boolean;
+  /**
+   * 第 3 批（TD-9 A、TY-4）：生产不显示价格（没有公开展示授权）：每行只列品种名和"登录后查看实时行情"，不闪动。
+   * 接口在这种情况下不返回任何价格
+   */
+  pricesHidden?: boolean;
   items: PublicQuote[];
 }

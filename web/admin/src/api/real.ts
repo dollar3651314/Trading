@@ -5,7 +5,7 @@
  *
  * Real admin API. Shapes follow the backend; prototype differences are adapted here.
  */
-import { API_BASE, request } from './http';
+import { API_BASE, request, withQuery } from './http';
 import type {
   AdjustLimits,
   AutoApproveChange,
@@ -45,6 +45,14 @@ import type {
   HotWalletBalance,
   PaymentOverview,
   PaymentProvider,
+  QuoteKeyCreated,
+  QuoteLicenseInput,
+  QuoteLicenses,
+  QuoteLimits,
+  QuoteOverview,
+  QuoteSources,
+  QuoteUsage,
+  QuoteUsageQuery,
   ReconStatus,
   ReconItem,
   ReconQuery,
@@ -509,3 +517,32 @@ export function getTradingParams(): Promise<TradingParams> {
 export async function updateTradingParams(p: TradingParamsInput, reason: string): Promise<void> {
   await request('/params', { method: 'PUT', body: { marginCallLevel: p.marginCallLevel, marginCallThrottleMinutes: p.marginCallThrottleMinutes, reason } });
 }
+
+// ---- 第 3 批：报价服务（原型 P8～P11） ----
+export const getQuoteOverview = (): Promise<QuoteOverview> => request('/quote-service/overview');
+export const createQuoteClient = (name: string, email: string, note: string, reason: string): Promise<unknown> =>
+  request('/quote-service/clients', { method: 'POST', body: { name, email, note, reason } });
+export const createQuoteKey = (clientId: number, kind: string, symbols: string[], reason: string): Promise<QuoteKeyCreated> =>
+  request('/quote-service/keys', { method: 'POST', body: { clientId, kind, symbols, reason } });
+export const rotateQuoteKey = (keyId: string, reason: string): Promise<QuoteKeyCreated> =>
+  request(`/quote-service/keys/${enc(keyId)}/rotate`, { method: 'POST', body: { reason } });
+export async function disableQuoteKey(keyId: string, reason: string): Promise<void> {
+  await request(`/quote-service/keys/${enc(keyId)}/disable`, { method: 'POST', body: { reason } });
+}
+export async function setQuoteKeyLimits(keyId: string, l: QuoteLimits, reason: string): Promise<void> {
+  await request(`/quote-service/keys/${enc(keyId)}/limits`, { method: 'PUT', body: { ...l, reason } });
+}
+export async function setQuoteDefaults(l: QuoteLimits, reason: string): Promise<void> {
+  await request('/quote-service/defaults', { method: 'PUT', body: { ...l, reason } });
+}
+export const getQuoteUsage = (q: QuoteUsageQuery): Promise<QuoteUsage> => request('/quote-service/usage', { query: { ...q } });
+/** 导出 CSV 的下载地址（浏览器直接打开，带登录 Cookie） */
+export const quoteUsageExportUrl = (q: QuoteUsageQuery): string => withQuery(`${API_BASE}/quote-service/usage/export`, { ...q });
+export const getQuoteLicenses = (): Promise<QuoteLicenses> => request('/quote-service/licenses');
+export async function saveQuoteLicense(input: QuoteLicenseInput): Promise<void> {
+  await request('/quote-service/licenses', { method: 'PUT', body: input });
+}
+export async function setQuoteGate(open: boolean, amosApproved: boolean, reason: string): Promise<void> {
+  await request('/quote-service/gate', { method: 'PUT', body: { open, amosApproved, reason } });
+}
+export const getQuoteSources = (): Promise<QuoteSources> => request('/quote-service/sources');

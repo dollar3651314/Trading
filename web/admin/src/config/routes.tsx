@@ -21,6 +21,10 @@ import { SymbolsPage } from '../pages/market/SymbolsPage';
 import { SessionsPage } from '../pages/market/SessionsPage';
 import { FxPage } from '../pages/market/FxPage';
 import { ParamsPage } from '../pages/params/ParamsPage';
+import { QuoteKeysPage } from '../pages/quote/QuoteKeysPage';
+import { QuoteUsagePage } from '../pages/quote/QuoteUsagePage';
+import { QuoteLicensePage } from '../pages/quote/QuoteLicensePage';
+import { QuoteSourcesPage } from '../pages/quote/QuoteSourcesPage';
 import { TemplatesPage } from '../pages/notify/TemplatesPage';
 import { SendPage } from '../pages/notify/SendPage';
 import { RecordsPage } from '../pages/notify/RecordsPage';
@@ -58,6 +62,11 @@ export const APP_ROUTES: RouteDef[] = [
   { path: '/market/symbols', menuKey: 'symbols', element: <SymbolsPage /> },
   { path: '/market/sessions', menuKey: 'sessions', element: <SessionsPage /> },
   { path: '/market/fx', menuKey: 'fx', element: <FxPage /> },
+  // 第 3 批：报价服务（原型 P8～P11）
+  { path: '/quote-service/keys', menuKey: 'quoteKeys', element: <QuoteKeysPage /> },
+  { path: '/quote-service/usage', menuKey: 'quoteUsage', element: <QuoteUsagePage /> },
+  { path: '/quote-service/license', menuKey: 'quoteLicense', element: <QuoteLicensePage /> },
+  { path: '/quote-service/sources', menuKey: 'quoteSources', element: <QuoteSourcesPage /> },
   { path: '/params', menuKey: 'params', element: <ParamsPage /> },
   { path: '/notify/templates', menuKey: 'templates', element: <TemplatesPage /> },
   { path: '/notify/send', menuKey: 'send', element: <SendPage /> },

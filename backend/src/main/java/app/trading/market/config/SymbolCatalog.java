@@ -58,6 +58,9 @@ public class SymbolCatalog {
       m.put("category", s.category());
       m.put("digits", s.digits());
       m.put("simStartPrice", sim.get(s.code()));
+      // 第 3 批：对外品种列表要中英文名
+      m.put("nameZh", s.nameZh());
+      m.put("nameEn", s.nameEn());
       syms.add(m);
     }
     List<Map<String, Object>> sess = new ArrayList<>();

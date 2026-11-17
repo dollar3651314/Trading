@@ -1,11 +1,11 @@
-/** AC-35：后台每个页面都能从菜单进入；需求说明书 5.2：10 个一级菜单 */
+/** AC-35：后台每个页面都能从菜单进入；需求说明书 5.2：10 个一级菜单，第 3 批加"报价服务"（原型 P8～P11）共 11 个 */
 import { MENU, flattenMenu, findMenuByPath, visibleMenu, type ServerMenuNode } from './menu';
 import { APP_ROUTES } from './routes';
 import { ALL_PERMISSION_CODES } from './permissions';
 
 describe('菜单', () => {
-  it('一级菜单共 10 个', () => {
-    expect(MENU).toHaveLength(10);
+  it('一级菜单共 11 个（第 3 批加"报价服务"）', () => {
+    expect(MENU).toHaveLength(11);
   });
 
   it('每个页面路由都对应一个菜单入口', () => {

@@ -95,6 +95,11 @@ export interface SymbolInfo {
   openPaused: boolean;
   /** 当前是否在交易时段内 */
   tradingOpen: boolean;
+  /**
+   * 第 3 批（原型 P3）：现在的报价源有"交易用途"授权，可以开仓。false 时行情、K 线照常，标"暂不开放交易"、下单按钮灰（拒单 SYMBOL_NOT_TRADABLE）。
+   * 测试环境总是 true；没有这个字段（老接口）按 true
+   */
+  tradable?: boolean;
 }
 
 export interface Quote {
@@ -228,6 +233,7 @@ export interface PlaceOrderResult {
 /** 下单被拒原因（AC-12） */
 export type OrderRejectReason =
   | 'tradingClosed'
+  | 'symbolNotTradable'
   | 'symbolPaused'
   | 'globalPaused'
   | 'rateStale'

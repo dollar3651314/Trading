@@ -23,11 +23,24 @@ type BarListener = (bar: Kline) => void;
 
 const cache: Record<string, Quote> = {};
 const quoteListeners = new Set<QuoteListener>();
+/** 第 3 批（原型 P3"暂无报价"）：报价服务中断时后端推 quoteStatus false，恢复后推 true */
+let quoteAvailable = true;
+const statusListeners = new Set<(available: boolean) => void>();
+
+/** 订阅"报价是否可用"：先回调一次当前值 */
+export function subscribeQuoteStatus(cb: (available: boolean) => void): () => void {
+  statusListeners.add(cb);
+  cb(quoteAvailable);
+  return () => {
+    statusListeners.delete(cb);
+  };
+}
 let kline: { symbol: string; tf: Timeframe; listeners: Set<BarListener> } | null = null;
 
-/** 推送消息：{"type":"quotes","data":[…]} 或 {"type":"kline","symbol","tf","bar"} */
+/** 推送消息：{"type":"quotes","data":[…]}、{"type":"kline","symbol","tf","bar"}，或第 3 批的 {"type":"quoteStatus","available":bool} */
 interface MarketMsg {
   type?: string;
+  available?: boolean;
   data?: Quote[];
   symbol?: string;
   tf?: Timeframe;
@@ -48,6 +61,9 @@ export function handleMarketMessage(msg: unknown): void {
     const qs = m.data.filter((q) => q && q.symbol).map(normalize);
     for (const q of qs) cache[q.symbol] = q;
     if (qs.length) quoteListeners.forEach((l) => l(qs));
+  } else if (m?.type === 'quoteStatus' && typeof m.available === 'boolean') {
+    quoteAvailable = m.available;
+    statusListeners.forEach((l) => l(quoteAvailable));
   } else if (m?.type === 'kline' && m.bar && kline && m.symbol === kline.symbol && m.tf === kline.tf) {
     const bar = m.bar;
     kline.listeners.forEach((l) => l(bar));

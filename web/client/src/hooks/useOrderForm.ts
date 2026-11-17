@@ -14,6 +14,7 @@ import { formatLots, formatPrice } from '../lib/format';
 import { estimateOrder, execPrice, pnlAt, usdRate } from '../lib/trading';
 import { hasErrors, sanitizeLots, validateOrder, type FieldErrors, type OrderForm } from '../lib/validators';
 import { useQuote } from './useQuotes';
+import { useQuoteAvailable } from './useQuoteStatus';
 
 export const LOT_CHIPS = ['0.01', '0.10', '0.50', '1.00', '2.00'];
 
@@ -131,7 +132,19 @@ export function useOrderForm(symbol: SymbolInfo, initialSide: Side, onDone?: () 
     }
   };
 
-  const notice = !symbol.tradingOpen ? t('order.noticeClosed') : symbol.openPaused ? t('order.noticePaused') : null;
+  // 第 3 批（原型 P3）：暂无报价（报价服务中断）、该品种暂不开放交易（没有交易用途授权）时下单按钮灰
+  const quoteAvailable = useQuoteAvailable();
+  const notTradable = symbol.tradable === false;
+  const blocked = notTradable || !quoteAvailable;
+  const notice = !quoteAvailable
+    ? t('order.noticeNoQuote')
+    : notTradable
+      ? t('order.noticeNotTradable')
+      : !symbol.tradingOpen
+        ? t('order.noticeClosed')
+        : symbol.openPaused
+          ? t('order.noticePaused')
+          : null;
 
   return {
     form,
@@ -150,6 +163,8 @@ export function useOrderForm(symbol: SymbolInfo, initialSide: Side, onDone?: () 
     expected,
     available: metrics?.available ?? ZERO,
     notice,
+    blocked,
+    notTradable,
     reject,
     confirm,
     setConfirm,

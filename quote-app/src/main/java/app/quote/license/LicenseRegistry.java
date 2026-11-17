@@ -38,11 +38,12 @@ public class LicenseRegistry implements TradingLicenses {
   LicenseRegistry(JdbcTemplate jdbc, Clock clock, LicenseProperties props, QuoteProperties quote) {
     this.jdbc = jdbc;
     this.clock = clock;
-    this.enforced = switch (props.enforce()) {
-      case "true" -> true;
-      case "false" -> false;
-      default -> QuoteRouter.mode(quote.source()) == QuoteRouter.Mode.LIVE;
-    };
+    boolean live = QuoteRouter.mode(quote.source()) == QuoteRouter.Mode.LIVE;
+    // 生产（报价模式 live）一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在非生产有效（第 3 批审查：不能用一个变量关掉生产的转售、交易用途检查）
+    if (live && "false".equals(props.enforce())) {
+      org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).warn("报价模式是 live（生产），忽略 FX_QUOTE_LICENSE_ENFORCE=false，授权检查照常启用");
+    }
+    this.enforced = live || "true".equals(props.enforce());
     reload();
   }
 

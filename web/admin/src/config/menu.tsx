@@ -1,5 +1,5 @@
 /**
- * 后台菜单（需求说明书 5.2：10 个一级菜单）。每个页面都必须在这里有入口（AC-35，由单元测试检查）。
+ * 后台菜单（需求说明书 5.2：10 个一级菜单；第 3 批加"报价服务"，共 11 个）。每个页面都必须在这里有入口（AC-35，由单元测试检查）。
  * Admin menu tree: 10 top-level entries; every routed page must be reachable from here.
  */
 import type { ReactNode } from 'react';
@@ -14,6 +14,7 @@ import {
   SlidersOutlined,
   BellOutlined,
   SettingOutlined,
+  ApiOutlined,
 } from '@ant-design/icons';
 import type { PermissionCode } from './permissions';
 
@@ -65,6 +66,17 @@ export const MENU: MenuItemDef[] = [
       { key: 'symbols', labelKey: 'menu.symbols', path: '/market/symbols', permission: 'symbol:view' },
       { key: 'sessions', labelKey: 'menu.sessions', path: '/market/sessions', permission: 'session:view' },
       { key: 'fx', labelKey: 'menu.fx', path: '/market/fx', permission: 'fx:view' },
+    ],
+  },
+  {
+    key: 'quoteService',
+    labelKey: 'menu.quoteService',
+    icon: <ApiOutlined />,
+    children: [
+      { key: 'quoteKeys', labelKey: 'menu.quoteKeys', path: '/quote-service/keys', permission: 'quote_service:view' },
+      { key: 'quoteUsage', labelKey: 'menu.quoteUsage', path: '/quote-service/usage', permission: 'quote_service:view' },
+      { key: 'quoteLicense', labelKey: 'menu.quoteLicense', path: '/quote-service/license', permission: 'quote_service:view' },
+      { key: 'quoteSources', labelKey: 'menu.quoteSources', path: '/quote-service/sources', permission: 'quote_service:view' },
     ],
   },
   { key: 'params', labelKey: 'menu.params', icon: <SlidersOutlined />, path: '/params', permission: 'params:view' },

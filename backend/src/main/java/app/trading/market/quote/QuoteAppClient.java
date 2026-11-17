@@ -72,6 +72,12 @@ public class QuoteAppClient {
     return out;
   }
 
+  /** 第 3 批：后台"报价服务"菜单转发内部接口，原样返回状态码、类型和内容 */
+  public app.trading.market.api.QuoteServiceApi.Response raw(String method, String pathWithQuery, String body) {
+    HttpResponse<String> r = send(method, pathWithQuery, body);
+    return new app.trading.market.api.QuoteServiceApi.Response(r.statusCode(), r.headers().firstValue("Content-Type").orElse(""), r.body());
+  }
+
   private static String enc(String s) {
     return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
   }

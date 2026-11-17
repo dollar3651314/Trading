@@ -8,6 +8,7 @@
  * Admin data API. Pages import from here only. "real" mode calls the backend for S18a endpoints; "mock" keeps the prototype.
  */
 import * as mock from '../mocks/handlers';
+import * as mockQuote from '../mocks/quoteService';
 import * as runtime from '../mocks/runtime';
 import { IS_MOCK } from './mode';
 import * as real from './real';
@@ -221,3 +222,31 @@ export const proto: Pick<typeof runtime, 'getScenario' | 'setScenario' | 'subscr
       subscribeScenario: () => () => {},
       getScenarioVersion: () => 0,
     };
+
+// ---- 第 3 批：报价服务（原型 P8～P11；数据在报价服务里，后台转发；只计量不收费） ----
+/** GET /api/admin/quote-service/overview（外部客户、Key、默认限额、总开关） */
+export const getQuoteOverview: typeof real.getQuoteOverview = IS_MOCK ? mockQuote.getQuoteOverview : real.getQuoteOverview;
+/** POST /api/admin/quote-service/clients（高危） */
+export const createQuoteClient: typeof real.createQuoteClient = IS_MOCK ? mockQuote.createQuoteClient : real.createQuoteClient;
+/** POST /api/admin/quote-service/keys（高危；返回里的 Secret 只有这一次） */
+export const createQuoteKey: typeof real.createQuoteKey = IS_MOCK ? mockQuote.createQuoteKey : real.createQuoteKey;
+/** POST /api/admin/quote-service/keys/{keyId}/rotate（高危；旧 Key 立即停用） */
+export const rotateQuoteKey: typeof real.rotateQuoteKey = IS_MOCK ? mockQuote.rotateQuoteKey : real.rotateQuoteKey;
+/** POST /api/admin/quote-service/keys/{keyId}/disable（高危） */
+export const disableQuoteKey: typeof real.disableQuoteKey = IS_MOCK ? mockQuote.disableQuoteKey : real.disableQuoteKey;
+/** PUT /api/admin/quote-service/keys/{keyId}/limits（高危，只改这一个 Key） */
+export const setQuoteKeyLimits: typeof real.setQuoteKeyLimits = IS_MOCK ? mockQuote.setQuoteKeyLimits : real.setQuoteKeyLimits;
+/** PUT /api/admin/quote-service/defaults（高危，不影响已建 Key） */
+export const setQuoteDefaults: typeof real.setQuoteDefaults = IS_MOCK ? mockQuote.setQuoteDefaults : real.setQuoteDefaults;
+/** GET /api/admin/quote-service/usage */
+export const getQuoteUsage: typeof real.getQuoteUsage = IS_MOCK ? mockQuote.getQuoteUsage : real.getQuoteUsage;
+/** GET /api/admin/quote-service/usage/export（CSV 下载地址） */
+export const quoteUsageExportUrl: typeof real.quoteUsageExportUrl = IS_MOCK ? mockQuote.quoteUsageExportUrl : real.quoteUsageExportUrl;
+/** GET /api/admin/quote-service/licenses */
+export const getQuoteLicenses: typeof real.getQuoteLicenses = IS_MOCK ? mockQuote.getQuoteLicenses : real.getQuoteLicenses;
+/** PUT /api/admin/quote-service/licenses（高危） */
+export const saveQuoteLicense: typeof real.saveQuoteLicense = IS_MOCK ? mockQuote.saveQuoteLicense : real.saveQuoteLicense;
+/** PUT /api/admin/quote-service/gate（只有超管；打开要勾"Amos 已同意"） */
+export const setQuoteGate: typeof real.setQuoteGate = IS_MOCK ? mockQuote.setQuoteGate : real.setQuoteGate;
+/** GET /api/admin/quote-service/sources */
+export const getQuoteSources: typeof real.getQuoteSources = IS_MOCK ? mockQuote.getQuoteSources : real.getQuoteSources;

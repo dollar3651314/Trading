@@ -114,6 +114,8 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   // 下单（AC-12）
   TRADING_CLOSED: 'tradingClosed',
   SYMBOL_PAUSED: 'symbolPaused',
+  // 第 3 批：报价源没有"交易用途"授权，只显示不开仓（TQ-11 A）
+  SYMBOL_NOT_TRADABLE: 'symbolNotTradable',
   GLOBAL_PAUSED: 'globalPaused',
   RATE_STALE: 'rateStale',
   QUOTE_UNAVAILABLE: 'quoteUnavailable',

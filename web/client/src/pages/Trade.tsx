@@ -25,6 +25,7 @@ import { useChartPrefs, type ChartPrefs } from '../hooks/useChartPrefs';
 import { useWatchMode } from '../hooks/useWatchMode';
 import { useFavorites } from '../hooks/useFavorites';
 import { useIsDesktop } from '../hooks/useMediaQuery';
+import { useQuoteAvailable } from '../hooks/useQuoteStatus';
 import { useQuote, useQuotes } from '../hooks/useQuotes';
 import { cmp, dec, sub, ZERO } from '../lib/decimal';
 import { formatAmount, formatDecimal, formatLots, formatPercent, formatPrice } from '../lib/format';
@@ -319,6 +320,7 @@ export default function Trade() {
           <WatchRail mode={wlMode} onMode={setWlMode} selected={s.code} onSelect={select} />
         </aside>
         <section className="center">
+          <QuoteDownBanner />
           <div className="panel chartp">
             <DesktopHead s={s} />
             <ChartToolbar period={tf} onPeriod={changeTf} prefs={prefs} onIndicator={toggleIndicator} onBidAsk={toggleBidAsk} inline />
@@ -341,6 +343,7 @@ export default function Trade() {
   return (
     <div className="page page-trade">
       <MobileHead s={s} onPick={() => setPicker(true)} />
+      <QuoteDownBanner />
       <ChartToolbar period={tf} onPeriod={changeTf} prefs={prefs} onIndicator={toggleIndicator} onBidAsk={toggleBidAsk} inline={false} />
       <div className="chart-box" data-sub-panes={prefs.indicators.filter((k) => k === 'macd' || k === 'rsi').length}>
         <KChart symbol={s.code} period={tf} digits={s.digits} positionLines={lines} indicators={prefs.indicators} showBidAsk={prefs.bidAsk} />
@@ -360,11 +363,30 @@ export default function Trade() {
   );
 }
 
+/** 第 3 批（原型 P3-3）：报价服务中断时顶部提示；恢复后自动消失，不用刷新 */
+function QuoteDownBanner() {
+  const { t } = useTranslation();
+  const available = useQuoteAvailable();
+  if (available) return null;
+  return (
+    <div className="notice warn quote-down" role="alert">
+      <Icon name="warn" size={16} strokeWidth={2.2} />
+      <div>
+        <b>{t('trade.quoteDownTitle')}</b>
+        <span>{t('trade.quoteDownDesc')}</span>
+      </div>
+    </div>
+  );
+}
+
 function TradeButton({ s, side, onOpen }: { s: SymbolInfo; side: Side; onOpen: (side: Side) => void }) {
   const { t } = useTranslation();
   const q = useQuote(s.code);
+  const available = useQuoteAvailable();
+  // 第 3 批（原型 P3）：没有交易用途授权、报价中断时按钮灰（价格照常显示）
+  const blocked = s.tradable === false || !available;
   return (
-    <button type="button" className={`big-btn ${side}`} onClick={() => onOpen(side)}>
+    <button type="button" className={`big-btn ${side}`} onClick={() => onOpen(side)} disabled={blocked} aria-disabled={blocked}>
       <small>{t(`side.${side}`)}</small>
       <b className="num">{q ? formatPrice(side === 'buy' ? q.ask : q.bid, s.digits) : '—'}</b>
     </button>

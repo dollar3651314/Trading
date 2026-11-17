@@ -40,6 +40,7 @@ public class GlobalExceptionHandler {
       Map.entry("CONFIG_CHANGED", HttpStatus.CONFLICT),
       // 钱包提供方暂时不通（拿不到充值地址等），稍后重试
       Map.entry("WALLET_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE),
+      Map.entry("QUOTE_SERVICE_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE),
       Map.entry("NOT_FOUND", HttpStatus.NOT_FOUND));
 
   @ExceptionHandler(BizException.class)

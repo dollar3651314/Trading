@@ -24,6 +24,12 @@ export function subscribeQuotes(cb: (quotes: Quote[]) => void): () => void {
   return mock.subscribeQuotes(cb);
 }
 
+/** 第 3 批（原型 P3）：订阅"报价是否可用"（报价服务中断时为 false）；先回调一次当前值。原型模式下按演示开关 */
+export function subscribeQuoteStatus(cb: (available: boolean) => void): () => void {
+  if (!IS_MOCK) return real.subscribeQuoteStatus(cb);
+  return mock.subscribeQuoteStatus(cb);
+}
+
 /** 订阅某个品种某个周期的最新一根 K 线 */
 export const subscribeKline = (symbol: string, tf: Timeframe, cb: (bar: Kline) => void): (() => void) =>
   IS_MOCK ? mock.subscribeKline(symbol, tf, cb) : real.subscribeKline(symbol, tf, cb);

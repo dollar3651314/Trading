@@ -139,6 +139,13 @@ export function Notice({ f }: { f: OrderFormState }) {
   );
 }
 
+/** 第 3 批（原型 P3）：没有交易用途授权的品种，下单区下面写"不会出现在你的持仓里" */
+export function NotTradableNote({ f, symbol }: { f: OrderFormState; symbol: SymbolInfo }) {
+  const { t } = useTranslation();
+  if (!f.notTradable) return null;
+  return <p className="est-note">{t('order.notInPositions', { symbol: symbol.code })}</p>;
+}
+
 export function RejectAndSummary({ f }: { f: OrderFormState }) {
   const { t } = useTranslation();
   return (
@@ -164,7 +171,7 @@ export function RejectAndSummary({ f }: { f: OrderFormState }) {
 export function SubmitButton({ f, symbol }: { f: OrderFormState; symbol: SymbolInfo }) {
   const { t } = useTranslation();
   return (
-    <button type="button" className={`btn btn-lg btn-block btn-${f.form.side} op-submit`} onClick={f.submit}>
+    <button type="button" className={`btn btn-lg btn-block btn-${f.form.side} op-submit`} onClick={f.submit} disabled={f.blocked} aria-disabled={f.blocked}>
       {t(f.form.side === 'buy' ? 'order.submitBuy' : 'order.submitSell', { lots: isDecimalString(f.form.lots) ? formatLots(f.form.lots) : f.form.lots || '0', symbol: symbol.code })}
     </button>
   );

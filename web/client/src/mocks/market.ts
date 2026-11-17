@@ -292,3 +292,21 @@ function recordTicks(quotes: Quote[]): void {
     if (buf.length > TICK_CAP) buf.shift();
   }
 }
+
+// ---- 第 3 批（原型 P3"暂无报价"）：原型里可以模拟报价服务中断 ----
+let quoteAvailable = true;
+const statusListeners = new Set<(available: boolean) => void>();
+
+export function subscribeQuoteStatus(cb: (available: boolean) => void): () => void {
+  statusListeners.add(cb);
+  cb(quoteAvailable);
+  return () => {
+    statusListeners.delete(cb);
+  };
+}
+
+/** 原型、测试用：模拟报价服务中断 / 恢复 */
+export function setQuoteAvailable(available: boolean): void {
+  quoteAvailable = available;
+  statusListeners.forEach((l) => l(available));
+}

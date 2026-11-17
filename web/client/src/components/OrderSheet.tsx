@@ -11,7 +11,7 @@ import { formatAmount, formatPrice } from '../lib/format';
 import { contractUnitText } from '../lib/symbol';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
-import { LeverageField, LimitPriceField, LotsField, Notice, OrderConfirm, RejectAndSummary, SubmitButton, TpSlFields, TypeSwitch } from './order/parts';
+import { LeverageField, LimitPriceField, LotsField, NotTradableNote, Notice, OrderConfirm, RejectAndSummary, SubmitButton, TpSlFields, TypeSwitch } from './order/parts';
 
 const SHEET_LOTS = ['0.01', '0.10', '0.50', '1.00'];
 
@@ -95,6 +95,7 @@ function SheetBody({ symbol, side, onDone }: { symbol: SymbolInfo; side: Side; o
 
       <RejectAndSummary f={f} />
       <SubmitButton f={f} symbol={symbol} />
+      <NotTradableNote f={f} symbol={symbol} />
       <OrderConfirm f={f} symbol={symbol} />
     </div>
   );

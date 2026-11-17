@@ -34,6 +34,9 @@ import org.springframework.web.bind.annotation.RestController;
  *   <li><b>默认不展示真实报价源的价格</b>（内部文档 第 6 节：两家数据商的条款都禁止未授权的公开展示）：
  *       {@code FX_PUBLIC_QUOTES_SOURCE=simulated}（默认）时，交易报价来自真实源的品种改取模拟源的"示例行情"
  *       （{@link QuoteProcessor#latestSample}），{@code sample} 为 true；{@code live} 时才取交易报价。</li>
+ *   <li><b>第 3 批（TD-9 A、TY-4、AC-Q10）：生产不显示价格</b>：报价服务是 live 模式（生产）且没有明确打开 {@code FX_PUBLIC_QUOTES_SOURCE=live}
+ *       （要先另谈公开展示授权、Amos 同意）时，{@code pricesHidden} 为 true，每个品种只给代码、中英文名、状态，<b>不返回价格、涨跌幅、时间</b>；
+ *       官网每行显示"登录后查看实时行情"。三项授权（交易用途、登录后展示、转售）都不覆盖不登录的公开展示。</li>
  * </ul>
  * 选轮询不用 WebSocket 的理由见技术方案：结果本来就按秒缓存，轮询简单、无状态、经过 Nginx 和限流不用特殊处理，断网恢复后自然继续。
  */
@@ -53,8 +56,9 @@ class PublicQuoteController {
   /** 一个品种。价格、涨跌幅、时间只在 OPEN 时有值 */
   record Item(String symbol, String nameZh, String nameEn, String bid, String changePct, String time, String status) {}
 
-  /** 整份结果 */
-  record PublicQuotes(boolean sample, List<Item> items) {}
+  /** 整份结果；pricesHidden（第 3 批）：生产不显示价格，官网只列品种名和"登录后查看实时行情" */
+  record PublicQuotes(boolean sample, @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_DEFAULT) boolean pricesHidden,
+      List<Item> items) {}
 
   private record Cached(Instant at, PublicQuotes body) {}
 
@@ -96,8 +100,19 @@ class PublicQuoteController {
     cached = null;
   }
 
+  /** 生产（报价服务 live 模式）不显示价格，除非明确打开了 FX_PUBLIC_QUOTES_SOURCE=live（另谈公开展示授权、Amos 同意以后） */
+  boolean pricesHidden() {
+    return !props.live() && processor.quoteMode().map("live"::equals).orElse(false);
+  }
+
   private PublicQuotes build(Instant now) {
     List<Item> items = new ArrayList<>();
+    if (pricesHidden()) {
+      for (String code : props.symbols()) {
+        market.symbol(code).ifPresent(s -> items.add(empty(s, market.isTradingOpen(s.code(), now) ? OPEN : CLOSED)));
+      }
+      return new PublicQuotes(false, true, List.copyOf(items));
+    }
     boolean sample = false;
     for (String code : props.symbols()) {
       Optional<SymbolSpec> s = market.symbol(code);
@@ -107,7 +122,7 @@ class PublicQuoteController {
       sample |= fromSample || processor.quoteMode().map("simulated"::equals).orElse(false) && !processor.liveTrading(code);
       items.add(item(s.get(), now, fromSample));
     }
-    return new PublicQuotes(sample, List.copyOf(items));
+    return new PublicQuotes(sample, false, List.copyOf(items));
   }
 
   private Item item(SymbolSpec s, Instant now, boolean fromSample) {

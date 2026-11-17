@@ -34,7 +34,7 @@ class MarketController {
 
   @GetMapping("/api/market/symbols")
   List<SymbolView> symbols() {
-    return market.symbols().stream().map(s -> Views.symbol(s, Views.open(market, s.code()), market.quoteDeviationPaused(s.code()))).toList();
+    return market.symbols().stream().map(s -> Views.symbol(s, Views.open(market, s.code()), market.quoteDeviationPaused(s.code()), market.quoteTradingAllowed(s.code()))).toList();
   }
 
   @GetMapping("/api/market/quotes")
