@@ -24,6 +24,7 @@ class OpenSocket extends TextWebSocketHandler implements WebSocketConfigurer, Ha
 
   static final String PATH = "/v1/ws";
   private static final String KEY_ATTR = "openKeyId";
+  private static final String LEASE_ATTR = "openLease";
 
   private final OpenStream stream;
   private final Tickets tickets;
@@ -57,12 +58,17 @@ class OpenSocket extends TextWebSocketHandler implements WebSocketConfigurer, Ha
       res.setStatusCode(HttpStatus.FORBIDDEN);
       return false;
     }
-    if (!usage.wsOpen(key.get())) {
+    String lease = usage.wsOpen(key.get());
+    if (lease == null) {
       res.setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
       return false;
     }
     attrs.put(KEY_ATTR, key.get().keyId());
-    if (req instanceof org.springframework.http.server.ServletServerHttpRequest r) r.getServletRequest().setAttribute(KEY_ATTR, key.get().keyId());
+    attrs.put(LEASE_ATTR, lease);
+    if (req instanceof org.springframework.http.server.ServletServerHttpRequest r) {
+      r.getServletRequest().setAttribute(KEY_ATTR, key.get().keyId());
+      r.getServletRequest().setAttribute(LEASE_ATTR, lease);
+    }
     return true;
   }
 
@@ -70,14 +76,15 @@ class OpenSocket extends TextWebSocketHandler implements WebSocketConfigurer, Ha
   public void afterHandshake(ServerHttpRequest req, ServerHttpResponse res, WebSocketHandler h, Exception e) {
     // 握手失败时连接数要还回去：afterConnectionEstablished 没有执行，下面的 afterConnectionClosed 也不会执行
     if (e != null) {
-      Object k = req instanceof org.springframework.http.server.ServletServerHttpRequest r ? r.getServletRequest().getAttribute(KEY_ATTR) : null;
-      if (k instanceof String s) usage.wsClose(s);
+      if (req instanceof org.springframework.http.server.ServletServerHttpRequest r && r.getServletRequest().getAttribute(KEY_ATTR) instanceof String s) {
+        usage.wsClose(s, (String) r.getServletRequest().getAttribute(LEASE_ATTR));
+      }
     }
   }
 
   @Override
   public void afterConnectionEstablished(WebSocketSession s) {
-    stream.open(s, (String) s.getAttributes().get(KEY_ATTR));
+    stream.open(s, (String) s.getAttributes().get(KEY_ATTR), (String) s.getAttributes().get(LEASE_ATTR));
   }
 
   @Override

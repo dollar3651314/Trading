@@ -301,10 +301,40 @@ class OpenServiceTest {
     assertThat(c.call(k2.id(), k2.secret(), "GET", "/v1/symbols").status()).isEqualTo(429);
     // WebSocket 连接数也按所有实例合计
     ((MutableClock) clock).advance(Duration.ofSeconds(1));
-    redis.opsForValue().set("fxq:ws:" + k2.id(), "2");
+    // （第 3 批复审后连接数改成租约：有序集合，成员 = 租约号，分数 = 到期毫秒）
+    long until = clock.millis() + 60_000;
+    redis.opsForZSet().add("fxq:ws:" + k2.id(), "other-1", until);
+    redis.opsForZSet().add("fxq:ws:" + k2.id(), "other-2", until);
     assertThat(c.handshakeStatus(k2.id(), k2.secret())).as("别的实例已经占了 2 条").isEqualTo(429);
-    redis.opsForValue().set("fxq:ws:" + k2.id(), "1");
+    redis.opsForZSet().remove("fxq:ws:" + k2.id(), "other-2");
     assertThat(c.handshakeStatus(k2.id(), k2.secret())).isEqualTo(101);
+  }
+
+  // ---- 复审：WebSocket 连接名额按租约，崩溃没释放的最多占一个租约期（60 秒） ----
+
+  @Test
+  void 连接名额是租约_崩溃没释放的60秒后不算_连着的定时续租_断开立即释放() throws Exception {
+    K k = key("INTERNAL_TEST");
+    limits(k.id(), 100, 1000, 1, 50);
+    String zk = "fxq:ws:" + k.id();
+    // 模拟另一个实例连上后崩溃：留下一个租约，没人续
+    redis.opsForZSet().add(zk, "crashed", clock.millis() + 60_000);
+    assertThat(c.handshakeStatus(k.id(), k.secret())).isEqualTo(429);
+    ((MutableClock) clock).advance(Duration.ofSeconds(61));
+    assertThat(usage.connections(k.id())).as("租约过期就不算").isZero();
+    try (OpenClient.Ws ws = c.connect(k.id(), k.secret())) {
+      await("hello", () -> !ws.of("hello").isEmpty());
+      assertThat(usage.connections(k.id())).isEqualTo(1);
+      assertThat(redis.getExpire(zk)).as("整个键也有过期，不会永久留着").isBetween(1L, 120L);
+      // 连着的：过 50 秒续一次，再过 30 秒（离领租约 80 秒）还算
+      ((MutableClock) clock).advance(Duration.ofSeconds(50));
+      usage.renewLeases();
+      ((MutableClock) clock).advance(Duration.ofSeconds(30));
+      assertThat(usage.connections(k.id())).as("续过租约").isEqualTo(1);
+      assertThat(c.handshakeStatus(k.id(), k.secret())).as("名额还占着").isEqualTo(429);
+    }
+    await("断开立即释放", () -> usage.connections(k.id()) == 0);
+    assertThat(c.handshakeStatus(k.id(), k.secret())).isEqualTo(101);
   }
 
   // ---- AC-Q2 Key 管理 ----

@@ -21,11 +21,12 @@ class OpenDocsController {
 
   private final boolean enabled;
 
-  OpenDocsController(OpenProperties props, QuoteProperties quote) {
+  OpenDocsController(OpenProperties props, QuoteProperties quote, app.quote.feed.QuoteFeedsProperties feeds) {
+    // auto：在用真实报价数据（报价模式 live，或配了任何真实报价源）时不给看（第 3 批审查：不能只看报价模式）；对外开放后由运维明确设 true
     this.enabled = switch (props.docs()) {
       case "true" -> true;
       case "false" -> false;
-      default -> QuoteRouter.mode(quote.source()) != QuoteRouter.Mode.LIVE;
+      default -> !app.quote.license.LicenseRegistry.realData(quote, feeds);
     };
   }
 

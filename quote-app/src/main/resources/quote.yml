@@ -90,10 +90,13 @@ quote:
     sweep: 1s
     # 签名里的 nonce 记多久（防重放；要不短于时间戳允许的偏差 × 2）
     nonce-ttl: 600s
-    # 开发者文档：auto = 报价模式不是 live 时能看（对外开放前只在测试环境能看）
+    # WebSocket 连接名额的租约：连接期间每 ws-renew 续一次，断开立即释放；进程崩溃没释放的最多占这么久
+    ws-lease: 60s
+    ws-renew: 20s
+    # 开发者文档：auto = 只用模拟源时能看（报价模式 live 或配了任何真实报价源都不给看）
     docs: ${FX_QUOTE_OPEN_DOCS:auto}
   # 报价源授权登记（技术方案 08 页，TQ-11 A）：auto = 报价模式 live（生产）时只用"交易用途"已授权的源开仓、外部 Key 只拿转售已授权的品种；测试环境不受限制。
-  # 报价模式 live 时一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在非生产（测试、开发）有效
+  # 报价模式 live，或者配了任何真实报价源（在用真实数据）时一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在只用模拟源时有效
   license:
     enforce: ${FX_QUOTE_LICENSE_ENFORCE:auto}
     reload-interval: 60s
