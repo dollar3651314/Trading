@@ -190,6 +190,15 @@ class AdminSimStartPriceTest extends AdminTestSupport {
       assertThat(q.executable()).isTrue();
       JsonNode listed = body(call(get("/api/admin/symbols?keyword=" + code), m.cookie(), null)).get("items").get(0);
       assertThat(listed.get("lastQuoteAt").isNull()).as("后台不再显示暂无报价").isFalse();
+      // K 线也认得新品种（拆分前在 AdminV2Test 里测；K 线搬到报价服务后要跨进程）：报价服务按同步过来的品种聚合，交易这边转出来
+      await("K 线有了这一根", () -> {
+        try {
+          return body(call(get("/api/market/klines?symbol=" + code + "&tf=1m"), c.cookie(), null)).size() == 1;
+        } catch (Exception e) {
+          throw new IllegalStateException(e);
+        }
+      });
+      assertThat(body(call(get("/api/market/klines?symbol=" + code + "&tf=1m"), c.cookie(), null)).size()).isEqualTo(1);
 
       // 暂停开仓时不能下单；打开后能成交（按含加点的买价）
       String order = "{\"symbol\":\"" + code + "\",\"type\":\"market\",\"side\":\"buy\",\"lots\":\"0.10\",\"leverage\":10,\"clientOrderId\":\"%s\"}";
@@ -297,9 +306,15 @@ class AdminSimStartPriceTest extends AdminTestSupport {
     assertThat(router.liveTrading("EURUSD")).isFalse();
     MarketAdminApi.Symbol eur = marketAdmin.symbols().stream().filter(x -> x.spec().code().equals("EURUSD")).findFirst().orElseThrow();
     assertThat(eur.quoteSource()).isEqualTo(new MarketAdminApi.QuoteSource("simulated", null));
-    // 拆进程后多了一项 quote.stream（交易连不上报价服务）；报价源的告警项（quote.alltick、quote.failover 等）一个都没有
+    // 拆进程后多了一项 quote.stream（交易连不上报价服务），而且它是正常的（连着）；报价源的告警项（quote.alltick、quote.failover 等）一个都没有
     List<String> quoteItems = new java.util.ArrayList<>();
-    for (AlertCheck a : alerts) for (AlertCheck.Item i : a.evaluate()) if (i.name().startsWith("quote.")) quoteItems.add(i.name());
+    for (AlertCheck a : alerts) {
+      for (AlertCheck.Item i : a.evaluate()) {
+        if (!i.name().startsWith("quote.")) continue;
+        quoteItems.add(i.name());
+        assertThat(i.ok()).as(i.name() + " 状态正常：" + i.detail()).isTrue();
+      }
+    }
     assertThat(quoteItems).containsExactly("quote.stream");
     JsonNode pub = body(mvc.perform(get("/api/public/quotes")).andReturn().getResponse());
     assertThat(pub.get("sample").asBoolean()).as("官网仍标示例行情").isTrue();

@@ -1,5 +1,6 @@
-package app.trading.market.kline;
+package app.quote.kline;
 
+import app.quote.protocol.Timeframe;
 import java.math.BigDecimal;
 
 /** 一根 K 线。time 是起点（UTC 秒）；ticks 是这根 K 线收到的报价条数（不是成交量）。 */

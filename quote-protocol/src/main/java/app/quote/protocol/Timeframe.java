@@ -1,8 +1,8 @@
-package app.trading.market.kline;
+package app.quote.protocol;
 
 import java.util.Optional;
 
-/** K 线周期（沿用现有系统，功能地图 M-10）：桶的起点按 UTC 向下取整；4h 起点是 UTC 0/4/8/12/16/20 点，1d 是 UTC 0 点。 */
+/** K 线周期（沿用现有系统，功能地图 M-10；第 2 批第二步搬进报价协议，两个进程共用）：桶的起点按 UTC 向下取整；4h 起点是 UTC 0/4/8/12/16/20 点，1d 是 UTC 0 点。 */
 public enum Timeframe {
   M1("1m", 60),
   M5("5m", 300),

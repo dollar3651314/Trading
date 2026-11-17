@@ -32,7 +32,8 @@ class QuoteCodecTest {
   void 其他消息来回不变() {
     List<Message> all = List.of(new Message.Hello("e1", "simulated", 5L, List.of(new Message.Source("EURUSD", "alltick", "primary"), new Message.Source("AAPL", "simulated", null))), new Message.Sample("XAUUSD", new BigDecimal("4197.70"), new BigDecimal("4198.10"), 7L),
         new Message.Heartbeat(9L, List.of(new Message.Alert("quote.alltick", "报价源 alltick 异常", "Quote feed alltick problem", false, "没连上"))),
-        new Message.Error("BAD_MESSAGE", "格式不对"), new Message.Subscribe("e1", Map.of("EURUSD", 3L)), new Message.Resync(Map.of("EURUSD", -1L)));
+        new Message.Error("BAD_MESSAGE", "格式不对"), new Message.Bar("XAUUSD", "15m", 1760436000L, new BigDecimal("4126.55"), new BigDecimal("4127.00"), new BigDecimal("4126.10"), new BigDecimal("4126.90"), 3),
+        new Message.WatchBars(java.util.Set.of("XAUUSD|15m", "EURUSD|1m")), new Message.Subscribe("e1", Map.of("EURUSD", 3L)), new Message.Resync(Map.of("EURUSD", -1L)));
     for (Message m : all) assertThat(QuoteCodec.decode(QuoteCodec.encode(m))).isEqualTo(m);
     assertThat(QuoteCodec.decode("{\"op\":\"subscribe\"}")).isEqualTo(new Message.Subscribe(null, Map.of()));
   }

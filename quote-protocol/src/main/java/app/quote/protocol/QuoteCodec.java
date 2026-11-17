@@ -78,6 +78,22 @@ public final class QuoteCodec {
         ObjectNode since = n.putObject("since");
         if (s.since() != null) s.since().forEach(since::put);
       }
+      case Message.Bar b -> {
+        n.put("type", "bar");
+        n.put("symbol", b.symbol());
+        n.put("tf", b.tf());
+        n.put("time", b.time());
+        n.put("open", b.open().toPlainString());
+        n.put("high", b.high().toPlainString());
+        n.put("low", b.low().toPlainString());
+        n.put("close", b.close().toPlainString());
+        n.put("ticks", b.ticks());
+      }
+      case Message.WatchBars w -> {
+        n.put("op", "watchBars");
+        ArrayNode a = n.putArray("keys");
+        w.keys().stream().sorted().forEach(a::add);
+      }
       case Message.Resync r -> {
         n.put("op", "resync");
         ObjectNode syms = n.putObject("symbols");
@@ -101,6 +117,11 @@ public final class QuoteCodec {
       return switch (op) {
         case "subscribe" -> new Message.Subscribe(text(n, "epoch"), longs(n.path("since")));
         case "resync" -> new Message.Resync(longs(n.path("symbols")));
+        case "watchBars" -> {
+          java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+          for (JsonNode k : n.path("keys")) keys.add(k.asString());
+          yield new Message.WatchBars(keys);
+        }
         default -> throw new IllegalArgumentException("不认识的 op " + op);
       };
     }
@@ -122,6 +143,8 @@ public final class QuoteCodec {
         yield new Message.Heartbeat(n.path("serverTime").asLong(), List.copyOf(alerts));
       }
       case "error" -> new Message.Error(text(n, "code"), text(n, "message"));
+      case "bar" -> new Message.Bar(required(n, "symbol"), required(n, "tf"), n.path("time").asLong(), decimal(n, "open"), decimal(n, "high"), decimal(n, "low"),
+          decimal(n, "close"), n.path("ticks").asInt());
       default -> throw new IllegalArgumentException("不认识的 type " + type);
     };
   }

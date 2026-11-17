@@ -1,11 +1,11 @@
-package app.trading.market.kline;
+package app.quote.kline;
 
+import app.quote.protocol.Timeframe;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 /**
  * K 线保留条数（需求 v2 第 11.2 节，AC2-19；功能取舍对照表 M-11）：每个品种、每个周期只保留最近 N 根，超出的每天清理一次。
  * <ul>
- *   <li>条数在 application.yml 的 {@code trading.market.kline-retention.keep}（1m 10080 ≈ 7 天、5m 8640 ≈ 30 天、15m 8640 ≈ 90 天、
+ *   <li>条数在 quote.yml 的 {@code quote.market.kline-retention.keep}（1m 10080 ≈ 7 天、5m 8640 ≈ 30 天、15m 8640 ≈ 90 天、
  *       1h 8760 ≈ 1 年、4h 4380 ≈ 2 年、1d 3650 ≈ 10 年），可以随时改；没写的周期不清理。</li>
  *   <li>每天 UTC 20:10（北京时间 04:10，测试环境数据库备份之后）运行（{@code cron}）。</li>
  *   <li><b>分批删除</b>：每批最多 {@code batch-size}（默认 5000）行、每批一个短事务（不在外层事务里），按主键范围删，不长时间锁表，
@@ -22,7 +22,6 @@ import org.springframework.stereotype.Component;
  * </ul>
  */
 @Component
-@EnableConfigurationProperties(KlineRetention.Props.class)
 public class KlineRetention {
 
   private static final Logger log = LoggerFactory.getLogger(KlineRetention.class);
@@ -33,7 +32,7 @@ public class KlineRetention {
    * @param batchSize 每批最多删多少行
    * @param keep 周期（1m、5m、15m、1h、4h、1d）→ 保留条数
    */
-  @ConfigurationProperties("trading.market.kline-retention")
+  @ConfigurationProperties("quote.market.kline-retention")
   public record Props(@DefaultValue("true") boolean enabled, @DefaultValue("0 10 20 * * *") String cron, @DefaultValue("5000") int batchSize,
       Map<String, Integer> keep) {}
 
@@ -60,7 +59,7 @@ public class KlineRetention {
     return out;
   }
 
-  @Scheduled(cron = "${trading.market.kline-retention.cron:0 10 20 * * *}", zone = "UTC")
+  @Scheduled(cron = "${quote.market.kline-retention.cron:0 10 20 * * *}", zone = "UTC")
   void scheduled() {
     if (!props.enabled()) return;
     try {

@@ -14,6 +14,9 @@ quote:
   market:
     # 测试里不启动报价源，由测试直接喂报价；要报价源的测试自己改成 simulated
     source: none
+    # K 线不定时清理，测试里直接调用（KlineRetentionTest）
+    kline-retention:
+      enabled: false
   stream:
     # 测试用的假 Key，明显不是密钥
     internal-key: ci_only_fake_internal_key

@@ -75,18 +75,6 @@ trading:
     # 没有对应外汇品种的币种：港币按联系汇率（1 USD = 7.78 HKD）
     fixed-usd-rates:
       HKD: 0.12853470
-    # K 线保留条数（v2 第 11.2 节，market/kline/KlineRetention）：每个品种每个周期只保留最近 N 根，每天 UTC 20:10 分批清理一次
-    kline-retention:
-      enabled: true
-      cron: "0 10 20 * * *"
-      batch-size: 5000
-      keep:
-        1m: 10080
-        5m: 8640
-        15m: 8640
-        1h: 8760
-        4h: 4380
-        1d: 3650
     # 官网公开行情 GET /api/public/quotes（v2 需求 4.2，不需要登录）：只返回这些品种的卖价和当日涨跌幅，按这个顺序；
     # 整份结果缓存 cache-ttl，所有访客共用。改品种只改这里（需求要求 8–12 个）。
     # source：官网用哪种价格。simulated（默认）一律模拟价、显示"示例行情"；live 用交易报价（真实报价源的价格），

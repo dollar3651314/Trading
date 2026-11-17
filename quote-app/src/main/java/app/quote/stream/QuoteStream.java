@@ -44,7 +44,8 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
  *   <li>每个品种在内存里留最近 {@code replayBuffer} 条：客户端重连时带上 epoch 和每个品种最后的序号，缓存里还有就补齐，没有就发快照；</li>
  *   <li>{@code epoch} 是这次启动的随机编号，重启后变（序号重新从 1 开始，客户端据此丢掉旧序号）；</li>
  *   <li>每条报价带当前报价源和状态（{@link QuoteRouter#current}）、能不能用来开仓（"交易用途"授权，{@link TradingLicenses}）；</li>
- *   <li>每秒一条心跳，带本进程的告警项（报价源断线、切备源、偏差），trading-app 照样发告警邮件。</li>
+ *   <li>每秒一条心跳，带本进程的告警项（报价源断线、切备源、偏差），trading-app 照样发告警邮件；</li>
+ *   <li>K 线变化（{@code bar}）只发给用 {@code watchBars} 关注了那个"品种|周期"的连接（trading-app 按客户端图表订阅的来关注）。</li>
  * </ul>
  * 发送用 {@link ConcurrentWebSocketSessionDecorator}：一条连接发不出去（超时或积压太多）就断开它，客户端重连后补齐，不拖慢其他连接和报价处理线程。
  */
@@ -66,6 +67,8 @@ public class QuoteStream {
     /** 已经发过起点（补齐或快照）的品种；之后这些品种的实时报价才发给它 */
     final Set<String> live = ConcurrentHashMap.newKeySet();
     volatile boolean all;
+    /** 关注的 K 线（"品种|周期"） */
+    volatile Set<String> bars = Set.of();
 
     Conn(WebSocketSession ws) {
       this.ws = ws;
@@ -89,8 +92,9 @@ public class QuoteStream {
   private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "quote-stream-heartbeat"));
 
   QuoteStream(StreamProperties props, ObjectProvider<QuoteRouter> router, TradingLicenses licenses, ObjectProvider<List<AlertCheck>> alerts, QuoteProperties quote,
-      app.quote.catalog.SymbolCatalog catalog, Clock clock) {
+      app.quote.catalog.SymbolCatalog catalog, app.quote.kline.KlineService klines, Clock clock) {
     this.catalog = catalog;
+    klines.onUpdate(this::bar);
     this.props = props;
     this.router = router;
     this.licenses = licenses;
@@ -135,6 +139,23 @@ public class QuoteStream {
   public void sample(String symbol, BigDecimal bid, BigDecimal ask, Instant time) {
     String text = QuoteCodec.encode(new Message.Sample(symbol, bid, ask, time.toEpochMilli()));
     for (Conn c : conns.values()) if (c.all) send(c, text);
+  }
+
+  /** 一根 K 线有变化：发给关注了它的连接（不编号、不缓存，只用来显示）。由该品种的处理线程调用 */
+  void bar(app.quote.kline.Bar b) {
+    String key = b.symbol() + "|" + b.tf().code;
+    String text = null;
+    for (Conn c : conns.values()) {
+      if (!c.bars.contains(key)) continue;
+      if (text == null) text = QuoteCodec.encode(new Message.Bar(b.symbol(), b.tf().code, b.time(), b.open(), b.high(), b.low(), b.close(), b.ticks()));
+      send(c, text);
+    }
+  }
+
+  /** watchBars：整份替换这条连接关注的 K 线 */
+  void watchBars(String id, Message.WatchBars w) {
+    Conn c = conns.get(id);
+    if (c != null) c.bars = w.keys();
   }
 
   /** 这个品种最新的一条（测试和健康检查看）；没有为空 */

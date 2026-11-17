@@ -1,5 +1,6 @@
-package app.trading.market.kline;
+package app.quote.kline;
 
+import app.quote.protocol.Timeframe;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;

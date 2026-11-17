@@ -1,4 +1,4 @@
-package app.trading.market.kline;
+package app.quote.protocol;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

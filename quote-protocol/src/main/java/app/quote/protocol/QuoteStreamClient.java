@@ -44,6 +44,9 @@ public final class QuoteStreamClient implements AutoCloseable {
 
     default void onHeartbeat(Message.Heartbeat heartbeat) {}
 
+    /** 关注的 K 线有变化（{@link #watchBars}） */
+    default void onBar(Message.Bar bar) {}
+
     /** 连接状态变化 */
     default void onConnection(boolean connected) {}
   }
@@ -77,6 +80,8 @@ public final class QuoteStreamClient implements AutoCloseable {
   private volatile Instant lastMessageAt;
   private volatile long reconnects;
   private volatile String lastError;
+  /** 关注的 K 线（"品种|周期"），每次连上都重新告诉服务器 */
+  private volatile java.util.Set<String> watchedBars = java.util.Set.of();
   private Duration backoff;
   /** 连接代数：旧连接的回调晚到时不处理 */
   private volatile long generation;
@@ -121,6 +126,13 @@ public final class QuoteStreamClient implements AutoCloseable {
 
   public String epoch() {
     return tracker.epoch();
+  }
+
+  /** 要推哪些 K 线的实时变化（整份替换）；连着时立即告诉服务器，重连后自动再告诉一次 */
+  public void watchBars(java.util.Set<String> keys) {
+    watchedBars = java.util.Set.copyOf(keys);
+    WebSocket w = ws;
+    if (connected && w != null) send(w, new Message.WatchBars(watchedBars));
   }
 
   /** 测试用：从客户端这边断开当前连接（不发关闭帧），之后照常重连 */
@@ -184,8 +196,13 @@ public final class QuoteStreamClient implements AutoCloseable {
     }
   }
 
-  private void send(WebSocket w, Message m) {
-    w.sendText(QuoteCodec.encode(m), true);
+  /** JDK WebSocket 上一条没发完不能发下一条：加锁、等发完（消息都很小） */
+  private synchronized void send(WebSocket w, Message m) {
+    try {
+      w.sendText(QuoteCodec.encode(m), true).join();
+    } catch (RuntimeException e) {
+      log.debug("发给报价服务失败：{}", e.getClass().getSimpleName());
+    }
   }
 
   private void handle(WebSocket w, String text) {
@@ -203,6 +220,7 @@ public final class QuoteStreamClient implements AutoCloseable {
         backoff = options.reconnectInitial();
         connected = true;
         send(w, new Message.Subscribe(h.epoch(), changed ? Map.of() : tracker.since()));
+        if (!watchedBars.isEmpty()) send(w, new Message.WatchBars(watchedBars));
         listener.onConnection(true);
         listener.onHello(h, changed);
       }
@@ -219,6 +237,7 @@ public final class QuoteStreamClient implements AutoCloseable {
       }
       case Message.Sample s -> listener.onSample(s);
       case Message.Heartbeat h -> listener.onHeartbeat(h);
+      case Message.Bar b -> listener.onBar(b);
       case Message.Error e -> log.warn("报价服务返回错误 {}：{}", e.code(), e.message());
       default -> log.debug("忽略客户端方向的消息");
     }

@@ -3,6 +3,7 @@ package app.quote.pipeline;
 import app.quote.QuoteProperties;
 import app.quote.catalog.QuoteSymbol;
 import app.quote.catalog.SymbolCatalog;
+import app.quote.kline.KlineService;
 import app.quote.stream.QuoteStream;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -21,8 +22,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * 报价主链路（拆分前 trading-app 的 {@code market.quote.QuoteProcessor} 的前半段）：报价 → 交易时段 → 质量守卫 → 最新报价 → 内部 WebSocket。
- * <b>不加点</b>（TQ-3 B：加点、逐笔、K 线、撮合在 trading-app 收到以后做）。
+ * 报价主链路（拆分前 trading-app 的 {@code market.quote.QuoteProcessor} 的前半段）：报价 → 交易时段 → 质量守卫 → 最新报价 → K 线 → 内部 WebSocket。
+ * <b>不加点</b>（TQ-3 B：加点、逐笔、撮合在 trading-app 收到以后做）。K 线用干净的中间价（和拆分前一样不含加点），只在报价服务里算（技术方案 02 页第 2 节第 4 条）。
  * 按品种分到固定的处理线程（同一品种严格按顺序，序号也按这个顺序编），不同品种并行。
  * <ul>
  *   <li>正常报价每条都推；不正常（休市、异常、过期、长时间不变）只在状态变化时推一条（价格是上一条正常报价），不重复推；</li>
@@ -42,6 +43,7 @@ public class QuoteProcessor {
   private final QuoteProperties props;
   private final QualityGuard guard;
   private final QuoteStream stream;
+  private final KlineService klines;
   private final Map<String, CleanQuote> book = new ConcurrentHashMap<>();
   private final ExecutorService[] stripes = new ExecutorService[STRIPES];
   private final Clock clock;
@@ -50,7 +52,8 @@ public class QuoteProcessor {
   private final Counter received;
   private final Set<String> deviationPaused = ConcurrentHashMap.newKeySet();
 
-  QuoteProcessor(SymbolCatalog catalog, QuoteProperties props, Clock clock, MeterRegistry metrics, QuoteStream stream) {
+  QuoteProcessor(SymbolCatalog catalog, QuoteProperties props, Clock clock, MeterRegistry metrics, QuoteStream stream, KlineService klines) {
+    this.klines = klines;
     this.catalog = catalog;
     this.props = props;
     this.guard = new QualityGuard(props);
@@ -96,6 +99,7 @@ public class QuoteProcessor {
     }
     CleanQuote c = new CleanQuote(q.symbol(), q.bid(), q.ask(), q.time(), QuoteStatus.FRESH, true);
     book.put(q.symbol(), c);
+    klines.accept(q.symbol(), QualityGuard.mid(q.bid(), q.ask()), q.time());
     stream.publish(c);
     return st;
   }

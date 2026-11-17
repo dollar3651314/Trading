@@ -3,9 +3,8 @@ package app.trading.market.web;
 import app.trading.common.error.BizException;
 import app.trading.market.api.MarketApi;
 import app.trading.market.api.SymbolSpec;
-import app.trading.market.kline.Bar;
-import app.trading.market.kline.KlineService;
-import app.trading.market.kline.Timeframe;
+import app.quote.protocol.Timeframe;
+import app.trading.market.kline.Klines;
 import app.trading.market.quote.QuoteProcessor;
 import app.trading.market.quote.RecentTicks;
 import app.trading.market.web.Views.KlineView;
@@ -19,15 +18,15 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 行情接口（需要登录）。实时更新走 WebSocket /api/ws/market。 */
+/** 行情接口（需要登录）。实时更新走 WebSocket /api/ws/market。K 线由报价服务算（{@link Klines}），这里按品种小数位格式化后转给客户端。 */
 @RestController
 class MarketController {
 
   private final MarketApi market;
   private final QuoteProcessor processor;
-  private final KlineService klines;
+  private final Klines klines;
 
-  MarketController(MarketApi market, QuoteProcessor processor, KlineService klines) {
+  MarketController(MarketApi market, QuoteProcessor processor, Klines klines) {
     this.market = market;
     this.processor = processor;
     this.klines = klines;
@@ -67,9 +66,11 @@ class MarketController {
   /** 今日走势（电脑版行情表的迷你图）：每个品种最近 24 根 1 小时 K 线的收盘价 */
   @GetMapping("/api/market/sparklines")
   Map<String, List<String>> sparklines() {
+    List<SymbolSpec> all = market.symbols();
+    Map<String, List<java.math.BigDecimal>> closes = klines.closes(all.stream().map(SymbolSpec::code).toList(), Timeframe.H1, 24);
     Map<String, List<String>> out = new LinkedHashMap<>();
-    for (SymbolSpec s : market.symbols()) {
-      out.put(s.code(), klines.history(s.code(), Timeframe.H1, 24).stream().map(Bar::close).map(v -> Views.price(v, s.digits())).toList());
+    for (SymbolSpec s : all) {
+      out.put(s.code(), closes.getOrDefault(s.code(), List.of()).stream().map(v -> Views.price(v, s.digits())).toList());
     }
     return out;
   }
