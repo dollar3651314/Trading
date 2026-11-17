@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * <ol>
  *   <li>对外开放总开关（{@link OpenSettings#gateOpen}，默认关）：关的时候外部 Key 一律 403、WebSocket 握手被拒；内部测试 Key 不受限制；</li>
  *   <li>转售授权：外部 Key 只能拿到"现在在用的报价源已登记转售授权"的品种（列表、报价、订阅、K 线都一样）；切到没授权的备源时这个品种对外
- *       "暂无报价"，不输出未授权的价格。和交易用途一样，授权检查在测试环境（报价模式不是 live，且没强制打开）不生效，页面照旧标"示例行情"。</li>
+ *       "暂无报价"，不输出未授权的价格。和交易用途是同一个授权检查开关：所有环境默认关（Amos 2026-11-17），只有 FX_QUOTE_LICENSE_ENFORCE=true 才生效；关的时候外部 Key 拿全部品种（仍受 Key 自己的品种限制）。</li>
  * </ol>
  * 每个 Key 还可以限定可用品种（空 = 全部）。
  */

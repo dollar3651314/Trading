@@ -44,7 +44,7 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * 报价对外（第 3 批，验收标准 AC-Q1～Q5、Q8、Q11）：真实的报价服务（随机端口、真实 MySQL）+ 按开发者文档签名的客户端。
- * 授权检查强制打开（quote.license.enforce=true，等同生产）；报价源用 mock 的路由给出（默认都在用 alltick 主源）；时钟固定在 2026-10-14（周三）10:00 UTC。
+ * 授权检查明确打开（quote.license.enforce=true；所有环境默认关，Amos 2026-11-17）；报价源用 mock 的路由给出（默认都在用 alltick 主源）；时钟固定在 2026-10-14（周三）10:00 UTC。
  * 每个测试自己建客户和 Key，测完清掉 Key、客户、设置、用量、授权。
  */
 @QuoteAppTest
