@@ -12,7 +12,7 @@ fail=0
 check() { local d=$1; shift; if "$@"; then echo "  ✓ $d"; else echo "  ✗ $d"; fail=1; fi; }
 
 echo "== shellcheck"
-check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/mysql-init/*.sh deploy/check.sh e2e/staging-smoke.sh
+check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/backup.sh deploy/kit/mysql-init/*.sh deploy/check.sh e2e/staging-smoke.sh
 
 echo "== docker compose config"
 sed -E 's/^([A-Z0-9_]+)=$/\1=check-only-not-a-secret/' deploy/kit/.env.example > "$tmp/.env"
@@ -22,22 +22,16 @@ check "compose 能解析" cfg -q
 cfg --format json > "$tmp/compose.json"
 jqc() { jq -e "$1" "$tmp/compose.json" > /dev/null; }
 check "每个容器 mem_limit = memswap_limit" jqc '[.services[] | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
-echo "  · 默认内存上限合计 $(jq "[.services[].mem_limit | tonumber] | add / 1048576" "$tmp/compose.json") MB（不含 Redis；可在 .env 用 TR_MEM_* 调）"
+check "默认内存上限合计 960 MB（实测后的默认值；+ Docker 约 100 = 1,060，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (960 * 1024 * 1024)'
+check "JVM 堆 + 元空间 + 代码缓存 + 直接内存 < 容器上限（trading-app 312 < 416、quote-app 192 < 256）" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=\${TR_META_APP:-128m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-24m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-16m}" deploy/kit/docker-compose.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-16m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-16m}" deploy/kit/docker-compose.yml'
 check "只有 trading-web 映射公网端口（80、443）" jqc '[.services | to_entries[] | select(.value.ports != null) | .value.ports[] | select((.host_ip // "") != "127.0.0.1") | .published] | sort == ["443","80"]'
 check "trading-app 只绑 127.0.0.1:8080" jqc '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"8080","protocol":"tcp"}]'
-check "quote-app、mysql 不映射端口" jqc '[.services["quote-app","mysql"].ports] | all(. == null)'
+check "quote-app、mysql、redis 不映射端口" jqc '[.services["quote-app","mysql","redis"].ports] | all(. == null)'
 check "quote-app 只在 quote 网络的别名上监听" jqc '.services["quote-app"].environment.FX_QUOTE_BIND_ADDRESS == "quote-internal" and (.services["quote-app"].networks.quote.aliases | index("quote-internal"))'
-check "mysql 只在不能出公网的 internal 网络" jqc '(.services.mysql.networks | keys) == ["internal"] and .networks.internal.internal == true and .networks.quote.internal == true'
+check "mysql、redis 只在不能出公网的 internal 网络" jqc '(.services.mysql.networks | keys) == ["internal"] and (.services.redis.networks | keys) == ["internal"] and .networks.internal.internal == true and .networks.quote.internal == true'
 check "测试环境标识和报价模式写死（不是 live）" jqc '.services["trading-app"].environment.FX_ENV_LABEL == "test" and .services["quote-app"].environment.FX_QUOTE_MARKET_SOURCE == "simulated" and .services["trading-app"].environment.FX_QUOTE_MARKET_SOURCE == "simulated"'
-# 单独模式（打开自己的 Redis）
-jqf() { jq -e "$1" "$2" > /dev/null; }
-docker compose --profile own-redis --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml --env-file "$tmp/.env" --env-file "$tmp/image.env" config --format json > "$tmp/own.json"
-check "单独模式：自己的 Redis 只在 internal 网络、不映射端口" jqf '(.services.redis.networks | keys) == ["internal"] and .services.redis.ports == null and .services.redis.mem_limit == .services.redis.memswap_limit' "$tmp/own.json"
-# 共机模式（叠加 docker-compose.shared.yml）
-docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml -f deploy/kit/docker-compose.shared.yml --env-file "$tmp/.env" --env-file "$tmp/image.env" config --format json > "$tmp/shared.json"
-check "共机模式：不起自己的 Redis、不占 80/443（只剩 trading-app 的 127.0.0.1:8080）" jqf '(.services.redis == null) and ([.services[] | select(.ports != null) | .ports[] | .host_ip] == ["127.0.0.1"])' "$tmp/shared.json"
-check "共机模式：只有 trading-web、trading-app、quote-app 接到 TopUP 网络，mysql 不接" jqf '[.services | to_entries[] | select(.value.networks.shared != null) | .key] | sort == ["quote-app","trading-app","trading-web"]' "$tmp/shared.json"
-check "共机模式：TopUP 网络是外部网络（不由 Trading 建、删）" jqf '.networks.shared.external == true' "$tmp/shared.json"
+check "Redis 只在 internal 网络、不映射端口" jqc '(.services.redis.networks | keys) == ["internal"] and .services.redis.ports == null'
+check "给 TopUP 的约定：trading-deploy 定时器的服务指向 /opt/trading/、有 backup.sh" bash -c 'grep -q "^ExecStart=/opt/trading/" deploy/kit/systemd/trading-deploy.service && test -x deploy/kit/backup.sh'
 check "compose 里没有 FX_E2E_ENABLED、e2e profile" bash -c '! grep -Eq "FX_E2E_ENABLED|SPRING_PROFILES_ACTIVE" deploy/kit/docker-compose.yml'
 
 echo "== nginx -t（$NGINX_IMAGE）"

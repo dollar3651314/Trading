@@ -9,7 +9,7 @@
 #   main-ancestor：staging 上"main 是不是祖先"
 # 没搬的：合约和本地链归集（自带钱包不要了）；部署形态端到端（Playwright 经过镜像和 Nginx 跑主流程，以后再加）。
 # 第 4 批前置（部署方案 v1）：
-#   deploy-check：部署工具包的静态检查（shellcheck、compose 两种模式、同版本 nginx -t、验收用例的写法），改 deploy/、e2e/staging-e2e/ 时跑
+#   deploy-check：部署工具包的静态检查（shellcheck、compose 约束、同版本 nginx -t、验收用例的写法），改 deploy/、e2e/staging-e2e/ 时跑
 #   image：合并到 staging 且 ci-ok 通过后，构建 trading-app、trading-quote、trading-web 三个镜像，扫一遍不带密钥（gitleaks），
 #          推到 GitHub 镜像仓库（标签 = 完整提交号，再移动 staging 标签）；测试服务器每分钟自己来拉（deploy/kit/trading update），GitHub 不登录服务器
 #   staging-smoke：等测试服务器换成这个提交后跑冒烟检查（e2e/staging-smoke.sh）；地址在仓库密钥 STAGING_URL，没配就跳过
@@ -313,7 +313,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
         with:
           persist-credentials: false
-      - name: shellcheck、docker compose config（单独 / 共机两种模式）、nginx -t
+      - name: shellcheck、docker compose config 约束、nginx -t
         run: bash deploy/check.sh
       - name: 测试环境验收用例的写法（语法；不用会把接口返回打进公开日志的断言和 console.log）
         run: |

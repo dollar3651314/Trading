@@ -223,8 +223,6 @@ spring:
       host: ${FX_REDIS_HOST:localhost}
       port: ${FX_REDIS_PORT:6379}
       password: ${FX_REDIS_PASSWORD:}
-      # db 编号（第 4 批）：测试环境和 TopUP 共用一台 Redis 时用单独的编号，键也都有自己的前缀
-      database: ${FX_REDIS_DATABASE:0}
       # Redis 只用于限次计数（登录失败、发验证码、通用限流）和健康检查；卡住时 2 秒就放弃，不让请求一直等（默认 60 秒）
       timeout: 2s
       connect-timeout: 2s

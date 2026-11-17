@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 第一次部署的入口（第 4 批）：在一台全新的 Ubuntu 24.04 上装 Docker、从公开镜像 trading-web:staging 取出工具包放到 /opt/trading，
-# 再运行 trading setup（参数原样传过去）。主会话给 Amos 的那一条命令就是它（固定到某个提交号，不跟着分支变）：
+# 再运行 trading install（参数原样传过去）。主会话给 Amos 的那一条命令就是它（固定到某个提交号，不跟着分支变）：
 #   curl -fsSL https://raw.githubusercontent.com/dollar3651314/Trading/<提交号>/deploy/kit/bootstrap.sh | sudo bash -s -- <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 地址]
 # 可以重复运行。不改系统防火墙（防火墙在轻量服务器控制台设，免得把人锁在外面）；不需要也不保存任何登录凭据（镜像公开）。
 set -euo pipefail
@@ -25,4 +25,4 @@ rm -rf "$tmp"
 chmod 755 /opt/trading/trading /opt/trading/mysql-init/*.sh
 ln -sf /opt/trading/trading /usr/local/bin/trading
 echo "  ✓ 工具包版本 $(cat /opt/trading/VERSION)"
-exec /opt/trading/trading setup "$@"
+exec /opt/trading/trading install "$@"

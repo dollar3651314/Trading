@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Trading 测试环境的服务器命令（第 4 批，部署方案 v1 03 页第 6 节）。装在 /opt/trading/trading，链接成 /usr/local/bin/trading，用 root 运行：
-#   sudo trading setup [--shared] <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]
-#                              第一次部署（可重复运行）：装软件、生成内部密码和 Key、申请证书、启动、打开定时器、打印摘要。
-#                              --shared = 和 TopUP 共机（不占 80、443，不起自己的 Redis，不动 TopUP 的容器、配置和数据；见 docker-compose.shared.yml）
+#   sudo trading install <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]
+#                              一次性安装（bootstrap.sh 调用，可重复运行，不问问题、不涉及密钥）：停 TopUP → 装软件、生成内部密码和 Key、申请证书、启动、打开定时器、打印摘要
+#   sudo trading setup         中文向导（隐藏输入，要终端）：① 邮件（同机有 TopUP 就沿用它的 MAIL_FROM、MAIL_TO，问是否沿用它的 Resend Key；只读不改）并发测试邮件 ② 后台第一个超管的初始密码 ③ 验收令牌（测试管理员）
+#                              ④ TopUP Key / Secret（可跳过，联调时填）⑤ 备份 + 恢复演练；最后打印摘要
+#   sudo trading on / off      和 TopUP 轮流用这台 2 核 2G（部署方案 07 页，TD4-20 = B）：
+#                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,060 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
+#                              off = 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 调 TopUP 自己的 topup start
 #   sudo trading keys [topup|mail]   中文向导：逐项问、Key / Secret / 邮件密码隐藏输入，写进 .env 后自动生效（要在"远程连接"的终端里运行）
 #   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
 #   sudo trading set-key <变量名>    隐藏输入改一个密钥（只认清单里的名字，要终端）
@@ -13,12 +17,12 @@
 #   sudo trading backup [名字]       加密备份（两个库、Redis、证件照片、.env），本机留 7 天
 #   sudo trading restore-drill       恢复演练：解密最新备份到临时目录 → 导入不联网的临时 MySQL → 核对表和行数 → 删临时文件
 #   sudo trading test-mail           给告警邮箱发一封测试邮件
-#   sudo trading watch               每 5 分钟的检查，状态变化时发邮件（定时器运行）
+#   sudo trading watch               每 5 分钟的检查，状态变化时发邮件（定时器运行；trading-deploy 定时器停着时不检查）
+# 给 TopUP 用的约定（TopUP topup.sh 的 stop_other）：装在 /opt/trading/，更新定时器叫 trading-deploy.timer，/opt/trading/backup.sh before-topup 能备份
 #   sudo trading gen-test-admin      生成测试管理员令牌（只在终端显示一次，.env 只存 SHA-256；再运行一次就换新令牌）
 #   sudo trading test-admin-off      关掉测试管理员（删哈希，旧令牌立刻作废）
-#   sudo trading admin-password      显示一次第一个超管的初始密码，然后从 .env 删掉（要终端）
 # 规矩（底线 1）：任何密钥、密码、Token 都不打印到屏幕（只有上面写明"显示一次"的两个，而且只在终端里）、不写日志、不放命令行参数。
-# 阿里云"云助手 → 执行命令"没有终端：要输入或显示密钥的命令（keys、set-key、gen-test-admin、admin-password）在那里会拒绝，改用"远程连接"。
+# 阿里云"云助手 → 执行命令"没有终端：要输入或显示密钥的命令（setup、keys、set-key、gen-test-admin）在那里会拒绝，改用"远程连接"。
 set -euo pipefail
 umask 077
 
@@ -28,7 +32,12 @@ IMAGES=(trading-app trading-quote trading-web)
 ENVF="$TR_DIR/.env"
 STATE="$TR_DIR/state"
 LOGF="$TR_DIR/logs/trading.log"
-TOPUP_DIR=${TR_TOPUP_DIR:-/opt/topup}
+# 启动前要求的可用内存：容器上限合计 960 + Docker 约 100（部署方案按 816 估的是 916，实测后改，见 docker-compose.yml 开头）
+MIN_MEM_MB=${TR_MIN_MEM_MB:-1060}
+TOPUP_BIN=${TR_TOPUP_BIN:-/usr/local/bin/topup}
+# 同机 TopUP 的应用配置（邮件设置从这里读，只读不改；Amos 11/17「邮箱用和TopUP一样的」）
+TOPUP_ENVF=${TR_TOPUP_ENV:-/opt/topup/.env}
+TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer)
 
 # ---------- 公共 ----------
 say() { printf '%s\n' "$*"; }
@@ -52,14 +61,14 @@ envdel() { local tmp; tmp=$(mktemp "$TR_DIR/.envnew-XXXXXX"); awk -F= -v k="$1" 
 set_if_empty() { if [ -z "$(envget "$1")" ]; then envset "$1" "$2"; ok "$1：已生成"; else ok "$1：已有，不改"; fi; }
 rand_hex() { openssl rand -hex "$1" | tr -d '\n'; }
 
-# 模式：shared（和 TopUP 共机）叠加 docker-compose.shared.yml；standalone 打开自己的 Redis
-mode() { local m; m=$(envget TR_MODE); echo "${m:-standalone}"; }
 compose() {
-  local extra=()
-  if [ "$(mode)" = shared ]; then extra=(-f "$TR_DIR/docker-compose.shared.yml"); else extra=(--profile own-redis); fi
-  docker compose --project-name trading --project-directory "$TR_DIR" -f "$TR_DIR/docker-compose.yml" "${extra[@]}" \
+  docker compose --project-name trading --project-directory "$TR_DIR" -f "$TR_DIR/docker-compose.yml" \
     --env-file "$ENVF" --env-file "$STATE/image.env" "$@"
 }
+# 开发机演练（TR_OFFLINE_TEST）没有 systemd
+sysctl_() { [ -n "${TR_OFFLINE_TEST:-}" ] && return 0; systemctl "$@"; }
+topup_running() { [ -n "$(docker ps -q --filter label=com.docker.compose.project=topup 2>/dev/null || true)" ]; }
+port_busy() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q . ; }
 current_tag() { sed -n 's/^IMAGE_TAG=//p' "$STATE/image.env" 2>/dev/null || true; }
 revision() { docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$1" 2>/dev/null || true; }
 pull() { [ -n "${TR_OFFLINE_TEST:-}" ] && return 0; docker pull -q "$1" > /dev/null; }
@@ -86,7 +95,6 @@ wait_healthy() {
 }
 
 switch_to() {
-  mkdir -p "$STATE/nginx"
   printf 'IMAGE_TAG=%s\n' "$1" > "$STATE/image.env.new" && mv "$STATE/image.env.new" "$STATE/image.env"
   guard_env
   compose up -d --remove-orphans
@@ -192,34 +200,22 @@ read_secret() {
 }
 
 # ---------- 命令 ----------
-cmd_setup() {
+cmd_install() {
   need_root
-  local shared=""
-  if [ "${1:-}" = --shared ]; then shared=1; shift; fi
-  [ $# -ge 5 ] || die "用法：sudo trading setup [--shared] <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]"
+  [ $# -ge 5 ] || die "用法：sudo trading install <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]（填密钥用 sudo trading setup）"
   local app=$1 admin=$2 www=$3 quote=$4 email=$5 topup=${6:-} d
   for d in "$app" "$admin" "$www" "$quote"; do [[ "$d" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "域名格式不对：$d"; done
   [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || die "邮箱格式不对"
   [ -z "$topup" ] || [[ "$topup" =~ ^https://[a-z0-9.-]+$ ]] || die "TopUP 地址要是 https://域名（不带路径）"
   mkdir -p "$TR_DIR/logs"
+  # 中途失败时提醒：TopUP 已被停下，要先恢复它就运行 trading off
+  trap '[ $? -eq 0 ] || say "（安装没做完。如果 TopUP 停着、要先恢复它，运行 sudo trading off；改好后再运行同一条安装命令）"' EXIT
   say "== Trading 测试环境第一次部署（可以重复运行；每步 ✓ / ✗，最后打印摘要，不显示任何密钥）"
 
-  say "== 1/9 检查系统和内存"
+  say "== 1/9 停 TopUP、检查系统和内存（这台 2 核 2G 和 TopUP 轮流用）"
   . /etc/os-release
   [ "${VERSION_ID:-}" = 24.04 ] && ok "Ubuntu 24.04" || bad "本脚本按 Ubuntu 24.04 写，这台是 ${PRETTY_NAME:-未知}（继续，出错截图）"
-  local avail min
-  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
-  # 门槛可在 .env 改（TR_MIN_MEM_MB）；默认：共机 1000 MB、单独 1600 MB。容器上限是"最多用到"，实际占用见 trading status
-  min=$(envget TR_MIN_MEM_MB); min=${min:-$([ -n "$shared" ] && echo 1000 || echo 1600)}
-  if [ -z "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] && [ "$avail" -lt "$min" ]; then
-    die "可用内存 ${avail} MB，少于 ${min} MB（差 $((min - avail)) MB），不启动。先和主会话确认内存方案"
-  fi
-  ok "可用内存 ${avail} MB（门槛 ${min} MB）"
-  if [ -n "$shared" ]; then
-    docker network inspect "${TR_SHARED_NETWORK:-topup_default}" > /dev/null 2>&1 || die "共机模式：找不到 TopUP 的 Docker 网络 ${TR_SHARED_NETWORK:-topup_default}（TopUP 没在这台机器上跑？）"
-    [ -f "$TOPUP_DIR/deploy.env" ] || die "共机模式：找不到 $TOPUP_DIR/deploy.env（要从这里读 TopUP Redis 的密码，只读不改）"
-    ok "共机模式：TopUP 网络和配置都在（只读，不改）"
-  fi
+  stop_topup_and_check_mem || exit 1
 
   say "== 2/9 安装 Docker、certbot、age（备份加密）、jq；Docker 日志按大小轮转；系统自动安全更新"
   export DEBIAN_FRONTEND=noninteractive
@@ -228,8 +224,8 @@ cmd_setup() {
     apt-get install -y -q docker.io docker-compose-v2 certbot age jq curl unattended-upgrades > /dev/null
   fi
   mkdir -p /etc/docker
-  # 共机时不碰 Docker 的全局设置、不重启 Docker（会连带重启 TopUP 的容器）
-  if [ -z "$shared" ] && [ ! -f /etc/docker/daemon.json ]; then
+  # 已有 daemon.json（TopUP 装过）就不动它、不重启 Docker
+  if [ ! -f /etc/docker/daemon.json ]; then
     printf '{ "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "3" } }\n' > /etc/docker/daemon.json
     systemctl restart docker
   fi
@@ -237,9 +233,9 @@ cmd_setup() {
   ok "$(docker --version)"; ok "$(docker compose version)"; ok "$(certbot --version 2>&1)"; ok "age $(age --version)"
 
   say "== 3/9 目录和 .env（只有 root 能读）"
-  mkdir -p "$TR_DIR"/{data/mysql,data/redis,data/storage,backup,state/nginx,logs} /var/www/certbot
+  mkdir -p "$TR_DIR"/{data/mysql,data/redis,data/storage,backup,state,logs} /var/www/certbot
   chown -R 10001 "$TR_DIR/data/storage"
-  chmod 700 "$TR_DIR/backup" "$TR_DIR/state"; chmod 755 "$TR_DIR/state/nginx"
+  chmod 700 "$TR_DIR/backup" "$TR_DIR/state"
   [ -f "$ENVF" ] || cp "$TR_DIR/.env.example" "$ENVF"
   chmod 600 "$ENVF"
   guard_env
@@ -251,37 +247,15 @@ cmd_setup() {
   [ -n "$(envget FX_ALERT_EMAILS)" ] || envset FX_ALERT_EMAILS "$email"
   [ -n "$(envget FX_RISK_ALERT_EMAILS)" ] || envset FX_RISK_ALERT_EMAILS "$email"
   [ -z "$topup" ] || envset FX_TOPUP_BASE_URL "$topup"
-  if [ -n "$shared" ]; then envset TR_MODE shared; [ -n "$(envget TR_REDIS_DB)" ] || envset TR_REDIS_DB 2; else envset TR_MODE standalone; fi
-  ok "模式 $(mode)；客户端 $app、后台 $admin、官网 $www、报价 $quote"
+  ok "客户端 $app、后台 $admin、官网 $www、报价 $quote"
 
   say "== 5/9 生成内部密码和 Key（写进 .env，不显示）"
   set_if_empty MYSQL_ROOT_PASSWORD "$(rand_hex 24)"
   set_if_empty FX_DB_PASSWORD "$(rand_hex 24)"
   set_if_empty FX_QUOTE_DB_PASSWORD "$(rand_hex 24)"
-  if [ -n "$shared" ]; then
-    # 共机：用 TopUP 的 Redis，密码从 TopUP 的 deploy.env 读（只读不改，不显示）
-    local rp
-    rp=$(awk -F= '$1=="REDIS_PASSWORD"{sub(/^[^=]*=/,""); v=$0} END{printf "%s", v}' "$TOPUP_DIR/deploy.env")
-    [ -n "$rp" ] || die "共机模式：$TOPUP_DIR/deploy.env 里没有 REDIS_PASSWORD"
-    envset FX_REDIS_PASSWORD "$rp"; unset rp
-    ok "FX_REDIS_PASSWORD：用 TopUP 的 Redis（db $(envget TR_REDIS_DB)）"
-    # 真实 IP：只信任从 TopUP 网络（它的 Nginx）来的 X-Real-IP
-    local subnet
-    subnet=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "${TR_SHARED_NETWORK:-topup_default}" | awk '{print $1}')
-    [ -n "$subnet" ] || die "读不到 TopUP 网络的网段"
-    printf '# trading setup 生成：只信任 TopUP 网络（%s）来的 X-Real-IP\nset_real_ip_from %s;\nreal_ip_header X-Real-IP;\n' "$subnet" "$subnet" > "$STATE/nginx/realip.conf"
-    chmod 644 "$STATE/nginx/realip.conf"
-  else
-    set_if_empty FX_REDIS_PASSWORD "$(rand_hex 24)"
-    rm -f "$STATE/nginx/realip.conf"
-  fi
+  set_if_empty FX_REDIS_PASSWORD "$(rand_hex 24)"
   set_if_empty FX_QUOTE_INTERNAL_KEY "$(rand_hex 32)"
   set_if_empty FX_QUOTE_KEY_ENC_KEY "$(rand_hex 32)"
-  if [ ! -f "$STATE/admin-created" ]; then
-    set_if_empty FX_ADMIN_INIT_USERNAME admin
-    # 后台密码规则：至少 10 位、有字母和数字
-    set_if_empty FX_ADMIN_INIT_PASSWORD "Tr$(rand_hex 10)A9"
-  fi
   if [ -z "$(envget FX_PUSH_VAPID_PRIVATE_KEY)" ]; then
     local key pub priv
     key=$(mktemp)
@@ -305,14 +279,8 @@ cmd_setup() {
   age-keygen -y "$STATE/backup.key" > "$STATE/backup.pub"
 
   say "== 6/9 HTTPS 证书（Let's Encrypt，一张证书四个子域名）"
-  if [ ! -f /etc/letsencrypt/live/trading/fullchain.pem ] && [ -n "$shared" ]; then
-    # 共机：80 端口是 TopUP 的 Nginx，它把 /.well-known/acme-challenge/ 交给 /var/www/certbot（任何域名都给），用 webroot 方式
-    if certbot certonly --webroot -w /var/www/certbot -n --agree-tos -m "$email" --cert-name trading -d "$app" -d "$admin" -d "$www" -d "$quote" > /dev/null 2>&1; then
-      ok "证书已申请（webroot，经 TopUP 的 80 端口验证）"
-    else
-      die "证书申请失败：检查四条 DNS 是不是都指向这台服务器、Cloudflare 是\"仅 DNS\"。日志：/var/log/letsencrypt/letsencrypt.log"
-    fi
-  elif [ ! -f /etc/letsencrypt/live/trading/fullchain.pem ]; then
+  if [ ! -f /etc/letsencrypt/live/trading/fullchain.pem ]; then
+    # 第一次：TopUP 已停、80 空着，用 certbot 自己的临时服务验证；之后改成 webroot（/var/www/certbot），哪边的 Nginx 在跑就由哪边应答（07 页第 5 节）
     compose stop trading-web > /dev/null 2>&1 || true
     if certbot certonly --standalone -n --agree-tos -m "$email" --cert-name trading -d "$app" -d "$admin" -d "$www" -d "$quote" > /dev/null 2>&1; then
       ok "证书已申请"
@@ -328,44 +296,118 @@ cmd_setup() {
     die "拉不到镜像 $REG/trading-app:staging：GitHub 上三个包（trading-app、trading-quote、trading-web）要先设为 Public（操作步骤第 6 步），或者 CI 还没推出第一个镜像"
   fi
   TR_FIRST=1 cmd_update || die "启动失败，看 $LOGF；改好后再运行同一条命令"
-  if [ ! -f "$STATE/admin-created" ] && compose logs --no-color trading-app 2>/dev/null | grep -q '已建第一个超级管理员'; then touch "$STATE/admin-created"; fi
 
   say "== 8/9 证书改为经 Nginx 自动续期（续完自动重新加载 Nginx）；打开定时器"
-  certbot reconfigure -n --cert-name trading --webroot -w /var/www/certbot --deploy-hook "docker exec trading-trading-web-1 nginx -s reload" > /dev/null 2>&1 \
+  certbot reconfigure -n --cert-name trading --webroot -w /var/www/certbot --deploy-hook "docker exec trading-trading-web-1 nginx -s reload || true" > /dev/null 2>&1 \
     && ok "证书自动续期" || bad "证书续期设置失败（不影响现在使用，截图给主会话）"
   install_units
-  systemctl enable --now trading-update.timer trading-backup.timer trading-watch.timer > /dev/null 2>&1 && ok "定时器：每分钟更新、每天北京时间 03:30 备份、每 5 分钟检查"
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器：每分钟更新（trading-deploy）、每天北京时间 03:30 备份、每 5 分钟检查"
   [ -n "$(ls -A "$TR_DIR/backup" 2>/dev/null)" ] || { cmd_backup first > /dev/null && ok "第一份备份"; }
 
   say "== 9/9 摘要（没有任何密钥）"
   cmd_status
-  if [ -n "$shared" ]; then
-    say "共机模式还差一步（不在本命令里做，因为要改 TopUP 的配置）：TopUP 的 Nginx 要加 $TR_DIR/shared/topup-nginx-trading.conf.example 那一段，"
-    say "Trading 的四个子域名才能从外面访问。由 TopUP 那边评审后加；没加之前只能在本机用 sudo trading status 看。"
-  fi
-  if [ -n "$(envget FX_ADMIN_INIT_PASSWORD)" ]; then
-    if [ -t 1 ]; then cmd_admin_password; else say "后台初始密码没在这里显示（这里没有终端，输出会被保存）：在\"远程连接\"里运行 sudo trading admin-password 看一次"; fi
+  say "现在 Trading 在跑、TopUP 停着。下一步：sudo trading setup（中文向导，填邮件、后台初始密码、验收令牌）；验收完运行 sudo trading off 切回 TopUP。"
+}
+
+# 读同机 TopUP 配置里的一个值（只读；没有这个文件或这一项时为空）
+topup_val() { [ -r "$TOPUP_ENVF" ] && awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); v=$0} END{printf "%s", v}' "$TOPUP_ENVF" || true; }
+
+# 邮件：同机有 TopUP 时沿用它的发件地址、收件人（MAIL_FROM、MAIL_TO），问要不要沿用它的 Resend Key（本地复制，不显示）；
+# 读不到（临时第二台）时逐项问。告警收件人 = MAIL_TO，FX_PUSH_VAPID_SUBJECT = mailto:MAIL_TO 的第一个
+setup_mail() {
+  local from to yn key shost
+  from=$(topup_val MAIL_FROM); to=$(topup_val MAIL_TO)
+  if [ -n "$from" ] && [ -n "$to" ]; then
+    envset FX_MAIL_FROM "$from"; envset FX_ALERT_EMAILS "$to"; envset FX_RISK_ALERT_EMAILS "$to"
+    ok "发件地址、收件人：沿用 TopUP 的（$from → $to）"
+    key=$(topup_val RESEND_API_KEY); shost=$(topup_val SMTP_HOST)
+    if [ -n "$key" ] || [ -n "$shost" ]; then
+      read -r -p "是否沿用 TopUP 的 Resend Key（是 = 直接回车或输入 是，否 = 输入 否）：" yn || true
+    else
+      yn=否; ok "TopUP 的配置里没有 Resend Key，下面隐藏输入"
+    fi
+    if [ "$yn" != 否 ] && [ "$yn" != n ] && [ "$yn" != N ] && [ -n "$key" ]; then
+      # Resend 的 SMTP：用户名 resend、密码就是 API Key（TopUP 用的是 Resend 的接口，同一个 Key）
+      envset FX_MAIL_HOST smtp.resend.com; envset FX_MAIL_PORT 587; envset FX_MAIL_SECURITY STARTTLS; envset FX_MAIL_USERNAME resend
+      envset FX_MAIL_PASSWORD "$key"; unset key
+      ok "Resend Key：已从 TopUP 的配置本地复制（不显示值）"
+    elif [ "$yn" != 否 ] && [ "$yn" != n ] && [ "$yn" != N ] && [ -n "$shost" ]; then
+      envset FX_MAIL_HOST "$shost"; envset FX_MAIL_PORT "$(topup_val SMTP_PORT)"; envset FX_MAIL_USERNAME "$(topup_val SMTP_USER)"
+      if [ "$(topup_val SMTP_SECURE)" = true ]; then envset FX_MAIL_SECURITY SSL; else envset FX_MAIL_SECURITY STARTTLS; fi
+      envset FX_MAIL_PASSWORD "$(topup_val SMTP_PASS)"
+      ok "SMTP 设置：已从 TopUP 的配置本地复制（不显示值）"
+    else
+      envset FX_MAIL_HOST smtp.resend.com; envset FX_MAIL_PORT 587; envset FX_MAIL_SECURITY STARTTLS; envset FX_MAIL_USERNAME resend
+      ask_secret FX_MAIL_PASSWORD "Resend API Key（权限 Sending access、只选发信域名）"
+    fi
+    unset key
+    envset FX_PUSH_VAPID_SUBJECT "mailto:${to%%,*}"
+    apply > /dev/null || true
+    cmd_test_mail || true
+  else
+    ok "这台机器上读不到 TopUP 的邮件设置（临时第二台？），逐项输入"
+    cmd_keys mail
+    to=$(envget FX_ALERT_EMAILS)
+    [ -z "$to" ] || { envset FX_PUSH_VAPID_SUBJECT "mailto:${to%%,*}"; apply > /dev/null || true; }
   fi
 }
 
-cmd_admin_password() {
-  need_root; need_tty
-  local p
-  p=$(envget FX_ADMIN_INIT_PASSWORD)
-  [ -n "$p" ] || die "初始密码已经显示过并删掉了；忘了的话请在后台用另一个超管重置，或找主会话"
-  say "后台第一个超管（只显示这一次，不要截图；存进密码管理器，首次登录必须改）："
-  say "  用户名：$(envget FX_ADMIN_INIT_USERNAME)"
-  say "  初始密码：$p"
-  unset p
+# 第一个超管：库里还没有管理员时，用这次输入的初始密码建（首次登录必须改），建好立刻从 .env 删掉
+setup_admin() {
+  if [ -f "$STATE/admin-created" ]; then ok "后台超管：已建过（忘了密码请在后台用另一个超管重置）"; return 0; fi
+  local p1 p2
+  read_secret "后台第一个超管的初始密码（至少 10 位、有字母和数字；从密码管理器粘；直接回车 = 跳过）："; p1=$REPLY_SECRET
+  [ -n "$p1" ] || { ok "后台超管：这次跳过"; return 0; }
+  read_secret "再粘一次确认："; p2=$REPLY_SECRET; REPLY_SECRET=
+  [ "$p1" = "$p2" ] || { bad "两次不一样，没保存（再运行 sudo trading setup）"; return 1; }
+  [ ${#p1} -ge 10 ] && [[ "$p1" =~ [A-Za-z] ]] && [[ "$p1" =~ [0-9] ]] || { bad "密码不够强（至少 10 位、有字母和数字）"; return 1; }
+  envset FX_ADMIN_INIT_USERNAME admin; envset FX_ADMIN_INIT_PASSWORD "$p1"; unset p1 p2
+  apply > /dev/null || true
+  if compose logs --no-color trading-app 2>/dev/null | grep -q '已建第一个超级管理员'; then
+    touch "$STATE/admin-created"; ok "后台超管已建：用户名 admin，首次登录必须改密码"
+  else
+    bad "后台超管没建成（库里已经有管理员，或密码不合规则；看 sudo trading status）"
+  fi
   envdel FX_ADMIN_INIT_PASSWORD; envdel FX_ADMIN_INIT_USERNAME
-  touch "$STATE/admin-created"
-  say "已从 .env 删掉初始用户名和密码（管理员已在库里，下次重启不再用到）。看完请关掉这个窗口"
+  apply > /dev/null || true
+}
+
+# 验收令牌（做法 07）：粘一串令牌（同一串填进 GitHub 环境 staging-e2e），服务器只存它的 SHA-256
+setup_test_admin() {
+  local t
+  read_secret "验收令牌（测试管理员；至少 32 位；同一串马上填进 GitHub 环境 staging-e2e 的 STAGING_TEST_ADMIN_TOKEN；直接回车 = 跳过）："; t=$REPLY_SECRET; REPLY_SECRET=
+  [ -n "$t" ] || { ok "验收令牌：这次跳过（也可以用 sudo trading gen-test-admin 让服务器生成）"; return 0; }
+  [ ${#t} -ge 32 ] || { bad "令牌太短（至少 32 位），没保存"; return 1; }
+  envset TEST_ADMIN_TOKEN_SHA256 "$(printf '%s' "$t" | sha256sum | cut -d' ' -f1)"; unset t
+  apply > /dev/null || true
+  ok "验收令牌已保存（服务器只存哈希）"
+}
+
+cmd_setup() {
+  need_root; need_tty
+  [ -f "$ENVF" ] && [ -n "$(current_tag)" ] || die "还没安装：先运行主会话给的一次性安装命令（sudo trading install …）"
+  say "Trading 测试环境中文向导。要粘的 Key、密码、令牌在屏幕上不显示，也不写进日志；每项直接回车 = 跳过 / 不改。"
+  say "-- ① 邮件"
+  setup_mail
+  say "-- ② 后台第一个超管"
+  setup_admin || true
+  say "-- ③ 验收令牌"
+  if [ "$(health_field env "$(health)")" = test ]; then setup_test_admin || true; else bad "健康检查的 env 不是 test，不设测试管理员"; fi
+  say "-- ④ TopUP（平时这台跳过；联调时在临时机填）"
+  local yn
+  read -r -p "现在填 TopUP 的 Key / Secret 吗？（y = 填，直接回车 = 跳过）：" yn || true
+  if [ "$yn" = y ] || [ "$yn" = Y ]; then cmd_keys topup; else ok "TopUP：这次跳过"; fi
+  say "-- ⑤ 备份 + 恢复演练"
+  if cmd_backup setup > /dev/null; then ok "备份：本机已加密"; else bad "备份失败"; fi
+  cmd_restore_drill || true
+  say "-- 摘要（没有任何密钥）"
+  cmd_status
 }
 
 # 把改过的 .env 生效：重建变量变了的容器，等健康
 apply() {
   guard_env
-  [ -n "$(current_tag)" ] || { say "还没部署过，先运行 sudo trading setup …"; return 0; }
+  [ -n "$(current_tag)" ] || { say "还没部署过，先运行 sudo trading install …"; return 0; }
   compose up -d > /dev/null 2>&1
   if wait_healthy "$(current_tag)"; then ok "已生效，健康检查通过"; else bad "改完后健康检查没通过（看 sudo trading status，截图给主会话）"; return 1; fi
 }
@@ -390,6 +432,13 @@ cmd_set_key() {
   REPLY_SECRET=
 }
 
+# 问一个不是密钥的值，输出到标准输出（提示写到终端）
+ask_val() {
+  local v
+  read -r -p "$1 [${2:-空}]：" v < /dev/tty > /dev/tty || true
+  printf '%s' "${v:-$2}"
+}
+
 # 中文向导：逐项问，直接回车 = 保留现在的值
 ask() {
   local name=$1 label=$2 def cur v
@@ -409,7 +458,7 @@ ask_secret() {
 
 cmd_keys() {
   need_root; need_tty
-  [ -f "$ENVF" ] || die "先运行 sudo trading setup …"
+  [ -f "$ENVF" ] || die "先运行 sudo trading install …"
   local what=${1:-all}
   say "Trading 测试环境：填 Key 和邮件设置。每项直接回车 = 保留现在的值。Key、Secret、密码在屏幕上不显示，也不写进日志。"
   if [ "$what" = all ] || [ "$what" = topup ]; then
@@ -516,15 +565,14 @@ cmd_rollback() {
 cmd_backup() {
   need_root
   local name=${1:-daily} f tmp
-  [ -f "$STATE/backup.pub" ] || die "没有备份加密密钥（先运行 setup）"
+  [ -f "$STATE/backup.pub" ] || die "没有备份加密密钥（先运行 install）"
   f="$TR_DIR/backup/trading-$(date -u +%Y%m%dT%H%M%SZ)-$name.tar.age"
   tmp=$(mktemp -d)
   # 密码用容器里已有的环境变量，不出现在命令行
   compose exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --routines --triggers --set-gtid-purged=OFF --databases trading quote' > "$tmp/mysql.sql"
-  # Redis 里只有限流、防重放计数这类临时数据；共机时是 TopUP 的 Redis，不碰（不 SAVE、不备份）
-  if [ "$(mode)" != shared ]; then compose exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE > /dev/null' || true; fi
+  compose exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE > /dev/null' || true
   local parts=(.env data/storage)
-  if [ "$(mode)" != shared ] && [ -f "$TR_DIR/data/redis/dump.rdb" ]; then parts+=(data/redis/dump.rdb); fi
+  if [ -f "$TR_DIR/data/redis/dump.rdb" ]; then parts+=(data/redis/dump.rdb); fi
   tar -C "$TR_DIR" -cf - --transform 's|^data/redis/dump.rdb$|redis.rdb|' "${parts[@]}" -C "$tmp" mysql.sql | age -R "$STATE/backup.pub" > "$f.tmp"
   rm -rf "$tmp"
   mv "$f.tmp" "$f"; chmod 600 "$f"
@@ -575,6 +623,11 @@ cmd_test_mail() { need_root; send_mail "测试邮件" "这是 Trading 测试环�
 # 每 5 分钟检查，只在状态变化时发邮件（恢复时再发一封）
 cmd_watch() {
   need_root
+  # Trading 停着（trading off，或者 TopUP 启动时按约定停了 trading-deploy 定时器）：不检查、不告警，顺手把自己也停了
+  if [ -z "${TR_OFFLINE_TEST:-}" ] && ! systemctl is-active --quiet trading-deploy.timer; then
+    systemctl disable --now trading-watch.timer > /dev/null 2>&1 || true
+    log "trading-deploy 定时器停着（Trading 轮到 TopUP 用机器），检查暂停"; return 0
+  fi
   local problems=() body avail disk last exp_s now
   body=$(health)
   [ "$(health_field status "$body")" = UP ] || problems+=("trading-app 没响应或不健康")
@@ -587,9 +640,7 @@ cmd_watch() {
   exp_s=$(date -d "$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/trading/fullchain.pem 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)
   [ $((exp_s - now)) -lt $((14 * 86400)) ] && problems+=("证书 14 天内到期或读不到")
   local c restarts
-  local cs=(trading-app quote-app trading-web mysql)
-  [ "$(mode)" = shared ] || cs+=(redis)
-  for c in "${cs[@]}"; do
+  for c in trading-app quote-app trading-web mysql redis; do
     restarts=$(docker inspect --format '{{.RestartCount}}' "trading-$c-1" 2>/dev/null || echo 0)
     [ "${restarts:-0}" -ge 3 ] && problems+=("$c 反复重启（$restarts 次）")
   done
@@ -629,10 +680,73 @@ cmd_test_admin_off() {
   ok "测试管理员已关，旧令牌立刻作废"; log "测试管理员已关"
 }
 
+# 停 TopUP（调它自己的 topup stop，按它的顺序：停定时器 → 停应用 → 备份 → 停数据库），确认 80/443 空出来、可用内存够
+stop_topup_and_check_mem() {
+  if topup_running; then
+    [ -x "$TOPUP_BIN" ] || { bad "TopUP 的容器在跑，但找不到 $TOPUP_BIN"; return 1; }
+    say "  停 TopUP（topup stop，数据保留；约 1～2 分钟）"
+    "$TOPUP_BIN" stop > /dev/null 2>&1 || { bad "topup stop 没成功（看 sudo topup status），Trading 不启动"; return 1; }
+  fi
+  topup_running && { bad "TopUP 的容器还在跑，Trading 不启动"; return 1; }
+  local p
+  for p in 80 443; do
+    if port_busy "$p" && ! docker ps --format '{{.Names}}' | grep -q '^trading-trading-web-1$'; then bad "$p 端口还被别的程序占着，Trading 不启动"; restart_topup; return 1; fi
+  done
+  local avail
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  if [ -z "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] && [ "$avail" -lt "$MIN_MEM_MB" ]; then
+    bad "可用内存 ${avail} MB，少于 ${MIN_MEM_MB} MB（差 $((MIN_MEM_MB - avail)) MB），Trading 不启动；已恢复 TopUP"
+    restart_topup; return 1
+  fi
+  ok "TopUP 已停、80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"
+}
+
+restart_topup() {
+  [ -x "$TOPUP_BIN" ] || return 0
+  say "  启动 TopUP（topup start，它自己再查内存和健康检查）"
+  if "$TOPUP_BIN" start > /dev/null 2>&1; then ok "TopUP 已启动"; else bad "topup start 没成功（看 sudo topup status，截图给主会话）"; return 1; fi
+}
+
+cmd_on() {
+  need_root
+  [ -f "$ENVF" ] && [ -n "$(current_tag)" ] || die "还没部署过，先运行 sudo trading install …"
+  say "== 切到 Trading（TopUP 停下）"
+  stop_topup_and_check_mem || exit 1
+  guard_env
+  compose up -d > /dev/null 2>&1
+  if wait_healthy "$(current_tag)"; then ok "Trading 已启动，健康检查通过"; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开"
+  log "trading on"
+}
+
+cmd_off() {
+  need_root
+  say "== 切回 TopUP（Trading 停下，数据保留）"
+  sysctl_ disable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
+  # 等进行中的自动更新做完
+  local _
+  for _ in $(seq 1 60); do [ -n "${TR_OFFLINE_TEST:-}" ] && break; systemctl is-active --quiet trading-deploy.service || break; sleep 5; done
+  ok "定时器已停"
+  if [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading)" ]; then
+    compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
+    ok "应用已停"
+    if cmd_backup before-off > /dev/null; then ok "备份完成"; else bad "备份失败：Trading 按原样恢复，TopUP 不启动"; compose up -d > /dev/null 2>&1; sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 || true; exit 1; fi
+    compose stop > /dev/null 2>&1 || true
+    ok "MySQL、Redis 已停"
+  else
+    ok "Trading 本来就停着"
+  fi
+  log "trading off"
+  restart_topup
+}
+
 main() {
   local c=${1:-help}; shift || true
   case "$c" in
-    setup) cmd_setup "$@" ;;
+    install) cmd_install "$@" ;;
+    setup) cmd_setup ;;
+    on) cmd_on ;;
+    off) cmd_off ;;
     keys) cmd_keys "$@" ;;
     set) cmd_set "$@" ;;
     set-key) cmd_set_key "$@" ;;
@@ -646,8 +760,7 @@ main() {
     watch) cmd_watch ;;
     gen-test-admin) cmd_gen_test_admin ;;
     test-admin-off) cmd_test_admin_off ;;
-    admin-password) cmd_admin_password ;;
-    *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
   esac
 }
 main "$@"

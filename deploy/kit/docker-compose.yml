@@ -1,14 +1,14 @@
 # Trading 测试环境的容器（第 4 批，部署方案 v1 02 页）。放在服务器 /opt/trading/，由 trading 命令用两个变量文件启动：
 #   .env             ← 服务器上生成的内部密码和 Amos 用 trading keys 填的 Key（变量名见 .env.example），权限 600，不进仓库
 #   state/image.env  ← 当前版本 IMAGE_TAG=<完整提交号>（trading update、rollback 写）
-# 两种模式（.env 的 TR_MODE，trading 命令按它组装）：
-#   standalone（单独一台）：本文件 + --profile own-redis。trading-web 开 80、443，自己的 Redis
-#   shared（和 TopUP 共机，Amos 11/17 定）：本文件 + docker-compose.shared.yml。不开 80、443（TopUP 的 Nginx 在前面做 TLS、按域名转给 trading-web），
-#     不起自己的 Redis（用 TopUP 的 Redis，单独的 db 编号 TR_REDIS_DB），不动 TopUP 的任何容器、配置和数据
+# 部署方案 v1 07 页（TD4-20 = B）：测试环境用现有的阿里云 2 核 2G，和 TopUP **轮流跑、不同时跑**（sudo trading on / off）；
+# Trading 自己占 80、443，自己的 MySQL、Redis，不动 TopUP 的任何容器、配置和数据。
 # trading-app 只绑本机 127.0.0.1:8080 给部署脚本看健康检查；quote-app、MySQL、Redis 不映射任何端口。
-# 内存：每个容器 mem_limit = memswap_limit（不用交换分区），JVM 堆等上限显式写在 JAVA_TOOL_OPTIONS。数都能在 .env 里改（TR_MEM_*、TR_HEAP_*），
-#   默认值按"和 TopUP 共用 2G 机器"偏小取（最终以部署方案为准）。
-# 服务名都带 trading 前缀或是只在自己网络里的名字：共机模式下 trading-web、trading-app、quote-app 会接到 TopUP 的网络上，不能和 TopUP 的 web、redis 等重名。
+# 内存：部署方案 07 页第 3 节按 816 MB 估；研发 11/17 在开发机实测（实际执行）：元空间 trading-app 空闲就用到约 86 MB（88 不够）、
+# quote-app 约 73 MB（64 时反复 OutOfMemoryError: Metaspace 重启）、MySQL 8.4 空闲约 172 MB（176 贴边）。所以默认值按实测加余量：
+# trading-app 416、quote-app 256、mysql 224、redis 32、web 32，合计 960 MB + Docker 约 100 = 1,060 MB（比 2G 机器停掉所有项目后的约 1,050 MB 多约 10 MB，待方案定）。
+# 每个容器 mem_limit = memswap_limit（不用交换分区），
+# JVM 堆、元空间、代码缓存、直接内存显式写在 JAVA_TOOL_OPTIONS。数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等），默认值 = 部署方案的数。
 # 三张自己的网络：
 #   internal（不能出公网）：mysql、redis、trading-app、quote-app。trading-web 不接，碰不到数据库
 #   quote（不能出公网）：quote-app（别名 quote-internal，只在这张网上监听）、trading-app、trading-web。mysql、redis 碰不到报价服务
@@ -43,8 +43,6 @@ services:
     volumes:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
-      # 共机模式的真实 IP 设置（trading 命令生成 state/nginx/realip.conf；单独模式是空目录）
-      - ./state/nginx:/etc/nginx/trading:ro
     networks:
       egress: {}
       quote: {}
@@ -64,12 +62,13 @@ services:
       FX_DB_URL: jdbc:mysql://mysql:3306/trading?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
       FX_DB_USERNAME: trading
       FX_DB_PASSWORD: ${FX_DB_PASSWORD:?缺少 FX_DB_PASSWORD}
-      FX_REDIS_HOST: ${TR_REDIS_HOST:-redis}
+      FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      FX_REDIS_DATABASE: ${TR_REDIS_DB:-0}
-      # JVM 上限（显式）：堆 TR_HEAP_APP + 元空间 + 代码缓存 + 直接内存 + 线程栈，要小于 TR_MEM_APP
-      JAVA_TOOL_OPTIONS: -Xms128m -Xmx${TR_HEAP_APP:-320m} -XX:MaxMetaspaceSize=${TR_META_APP:-150m} -XX:ReservedCodeCacheSize=48m -XX:MaxDirectMemorySize=48m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # JVM 上限：堆 144 + 元空间 128 + 代码缓存 24 + 直接内存 16 + 线程和本机内存约 60 = 372，容器 416
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-128m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-24m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
+      FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
       FX_COOKIE_SECURE: "true"
       FX_ENV_LABEL: test
       FX_ID_NODE: "1"
@@ -111,13 +110,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-        required: false
       quote-app:
         condition: service_started
     # 单实例：停机时先停止接收新订单、处理完队列再退出
     stop_grace_period: 60s
-    mem_limit: ${TR_MEM_APP:-640m}
-    memswap_limit: ${TR_MEM_APP:-640m}
+    mem_limit: ${TR_MEM_APP:-416m}
+    memswap_limit: ${TR_MEM_APP:-416m}
     logging: *logging
 
   quote-app:
@@ -129,11 +127,12 @@ services:
       FX_QUOTE_DB_URL: jdbc:mysql://mysql:3306/quote?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
       FX_QUOTE_DB_USERNAME: quote
       FX_QUOTE_DB_PASSWORD: ${FX_QUOTE_DB_PASSWORD:?缺少 FX_QUOTE_DB_PASSWORD}
-      FX_REDIS_HOST: ${TR_REDIS_HOST:-redis}
+      FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      FX_REDIS_DATABASE: ${TR_REDIS_DB:-0}
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_QUOTE:-160m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-120m} -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=48m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 16 + 直接内存 16 + 线程和本机内存约 40 = 232，容器 256
+      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-16m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
       FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
       FX_QUOTE_KEY_ENC_KEY: ${FX_QUOTE_KEY_ENC_KEY:?缺少 FX_QUOTE_KEY_ENC_KEY}
       # 测试环境：模拟价，配了 token 的真实源接管它覆盖的品种；live 只给生产
@@ -154,7 +153,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-        required: false
     # 管理端口只在容器里的 127.0.0.1:8091；镜像里没有 curl，用 bash 自带的 /dev/tcp 查
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8091 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
@@ -163,8 +161,8 @@ services:
       retries: 3
       start_period: 90s
     stop_grace_period: 30s
-    mem_limit: ${TR_MEM_QUOTE:-384m}
-    memswap_limit: ${TR_MEM_QUOTE:-384m}
+    mem_limit: ${TR_MEM_QUOTE:-256m}
+    memswap_limit: ${TR_MEM_QUOTE:-256m}
     logging: *logging
 
   mysql:
@@ -177,9 +175,9 @@ services:
       FX_QUOTE_DB_PASSWORD: ${FX_QUOTE_DB_PASSWORD:?缺少 FX_QUOTE_DB_PASSWORD}
       TZ: UTC
     command:
-      - --innodb-buffer-pool-size=${TR_MYSQL_BUFFER_POOL:-128M}
+      - --innodb-buffer-pool-size=${TR_MYSQL_BUFFER_POOL:-32M}
       - --performance-schema=OFF
-      - --max-connections=60
+      - --max-connections=25
       - --innodb-log-buffer-size=8M
       - --key-buffer-size=8M
       - --tmp-table-size=16M
@@ -197,17 +195,15 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    mem_limit: ${TR_MEM_MYSQL:-384m}
-    memswap_limit: ${TR_MEM_MYSQL:-384m}
+    mem_limit: ${TR_MEM_MYSQL:-224m}
+    memswap_limit: ${TR_MEM_MYSQL:-224m}
     logging: *logging
 
-  # 自己的 Redis 只在单独模式（--profile own-redis）；共机模式用 TopUP 的 Redis（TR_REDIS_DB 单独的 db 编号）
   redis:
     image: redis:7
-    profiles: [own-redis]
     restart: unless-stopped
     # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）
-    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 48mb --maxmemory-policy noeviction --save 300 10"]
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 16mb --maxmemory-policy noeviction --save 300 10"]
     environment:
       REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
     volumes:
@@ -219,6 +215,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
-    mem_limit: ${TR_MEM_REDIS:-64m}
-    memswap_limit: ${TR_MEM_REDIS:-64m}
+    mem_limit: ${TR_MEM_REDIS:-32m}
+    memswap_limit: ${TR_MEM_REDIS:-32m}
     logging: *logging
