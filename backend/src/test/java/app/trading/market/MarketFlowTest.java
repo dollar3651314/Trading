@@ -11,8 +11,6 @@ import app.trading.market.api.MarketApi;
 import app.trading.market.api.MarketQuote;
 import app.trading.market.api.QuoteStatus;
 import app.trading.market.config.SymbolCatalog;
-import app.trading.market.kline.KlineService;
-import app.trading.market.kline.Timeframe;
 import app.trading.market.quote.QuoteProcessor;
 import app.trading.market.quote.RawQuote;
 import app.trading.notification.api.MailApi;
@@ -58,7 +56,6 @@ class MarketFlowTest {
   @Autowired QuoteProcessor processor;
   @Autowired MarketApi market;
   @Autowired SymbolCatalog catalog;
-  @Autowired KlineService klines;
   @Autowired JdbcTemplate jdbc;
   @Autowired MockMvc mvc;
   @MockitoBean MailApi mail;
@@ -146,24 +143,6 @@ class MarketFlowTest {
     catalog.reload();
   }
 
-  @Test
-  void K线跨桶时上一根收盘写库_历史接口含当前这一根() {
-    Instant a = NOW.minusSeconds(120);
-    // 用固定时钟时，报价时间不能和"现在"差超过 5 秒，所以直接调用 K 线聚合
-    klines.accept("SOLUSD", new BigDecimal("196.00"), a);
-    klines.accept("SOLUSD", new BigDecimal("197.50"), a.plusSeconds(10));
-    klines.accept("SOLUSD", new BigDecimal("195.00"), a.plusSeconds(20));
-    klines.accept("SOLUSD", new BigDecimal("196.20"), a.plusSeconds(70));
-    var bars = klines.history("SOLUSD", Timeframe.M1, 10);
-    assertThat(bars).hasSizeGreaterThanOrEqualTo(2);
-    var closed = bars.get(bars.size() - 2);
-    assertThat(closed.open()).isEqualByComparingTo("196.00");
-    assertThat(closed.high()).isEqualByComparingTo("197.50");
-    assertThat(closed.low()).isEqualByComparingTo("195.00");
-    assertThat(closed.close()).isEqualByComparingTo("195.00");
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM market_kline WHERE symbol = 'SOLUSD' AND timeframe = '1m'", Integer.class)).isGreaterThanOrEqualTo(1);
-  }
-
   @SuppressWarnings("unchecked")
   private Cookie login() throws Exception {
     String email = "m" + System.nanoTime() + "@example.com";
@@ -182,10 +161,8 @@ class MarketFlowTest {
     String symbols = mvc.perform(get("/api/market/symbols").cookie(c)).andReturn().getResponse().getContentAsString();
     assertThat(symbols).contains("\"code\":\"XAUUSD\"").contains("\"contractSize\":\"100\"").contains("\"unit\":\"ounce\"").contains("\"tradingOpen\":");
     String quotes = mvc.perform(get("/api/market/quotes").cookie(c)).andReturn().getResponse().getContentAsString();
-    // 对客报价含加点（每边 0.10）；K 线用不含加点的中间价 4126.55
+    // 对客报价含加点（每边 0.10）。K 线在报价服务里算（第 2 批第二步），"K 线用不含加点的中间价 4126.55"这条搬到跨进程的 KlineCrossProcessTest
     assertThat(quotes).contains("\"symbol\":\"XAUUSD\"").contains("\"bid\":\"4126.25\"").contains("\"ask\":\"4126.85\"").contains("\"quoteToUsd\":\"1\"");
-    String k = mvc.perform(get("/api/market/klines").param("symbol", "XAUUSD").param("tf", "15m").cookie(c)).andReturn().getResponse().getContentAsString();
-    assertThat(k).contains("\"open\":\"4126.55\"");
     assertThat(mvc.perform(get("/api/market/klines").param("symbol", "XAUUSD").param("tf", "2m").cookie(c)).andReturn().getResponse().getContentAsString()).contains("TIMEFRAME_INVALID");
     assertThat(mvc.perform(get("/api/market/sparklines").cookie(c)).andReturn().getResponse().getContentAsString()).contains("\"XAUUSD\":[");
   }

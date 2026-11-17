@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Trading 后端父工程：一个 Maven 工程、两个进程。
-     backend/   = trading-app（交易主进程；第 0 批是从前身项目搬来的单体，含行情模块。目录名沿用 backend，路径和前身一致）
-     quote-app/ = 报价进程（第 0 批只有模块壳，行情代码第 2 批再拆过去） -->
+     quote-protocol/ = 报价协议（内部 WebSocket 的消息格式、序号检查、客户端），trading-app 和 quote-app 共用；不依赖 Spring
+     quote-app/      = 报价进程（报价源接入、主备切换、质量守卫、交易时段、内部 WebSocket、报价源授权登记），单独启动
+     backend/        = trading-app（交易主进程。目录名沿用 backend，路径和前身一致）；只通过 quote-protocol 收报价，不能依赖 quote-app 的类 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -21,8 +22,9 @@
   <name>trading-parent</name>
 
   <modules>
-    <module>backend</module>
+    <module>quote-protocol</module>
     <module>quote-app</module>
+    <module>backend</module>
   </modules>
 
   <properties>

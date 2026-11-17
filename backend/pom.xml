@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- trading-app：交易主进程，一个 Spring Boot 单体应用（账户、交易、风控、钱包过渡层、通知、后台；第 0 批还带着行情模块）。 -->
+<!-- trading-app：交易主进程，一个 Spring Boot 单体应用（账户、交易、风控、钱包过渡层、通知、后台、行情的交易侧）。
+     报价从 quote-app 的内部 WebSocket 收（只依赖 quote-protocol）；正式代码不能依赖 quote-app（ArchUnit 检查）。 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -16,6 +17,12 @@
   <name>trading-app</name>
 
   <dependencies>
+    <!-- 报价内部 WebSocket 协议和客户端（第 2 批） -->
+    <dependency>
+      <groupId>app.trading</groupId>
+      <artifactId>quote-protocol</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webmvc</artifactId>
@@ -95,6 +102,21 @@
       <groupId>com.icegreen</groupId>
       <artifactId>greenmail</artifactId>
       <version>2.1.14</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- 只在测试里：跨进程测试在同一个 JVM 里另起一个真实的 quote-app（独立的 Spring 上下文、端口和库），交易这边照常走内部 WebSocket。
+         正式代码不能 import app.quote 的类（ModuleBoundaryTest） -->
+    <dependency>
+      <groupId>app.trading</groupId>
+      <artifactId>quote-app</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>app.trading</groupId>
+      <artifactId>quote-app</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
       <scope>test</scope>
     </dependency>
     <dependency>

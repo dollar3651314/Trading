@@ -37,5 +37,12 @@ public interface MarketApi {
    */
   boolean quoteDeviationPaused(String code);
 
+  /**
+   * 这个品种现在的报价源能不能用来<b>开仓</b>（第 2 批，TQ-11 A，技术方案 08 页）：生产只用报价源授权登记里"交易用途"已授权的源成交，
+   * 没有授权的品种只显示、不开仓（拒单原因"该品种暂不开放交易"）。测试环境（没启用授权检查）总是 true。
+   * 只影响开仓（市价开仓、挂单成交）；平仓、止盈止损、强平不看这一项。
+   */
+  boolean quoteTradingAllowed(String code);
+
   void subscribe(QuoteListener listener);
 }

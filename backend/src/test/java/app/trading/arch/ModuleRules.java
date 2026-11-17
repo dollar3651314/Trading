@@ -36,6 +36,21 @@ final class ModuleRules {
     return result;
   }
 
+  /**
+   * 第 2 批拆进程：trading-app 的代码（root 下的类）不能依赖报价服务 quote-app 的类（{@code app.quote..}），
+   * 只能用报价协议 {@code app.quote.protocol..}（quote-protocol 模块：消息格式、序号检查、客户端）。
+   */
+  static EvaluationResult checkQuoteApp(String root, JavaClasses classes) {
+    return noClasses().that().resideInAPackage(root + "..")
+        .should().dependOnClassesThat(DescribedPredicate.describe("报价服务 quote-app 的内部类（app.quote.protocol 以外）", c -> {
+          String p = c.getPackageName();
+          return (p.equals("app.quote") || p.startsWith("app.quote.")) && !(p.equals("app.quote.protocol") || p.startsWith("app.quote.protocol."));
+        }))
+        .because("trading-app 只能通过内部 WebSocket 协议收报价，不能直接调用报价服务的类（两个进程分开启停）")
+        .allowEmptyShould(true)
+        .evaluate(classes);
+  }
+
   private static DescribedPredicate<JavaClass> internalOf(String root, String module) {
     String base = root + "." + module;
     String api = base + ".api";

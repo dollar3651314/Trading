@@ -2,8 +2,8 @@ package app.trading.market.web;
 
 import app.trading.market.api.MarketApi;
 import app.trading.market.api.SymbolSpec;
-import app.trading.market.kline.Bar;
-import app.trading.market.kline.KlineService;
+import app.quote.protocol.Message;
+import app.trading.market.kline.Klines;
 import app.trading.market.quote.QuoteProcessor;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -30,7 +30,8 @@ import tools.jackson.databind.ObjectMapper;
  * 行情推送 WebSocket（/api/ws/market，需要登录，握手时由登录检查过滤器校验 Cookie）。
  * <ul>
  *   <li>连上后先推一次全部报价，之后每 250 毫秒推一次有变化的报价：{"type":"quotes","data":[…]}</li>
- *   <li>K 线：客户端发 {"op":"subKline","symbol":"XAUUSD","tf":"15m"} 订阅（同时只订阅一个），之后推 {"type":"kline",…}</li>
+ *   <li>K 线：客户端发 {"op":"subKline","symbol":"XAUUSD","tf":"15m"} 订阅（同时只订阅一个），之后推 {"type":"kline",…}；
+ *       K 线在报价服务里算，这里把所有客户端订阅的"品种|周期"告诉报价服务（{@link Klines#watch}），收到变化再转给订阅的客户端</li>
  * </ul>
  */
 @Component
@@ -41,17 +42,19 @@ class MarketPush extends TextWebSocketHandler {
   private final QuoteProcessor processor;
   private final MarketApi market;
   private final ObjectMapper json;
+  private final Klines klines;
   private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
   /** 会话 → 订阅的 "symbol|tf" */
   private final Map<String, String> klineSubs = new ConcurrentHashMap<>();
-  private final Map<String, Bar> pendingBars = new ConcurrentHashMap<>();
+  private final Map<String, Message.Bar> pendingBars = new ConcurrentHashMap<>();
   private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "market-push"));
 
-  MarketPush(QuoteProcessor processor, MarketApi market, KlineService klines, ObjectMapper json, app.trading.market.MarketProperties props) {
+  MarketPush(QuoteProcessor processor, MarketApi market, Klines klines, ObjectMapper json, app.trading.market.MarketProperties props) {
     this.processor = processor;
     this.market = market;
     this.json = json;
-    klines.onUpdate(b -> pendingBars.put(b.symbol() + "|" + b.tf().code, b));
+    this.klines = klines;
+    klines.onUpdate(b -> pendingBars.put(b.symbol() + "|" + b.tf(), b));
     long ms = props.pushInterval().toMillis();
     timer.scheduleAtFixedRate(this::flush, ms, ms, TimeUnit.MILLISECONDS);
   }
@@ -70,6 +73,8 @@ class MarketPush extends TextWebSocketHandler {
       String op = n.path("op").asString("");
       if ("subKline".equals(op)) klineSubs.put(s.getId(), n.path("symbol").asString("") + "|" + n.path("tf").asString(""));
       else if ("unsubKline".equals(op)) klineSubs.remove(s.getId());
+      else return;
+      watchBars();
     } catch (RuntimeException e) {
       log.debug("忽略无法解析的消息");
     }
@@ -78,7 +83,12 @@ class MarketPush extends TextWebSocketHandler {
   @Override
   public void afterConnectionClosed(WebSocketSession s, CloseStatus status) {
     sessions.remove(s.getId());
-    klineSubs.remove(s.getId());
+    if (klineSubs.remove(s.getId()) != null) watchBars();
+  }
+
+  /** 告诉报价服务现在要哪些 K 线的实时变化（所有客户端订阅的并集） */
+  private void watchBars() {
+    klines.watch(java.util.Set.copyOf(klineSubs.values()));
   }
 
   private List<Views.QuoteView> quotes(Set<String> only) {
@@ -98,14 +108,14 @@ class MarketPush extends TextWebSocketHandler {
         sessions.values().forEach(s -> send(s, msg));
       }
       if (!pendingBars.isEmpty()) {
-        Map<String, Bar> bars = Map.copyOf(pendingBars);
+        Map<String, Message.Bar> bars = Map.copyOf(pendingBars);
         pendingBars.keySet().removeAll(bars.keySet());
         klineSubs.forEach((sid, key) -> {
-          Bar b = bars.get(key);
+          Message.Bar b = bars.get(key);
           WebSocketSession s = sessions.get(sid);
           if (b == null || s == null) return;
           int digits = market.symbol(b.symbol()).map(SymbolSpec::digits).orElse(8);
-          send(s, Map.of("type", "kline", "symbol", b.symbol(), "tf", b.tf().code, "bar", Views.kline(b, digits)));
+          send(s, Map.of("type", "kline", "symbol", b.symbol(), "tf", b.tf(), "bar", Views.kline(b, digits)));
         });
       }
     } catch (RuntimeException e) {

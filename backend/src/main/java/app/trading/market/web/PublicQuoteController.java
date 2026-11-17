@@ -5,7 +5,6 @@ import app.trading.market.api.MarketQuote;
 import app.trading.market.api.SymbolSpec;
 import app.trading.market.quote.QuoteBook;
 import app.trading.market.quote.QuoteProcessor;
-import app.trading.market.quote.feed.QuoteRouter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -62,15 +61,13 @@ class PublicQuoteController {
   private final MarketApi market;
   private final QuoteProcessor processor;
   private final PublicQuoteProperties props;
-  private final QuoteRouter router;
   private final Clock clock;
   private volatile Cached cached;
 
-  PublicQuoteController(MarketApi market, QuoteProcessor processor, PublicQuoteProperties props, QuoteRouter router, Clock clock) {
+  PublicQuoteController(MarketApi market, QuoteProcessor processor, PublicQuoteProperties props, Clock clock) {
     this.market = market;
     this.processor = processor;
     this.props = props;
-    this.router = router;
     this.clock = clock;
     if (props.live()) log.warn("官网公开行情展示交易报价（FX_PUBLIC_QUOTES_SOURCE=live）：真实报价源必须已有书面的公开展示授权");
     for (String code : props.symbols()) {
@@ -105,9 +102,9 @@ class PublicQuoteController {
     for (String code : props.symbols()) {
       Optional<SymbolSpec> s = market.symbol(code);
       if (s.isEmpty()) continue;
-      boolean fromSample = !props.live() && router.liveTrading(code);
-      // 价格来自模拟源：取示例行情，或交易报价本来就是模拟价
-      sample |= fromSample || router.mode() == QuoteRouter.Mode.SIMULATED && !router.liveTrading(code);
+      boolean fromSample = !props.live() && processor.liveTrading(code);
+      // 价格来自模拟源：取示例行情，或交易报价本来就是模拟价（报价服务是模拟模式）
+      sample |= fromSample || processor.quoteMode().map("simulated"::equals).orElse(false) && !processor.liveTrading(code);
       items.add(item(s.get(), now, fromSample));
     }
     return new PublicQuotes(sample, List.copyOf(items));

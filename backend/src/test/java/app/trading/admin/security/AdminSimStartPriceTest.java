@@ -10,9 +10,12 @@ import app.trading.market.config.SymbolCatalog;
 import app.trading.market.quote.QuoteProcessor;
 import app.trading.common.health.AlertCheck;
 import app.trading.market.api.MarketAdminApi;
-import app.trading.market.quote.SimulatedQuoteSource;
-import app.trading.market.quote.feed.QuoteFeeds;
-import app.trading.market.quote.feed.QuoteRouter;
+import app.quote.feed.QuoteFeeds;
+import app.quote.feed.QuoteRouter;
+import app.quote.pipeline.SimulatedQuoteSource;
+import app.trading.market.quote.RemoteQuotes;
+import app.trading.support.MutableClock;
+import app.trading.support.QuoteAppHarness;
 import app.trading.trading.api.Bucket;
 import app.trading.trading.api.LedgerApi;
 import app.trading.trading.api.LedgerCommand;
@@ -24,12 +27,18 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -39,22 +48,57 @@ import tools.jackson.databind.ObjectMapper;
  * 不填 → 没报价；已有品种在编辑里补填；重启后从库里读回（csv 里有的品种以 csv 为准）；校验错误和其他字段一起返回。
  * 非模拟源下忽略这一项见 {@link AdminV2Test}。
  *
- * <p>这个类单独起一个报价源是模拟源的 Spring 上下文：随机游走的间隔设成 1 小时（测试期间不跳价，报价都是起始价），
- * 测完关闭上下文（{@link DirtiesContext}），不在其他测试运行时继续推报价。
+ * <p>这个类单独起一个 Spring 上下文，连一个<b>真实的报价服务</b>（第 2 批拆进程，{@link QuoteAppHarness}，模拟模式）：随机游走的间隔设成 1 小时
+ * （测试期间不跳价，报价都是起始价）。后台改完品种，交易这边把品种和起始价同步给报价服务，报价服务的模拟源开始报价，再经内部 WebSocket 回到交易这边加点。
+ * 同步和报价都是异步的，所以"有没有开始报价"用"等到"判断；"没有报价"先等同步完成再判断。测完关闭两边（{@link DirtiesContext}）。
  */
-@TestPropertySource(properties = {"trading.market.source=simulated", "trading.market.simulated-interval=1h"})
+@TestPropertySource(properties = {"trading.market.source=remote"})
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AdminSimStartPriceTest extends AdminTestSupport {
+
+  static final QuoteAppHarness quoteApp = QuoteAppHarness.start(new MutableClock(), Map.of("quote.market.source", "simulated",
+      "quote.market.simulated-interval", "1h"));
+
+  @DynamicPropertySource
+  static void quoteApp(DynamicPropertyRegistry r) {
+    r.add("trading.market.quote-app.url", quoteApp::url);
+    r.add("trading.market.quote-app.key", () -> QuoteAppHarness.KEY);
+  }
+
+  @AfterAll
+  static void stopQuoteApp() {
+    quoteApp.close();
+  }
 
   @Autowired LedgerApi ledger;
   @Autowired QuoteProcessor processor;
   @Autowired SymbolCatalog catalog;
-  @Autowired SimulatedQuoteSource source;
-  @Autowired QuoteFeeds feeds;
-  @Autowired QuoteRouter router;
+  final SimulatedQuoteSource source = quoteApp.bean(SimulatedQuoteSource.class);
+  final QuoteFeeds feeds = quoteApp.bean(QuoteFeeds.class);
+  final QuoteRouter router = quoteApp.bean(QuoteRouter.class);
+  final app.quote.catalog.SymbolCatalog quoteCatalog = quoteApp.bean(app.quote.catalog.SymbolCatalog.class);
+  @Autowired RemoteQuotes remote;
   @Autowired MarketAdminApi marketAdmin;
   @Autowired List<AlertCheck> alerts;
   final ObjectMapper json = new ObjectMapper();
+
+  @BeforeEach
+  void connected() throws InterruptedException {
+    await("交易连上报价服务", () -> remote.connected() && remote.synced());
+  }
+
+  static void await(String what, BooleanSupplier ok) throws InterruptedException {
+    for (int i = 0; i < 200; i++) {
+      if (ok.getAsBoolean()) return;
+      Thread.sleep(50);
+    }
+    throw new AssertionError("等了 10 秒还没有：" + what);
+  }
+
+  /** 等报价服务那边的品种表和交易这边一致（同步是异步的）：present = 这个品种在不在 */
+  void awaitSynced(String code, boolean present) throws InterruptedException {
+    await("品种同步到报价服务", () -> quoteCatalog.get(code).isPresent() == present);
+  }
 
   JsonNode body(MockHttpServletResponse r) throws Exception {
     return json.readTree(r.getContentAsString());
@@ -77,6 +121,11 @@ class AdminSimStartPriceTest extends AdminTestSupport {
     jdbc.update("DELETE FROM risk_symbol WHERE symbol = ?", code);
     jdbc.update("DELETE FROM market_symbol WHERE code = ?", code);
     catalog.reload();
+    try {
+      awaitSynced(code, false);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   String audit(String action, String target) {
@@ -133,6 +182,7 @@ class AdminSimStartPriceTest extends AdminTestSupport {
       assertThat(audit("symbol.create", code)).startsWith("SUCCESS||").contains("\"simStartPrice\":\"123.45\"");
 
       // 报价源立即从起始价开始报价：原始卖价 123.45、点差是起始价的万分之一（按 2 位小数，至少 0.01），再加统一加点 0.05
+      await("报价服务的模拟源开始报价", () -> source.has(code));
       assertThat(source.has(code)).isTrue();
       MarketQuote q = awaitQuote(code).orElseThrow(() -> new AssertionError("没有收到报价"));
       assertThat(q.bid()).isEqualByComparingTo("123.40");
@@ -140,6 +190,15 @@ class AdminSimStartPriceTest extends AdminTestSupport {
       assertThat(q.executable()).isTrue();
       JsonNode listed = body(call(get("/api/admin/symbols?keyword=" + code), m.cookie(), null)).get("items").get(0);
       assertThat(listed.get("lastQuoteAt").isNull()).as("后台不再显示暂无报价").isFalse();
+      // K 线也认得新品种（拆分前在 AdminV2Test 里测；K 线搬到报价服务后要跨进程）：报价服务按同步过来的品种聚合，交易这边转出来
+      await("K 线有了这一根", () -> {
+        try {
+          return body(call(get("/api/market/klines?symbol=" + code + "&tf=1m"), c.cookie(), null)).size() == 1;
+        } catch (Exception e) {
+          throw new IllegalStateException(e);
+        }
+      });
+      assertThat(body(call(get("/api/market/klines?symbol=" + code + "&tf=1m"), c.cookie(), null)).size()).isEqualTo(1);
 
       // 暂停开仓时不能下单；打开后能成交（按含加点的买价）
       String order = "{\"symbol\":\"" + code + "\",\"type\":\"market\",\"side\":\"buy\",\"lots\":\"0.10\",\"leverage\":10,\"clientOrderId\":\"%s\"}";
@@ -164,6 +223,7 @@ class AdminSimStartPriceTest extends AdminTestSupport {
     try {
       JsonNode s = body(call(post("/api/admin/symbols"), m.cookie(), createBody(code, ",\"reason\":\"上新\"")));
       assertThat(s.get("simStartPrice").isNull()).isTrue();
+      awaitSynced(code, true);
       assertThat(source.has(code)).isFalse();
       Thread.sleep(300);
       assertThat(processor.latest(code)).as("没有起始价：不报价").isEmpty();
@@ -184,6 +244,8 @@ class AdminSimStartPriceTest extends AdminTestSupport {
       // 已经在报价的品种再改起始价：只保存，不跳价
       body(call(put("/api/admin/symbols/" + code), m.cookie(), "{\"simStartPrice\":\"20\",\"reason\":\"改起始价\"}"));
       assertThat(jdbc.queryForObject("SELECT sim_start_price FROM market_symbol WHERE code = ?", BigDecimal.class, code)).isEqualByComparingTo("20");
+      await("新的起始价同步到报价服务", () -> quoteCatalog.get(code).map(x -> x.simStartPrice() != null && x.simStartPrice().compareTo(new BigDecimal("20")) == 0)
+          .orElse(false));
       Thread.sleep(300);
       assertThat(processor.latest(code).orElseThrow().bid()).isEqualByComparingTo("8.45");
     } finally {
@@ -215,20 +277,21 @@ class AdminSimStartPriceTest extends AdminTestSupport {
   @Test
   void 重启后从库里读回起始价_csv里有的品种以csv为准() throws Exception {
     String code = newCode();
-    // 模拟"上次运行时建的品种"：直接写库，报价源还不知道它
+    // 模拟"上次运行时建的品种"：直接写库，报价服务还不知道它。拆进程后"重启读回"在报价服务里（quote-app 的 QuoteCatalogSyncTest 测纯重启的情况）；
+    // 这里测交易这边重新加载（和启动时一样）→ 整份同步 → 报价服务从同步来的起始价开始报价
     jdbc.update("INSERT INTO market_symbol (code, name_zh, name_en, category, digits, contract_size, unit, base_ccy, quote_ccy, max_leverage, min_lots, max_lots, "
         + "lot_step, fee_rate, maintenance_margin_rate, markup, sim_start_price, open_paused, sort_order) "
         + "VALUES (?, '重启币', 'Restart Coin', 'crypto', 3, 1, 'unit', 'RST', 'USD', 10, 0.01, 10, 0.01, 0, 0.01, 0, 42.125, 1, 9999)", code);
     for (int d = 1; d <= 7; d++) jdbc.update("INSERT INTO market_session (symbol, day_of_week, open_minute, close_minute) VALUES (?, ?, 0, 1440)", code, d);
     jdbc.update("UPDATE market_symbol SET sim_start_price = 9.99999 WHERE code = 'EURUSD'");
     try {
-      catalog.reload();
       assertThat(source.has(code)).isFalse();
-      assertThat(source.seedFromDatabase()).as("EURUSD 在 csv 里，不用库里的起始价").contains(code).doesNotContain("EURUSD");
+      catalog.reload();
       MarketQuote q = awaitQuote(code).orElseThrow(() -> new AssertionError("重启后没有收到报价"));
       assertThat(q.bid()).isEqualByComparingTo("42.125");
       assertThat(q.ask()).isEqualByComparingTo("42.129"); // 点差 42.125 × 0.0001 ≈ 0.004（3 位小数）
-      assertThat(source.seedFromDatabase()).as("已经在报价的不重复加入").doesNotContain(code);
+      assertThat(quoteCatalog.get("EURUSD").orElseThrow().simStartPrice()).as("EURUSD 的起始价也同步过去了").isEqualByComparingTo("9.99999");
+      assertThat(source.seedFromDatabase()).as("EURUSD 在 csv 里，不用库里的起始价；已经在报价的不重复加入").doesNotContain(code).doesNotContain("EURUSD");
     } finally {
       jdbc.update("UPDATE market_symbol SET sim_start_price = NULL WHERE code = 'EURUSD'");
       dropSymbol(code);
@@ -243,7 +306,16 @@ class AdminSimStartPriceTest extends AdminTestSupport {
     assertThat(router.liveTrading("EURUSD")).isFalse();
     MarketAdminApi.Symbol eur = marketAdmin.symbols().stream().filter(x -> x.spec().code().equals("EURUSD")).findFirst().orElseThrow();
     assertThat(eur.quoteSource()).isEqualTo(new MarketAdminApi.QuoteSource("simulated", null));
-    for (AlertCheck a : alerts) for (AlertCheck.Item i : a.evaluate()) assertThat(i.name()).doesNotStartWith("quote.");
+    // 拆进程后多了一项 quote.stream（交易连不上报价服务），而且它是正常的（连着）；报价源的告警项（quote.alltick、quote.failover 等）一个都没有
+    List<String> quoteItems = new java.util.ArrayList<>();
+    for (AlertCheck a : alerts) {
+      for (AlertCheck.Item i : a.evaluate()) {
+        if (!i.name().startsWith("quote.")) continue;
+        quoteItems.add(i.name());
+        assertThat(i.ok()).as(i.name() + " 状态正常：" + i.detail()).isTrue();
+      }
+    }
+    assertThat(quoteItems).containsExactly("quote.stream");
     JsonNode pub = body(mvc.perform(get("/api/public/quotes")).andReturn().getResponse());
     assertThat(pub.get("sample").asBoolean()).as("官网仍标示例行情").isTrue();
   }

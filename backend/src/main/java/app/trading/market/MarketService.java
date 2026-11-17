@@ -85,6 +85,11 @@ class MarketService implements MarketApi {
   }
 
   @Override
+  public boolean quoteTradingAllowed(String code) {
+    return processor.tradingAllowed(code);
+  }
+
+  @Override
   public void subscribe(QuoteListener listener) {
     processor.subscribe(listener);
   }

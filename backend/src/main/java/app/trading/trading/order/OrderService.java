@@ -83,6 +83,8 @@ class OrderService {
     SymbolSpec spec = c.spec();
 
     if (!market.isTradingOpen(spec.code(), clock.instant())) throw reject("TRADING_CLOSED", "不在交易时段");
+    // 报价源没有"交易用途"授权的品种只显示、不开仓（第 2 批，TQ-11 A；生产才检查，测试环境不受限制）
+    if (!market.quoteTradingAllowed(spec.code())) throw reject("SYMBOL_NOT_TRADABLE", "该品种暂不开放交易");
     // 品种配置的暂停、风控的暂停（手动、净敞口自动禁开）、两家报价源偏差过大的暂停（负责人 2026-10-17 选 B），
     // 对客户都是同一个原因"品种暂停开仓"，不暴露风控和报价源信息（T5）
     if (spec.openPaused() || risk.symbolOpenPaused(spec.code()) || market.quoteDeviationPaused(spec.code())) throw reject("SYMBOL_PAUSED", "品种暂停开仓");

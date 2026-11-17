@@ -1,5 +1,5 @@
 {
-  "_说明": "项目地图和项目索引的检查配置。由 scripts/check-project-index.mjs 读取，CI 会运行。第 0 批起：后端（父工程 pom.xml、backend/ = trading-app、quote-app/）的根目录文件和 src/main/resources 逐个列出，Java 代码按模块目录列出；三个前端的根目录配置、src/api、src/i18n 逐个列出，其余按目录；端到端 e2e/ 的根目录文件和 e2e/tests/ 逐个列出。",
+  "_说明": "项目地图和项目索引的检查配置。由 scripts/check-project-index.mjs 读取，CI 会运行。第 0 批起：后端（父工程 pom.xml、backend/ = trading-app、quote-app/、第 2 批加的 quote-protocol/）的根目录文件和 src/main/resources、src/test/resources 逐个列出，Java 代码按模块目录列出；三个前端的根目录配置、src/api、src/i18n 逐个列出，其余按目录；端到端 e2e/ 的根目录文件和 e2e/tests/ 逐个列出。",
   "map": "项目地图.md",
   "index": "项目索引.md",
   "entry": ["CLAUDE.md", "AGENTS.md"],
@@ -14,7 +14,10 @@
       "backend/*",
       "backend/src/main/resources/**",
       "backend/src/test/resources/**",
-      "quote-app/**",
+      "quote-app/*",
+      "quote-app/src/main/resources/**",
+      "quote-app/src/test/resources/**",
+      "quote-protocol/*",
       "web/*/*",
       "web/*/src/api/**",
       "web/*/src/i18n/**",
@@ -28,7 +31,7 @@
     {
       "name": "环境变量",
       "section": "2. 环境变量",
-      "sources": [".github/workflows/", ".github/actions/", "scripts/", "backend/src/main/resources/", "e2e/"],
+      "sources": [".github/workflows/", ".github/actions/", "scripts/", "backend/src/main/resources/", "quote-app/src/main/resources/", "e2e/"],
       "patterns": ["\\benv(?:\\.|\\[['\"])([A-Z][A-Z0-9_]+)", "\\$\\{\\{\\s*(?:vars|secrets)\\.([A-Z][A-Z0-9_]+)", "^\\s+([A-Z][A-Z0-9_]+):\\s", "\\$\\{(FX_[A-Z0-9_]+)", "\\b(FX_[A-Z0-9_]+)="],
       "match": "firstColumn",
       "twoWay": "word",

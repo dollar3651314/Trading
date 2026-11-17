@@ -54,133 +54,29 @@ trading:
     admin-login-window: 15m
     # Redis 出错后 30 秒内不再访问 Redis、直接放行
     redis-down-skip: 30s
-  # 行情（内部文档 第 8 节）。质量守卫阈值沿用现有系统（功能地图 M-05、M-06）
+  # 行情的交易侧（内部文档 第 8 节）。第 2 批拆进程：报价源、主备切换、质量守卫在报价服务 quote-app（配置见 quote-app 的 quote.yml），
+  # 这里通过内部 WebSocket 收干净报价，再加点、撮合、推给客户端
   market:
-    # 报价模式（内部文档 第 3.2 节）：none（默认，不启动报价源，防止生产忘了配置时用上模拟价格）；
-    # simulated（开发、测试环境：配了 token 的真实报价源接管它覆盖的品种，其余模拟）；live（生产：只用真实报价源，绝不用模拟价成交）
+    # 报价从哪来：none（默认，不连报价服务，防止生产忘了配置时用上别的价格；后端测试直接喂报价）；remote（连报价服务）
     source: ${FX_MARKET_SOURCE:none}
-    simulated-interval: 500ms
+    # 报价时间（报价源给的时间）距今超过这个不能成交（和报价服务的质量守卫一样）
     stale-after: 5s
-    unchanged-max-age: 1m
-    max-spread-rate: 0.05
-    max-tick-jump-rate: 0.10
-    max-volatility-rate: 0.05
-    volatility-window: 60s
+    # 过期保护（第 2 批）：一个品种超过这个时间没收到新报价就不成交、不开仓；到达时已经超过 stale-after 的旧报价不交给撮合（不按过期价强平）
+    max-quote-age: 3s
     push-interval: 250ms
-    # 真实报价源（内部文档）：外汇、指数、贵金属、原油、美股 AllTick 主、iTick 备；10 个加密货币币安现货主、AllTick 备（第 12 节）。
-    # AllTick、iTick 的 token 只由 负责人 填进服务器 .env，空 = 不用这家；币安不要 token，用开关 FX_QUOTE_BINANCE_ENABLED（默认关闭）。
-    # 都没配时和接入以前完全一样（simulated 模式下全部模拟）。只要报价，不抛单
-    feeds:
-      # AllTick、iTick 谁在前：alltick 或 itick（填 itick 时这两家在所有品种里对调；币安的位置不受影响）
-      primary: ${FX_QUOTE_PRIMARY:alltick}
-      # 主源一个品种多久没报价切备源；主源恢复多久后切回
-      failover-after: ${FX_QUOTE_FAILOVER_AFTER:10s}
-      failback-after: ${FX_QUOTE_FAILBACK_AFTER:30s}
-      # 两家中间价偏差超过这个比例（0.005 = 0.5%）→ 这个品种暂停开仓并告警（平仓、止盈止损、强平照常，用主源价格）；两家的报价都在 cross-check-max-age 以内才比较
-      max-deviation: ${FX_QUOTE_MAX_DEVIATION:0.005}
-      cross-check-max-age: 5s
-      # USDT 计价的映射（代码以 USDT 结尾）乘的系数：负责人 2026-10-17 确认 USDT 按 1:1 当 USD
-      usdt-usd-rate: ${FX_QUOTE_USDT_USD_RATE:1}
-      # 开市时一家报价源多久没给任何报价算告警（quote.alltick / quote.itick / quote.binance）
-      silence-alert: 60s
-      # 断线重连：1 秒起每次翻倍，最长 60 秒；一条连接 60 秒没有任何消息就断开重连
-      reconnect-initial: 1s
-      reconnect-max: 60s
-      idle-timeout: 60s
-      alltick:
-        token: ${FX_QUOTE_ALLTICK_TOKEN:}
-        fx-url: ${FX_QUOTE_ALLTICK_FX_URL:wss://quote.alltick.co/quote-b-ws-api}
-        stock-url: ${FX_QUOTE_ALLTICK_STOCK_URL:wss://quote.alltick.co/quote-stock-b-ws-api}
-        heartbeat: 10s
-        channel-gap: 3s
-      itick:
-        token: ${FX_QUOTE_ITICK_TOKEN:}
-        url: ${FX_QUOTE_ITICK_URL:wss://api.itick.org}
-        heartbeat: 20s
-      # 币安公开行情（第 12 节）：不需要 API Key。默认关闭（不改变现有行为，也避开条款风险：币安公开数据是非商业许可），负责人 决定后在 .env 打开。
-      # 现货地址是只读行情专用域名（美国服务器也能连）。永续（futures）代码保留但默认关闭：负责人 2026-10-17 决定不用币安永续给贵金属、原油、美股报价，
-      # 映射里没有任何品种用它
-      binance:
-        enabled: ${FX_QUOTE_BINANCE_ENABLED:false}
-        spot-url: ${FX_QUOTE_BINANCE_SPOT_WS_URL:wss://data-stream.binance.vision}
-        futures-enabled: ${FX_QUOTE_BINANCE_FUTURES_ENABLED:false}
-        futures-url: ${FX_QUOTE_BINANCE_FUTURES_WS_URL:wss://fstream.binance.com/public}
-        # 每 30 秒发一次 LIST_SUBSCRIPTIONS 确认连接活着（现货每条连接每秒最多 5 条客户端消息）
-        heartbeat: 30s
-        # 一条连接最多几个流（官方上限 1024），超过分多条连接
-        max-streams-per-connection: 200
-        # 官方：一条连接只保持 24 小时。23 小时主动换新连接
-        max-connection-age: 23h
-      # 品种 → [主源, 备源, 第三候补]，每项 "报价源:连接:代码"。AllTick 连接 fx / stock；iTick 连接 forex / indices / crypto / stock（代码写成 代码$地区）。
-      # 币安连接 spot / futures（代码大写，例如 BTCUSDT）。只用最前面两个能用的源：加密货币在币安开关关闭时就是以前的"AllTick 主、iTick 备"，
-      # 打开后是"币安主、AllTick 备"（iTick 不订阅，AllTick 没 token 时 iTick 补上当备源）。
-      # 代码依据和标【推断】的项见技术方案第 2 节，拿到 token 后要核对。没写的品种（例如后台新增的）只走模拟源
-      routes:
-        EURUSD: ["alltick:fx:EURUSD", "itick:forex:EURUSD$GB"]
-        GBPUSD: ["alltick:fx:GBPUSD", "itick:forex:GBPUSD$GB"]
-        USDJPY: ["alltick:fx:USDJPY", "itick:forex:USDJPY$GB"]
-        USDCHF: ["alltick:fx:USDCHF", "itick:forex:USDCHF$GB"]
-        USDCAD: ["alltick:fx:USDCAD", "itick:forex:USDCAD$GB"]
-        AUDUSD: ["alltick:fx:AUDUSD", "itick:forex:AUDUSD$GB"]
-        NZDUSD: ["alltick:fx:NZDUSD", "itick:forex:NZDUSD$GB"]
-        EURGBP: ["alltick:fx:EURGBP", "itick:forex:EURGBP$GB"]
-        EURJPY: ["alltick:fx:EURJPY", "itick:forex:EURJPY$GB"]
-        GBPJPY: ["alltick:fx:GBPJPY", "itick:forex:GBPJPY$GB"]
-        EURCHF: ["alltick:fx:EURCHF", "itick:forex:EURCHF$GB"]
-        EURAUD: ["alltick:fx:EURAUD", "itick:forex:EURAUD$GB"]
-        EURCAD: ["alltick:fx:EURCAD", "itick:forex:EURCAD$GB"]
-        AUDJPY: ["alltick:fx:AUDJPY", "itick:forex:AUDJPY$GB"]
-        CADJPY: ["alltick:fx:CADJPY", "itick:forex:CADJPY$GB"]
-        CHFJPY: ["alltick:fx:CHFJPY", "itick:forex:CHFJPY$GB"]
-        AUDCAD: ["alltick:fx:AUDCAD", "itick:forex:AUDCAD$GB"]
-        AUDNZD: ["alltick:fx:AUDNZD", "itick:forex:AUDNZD$GB"]
-        GBPAUD: ["alltick:fx:GBPAUD", "itick:forex:GBPAUD$GB"]
-        GBPCHF: ["alltick:fx:GBPCHF", "itick:forex:GBPCHF$GB"]
-        USDCNH: ["alltick:fx:USDCNH", "itick:forex:USDCNH$GB"]
-        XAUUSD: ["alltick:fx:GOLD", "itick:forex:XAUUSD$GB"]
-        XAGUSD: ["alltick:fx:Silver", "itick:forex:XAGUSD$GB"]
-        XTIUSD: ["alltick:fx:USOIL", "itick:forex:XTIUSD$GB"]
-        XBRUSD: ["alltick:fx:UKOIL", "itick:forex:XBRUSD$GB"]
-        US30: ["alltick:fx:US30", "itick:indices:US30USD$GB"]
-        US500: ["alltick:fx:US500", "itick:indices:SPX500USD$GB"]
-        NAS100: ["alltick:fx:NAS100", "itick:indices:NAS100$GB"]
-        US2000: ["alltick:fx:US2000"]
-        GER40: ["alltick:fx:GER30", "itick:indices:GER40$GB"]
-        UK100: ["alltick:fx:UK100", "itick:indices:UK100$GB"]
-        FRA40: ["alltick:fx:FRA40", "itick:indices:FR40EUR$GB"]
-        JPN225: ["alltick:fx:JPN225", "itick:indices:JPN225$GB"]
-        HK50: ["alltick:fx:HK50", "itick:indices:HKG33$GB"]
-        AUS200: ["alltick:fx:AUS200", "itick:indices:AUS200$GB"]
-        BTCUSD: ["binance:spot:BTCUSDT", "alltick:fx:BTCUSDT", "itick:crypto:BTCUSDT$BA"]
-        ETHUSD: ["binance:spot:ETHUSDT", "alltick:fx:ETHUSDT", "itick:crypto:ETHUSDT$BA"]
-        SOLUSD: ["binance:spot:SOLUSDT", "alltick:fx:SOLUSDT", "itick:crypto:SOLUSDT$BA"]
-        XRPUSD: ["binance:spot:XRPUSDT", "alltick:fx:XRPUSDT", "itick:crypto:XRPUSDT$BA"]
-        BNBUSD: ["binance:spot:BNBUSDT", "alltick:fx:BNBUSDT", "itick:crypto:BNBUSDT$BA"]
-        DOGEUSD: ["binance:spot:DOGEUSDT", "alltick:fx:DOGEUSDT", "itick:crypto:DOGEUSDT$BA"]
-        ADAUSD: ["binance:spot:ADAUSDT", "alltick:fx:ADAUSDT", "itick:crypto:ADAUSDT$BA"]
-        LTCUSD: ["binance:spot:LTCUSDT", "alltick:fx:LTCUSDT", "itick:crypto:LTCUSDT$BA"]
-        DOTUSD: ["binance:spot:DOTUSDT", "alltick:fx:DOTUSDT", "itick:crypto:DOTUSDT$BA"]
-        BCHUSD: ["binance:spot:BCHUSDT", "alltick:fx:BCHUSDT", "itick:crypto:BCHUSDT$BA"]
-        AAPL: ["alltick:stock:AAPL.US", "itick:stock:AAPL$US"]
-        MSFT: ["alltick:stock:MSFT.US", "itick:stock:MSFT$US"]
-        NVDA: ["alltick:stock:NVDA.US", "itick:stock:NVDA$US"]
-        TSLA: ["alltick:stock:TSLA.US", "itick:stock:TSLA$US"]
-        AMZN: ["alltick:stock:AMZN.US", "itick:stock:AMZN$US"]
+    # 报价服务（source=remote 时用）。内部 Key 只由负责人填进服务器 .env，和报价服务的 FX_QUOTE_INTERNAL_KEY 是同一个值
+    quote-app:
+      url: ${FX_QUOTE_APP_URL:http://127.0.0.1:8090}
+      key: ${FX_QUOTE_INTERNAL_KEY:}
+      reconnect-initial: 500ms
+      reconnect-max: 30s
+      idle-timeout: 10s
+      sync-retry: 30s
+      # 给报价服务发一条消息最多等多久，超时说明连接半死，断开重连
+      send-timeout: 3s
     # 没有对应外汇品种的币种：港币按联系汇率（1 USD = 7.78 HKD）
     fixed-usd-rates:
       HKD: 0.12853470
-    # K 线保留条数（v2 第 11.2 节，market/kline/KlineRetention）：每个品种每个周期只保留最近 N 根，每天 UTC 20:10 分批清理一次
-    kline-retention:
-      enabled: true
-      cron: "0 10 20 * * *"
-      batch-size: 5000
-      keep:
-        1m: 10080
-        5m: 8640
-        15m: 8640
-        1h: 8760
-        4h: 4380
-        1d: 3650
     # 官网公开行情 GET /api/public/quotes（v2 需求 4.2，不需要登录）：只返回这些品种的卖价和当日涨跌幅，按这个顺序；
     # 整份结果缓存 cache-ttl，所有访客共用。改品种只改这里（需求要求 8–12 个）。
     # source：官网用哪种价格。simulated（默认）一律模拟价、显示"示例行情"；live 用交易报价（真实报价源的价格），
