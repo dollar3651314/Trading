@@ -39,7 +39,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 /**
  * 第 3 批客户端交易页（原型 P3）要的两样，跨进程（真实的报价服务 + trading-app remote）：
  * <ul>
- *   <li>"暂不开放交易"：报价服务启用授权检查（等同生产）、品种没有"交易用途"授权时，品种列表的 {@code tradable} 是 false（下单拒 SYMBOL_NOT_TRADABLE 已有测试）；</li>
+ *   <li>"暂不开放交易"：报价服务明确打开授权检查（enforce=true；所有环境默认关）、品种没有"交易用途"授权时，品种列表的 {@code tradable} 是 false（下单拒 SYMBOL_NOT_TRADABLE 已有测试）；</li>
  *   <li>"暂无报价"：行情推送连上先推 {@code quoteStatus}；开市的品种 3 秒都没收到报价推 available=false，来了报价推 true（恢复不用刷新）。</li>
  * </ul>
  * 时钟：两边都停在 2026-10-14（周三）10:00 UTC，交易这边按需要往前拨。

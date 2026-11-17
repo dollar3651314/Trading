@@ -5,11 +5,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * 报价源授权检查（quote.yml 的 quote.license）。
  *
- * @param enforce 是否按"交易用途"授权决定能不能开仓：auto（默认，报价模式 live 即生产时启用，simulated 的测试环境不受限制）/ true / false。<b>报价模式 live 时一律启用</b>，false 只在非生产有效
+ * @param enforce 是否检查授权（开仓看"交易用途"、外部 Key 看"转售"）：只有 {@code true} 才检查；false（默认）、auto（旧写法）和其他值一律不检查。
+ *     <b>所有环境默认关，包括报价模式 live 和配了真实报价源</b>（Amos 2026-11-17 决定"授权检查彻底关掉"）
  */
 @ConfigurationProperties(prefix = "quote.license")
 public record LicenseProperties(String enforce) {
   public LicenseProperties {
-    enforce = enforce == null || enforce.isBlank() ? "auto" : enforce.strip().toLowerCase(java.util.Locale.ROOT);
+    enforce = enforce == null || enforce.isBlank() ? "false" : enforce.strip().toLowerCase(java.util.Locale.ROOT);
+  }
+
+  /** 只有明确设 true 才检查 */
+  public boolean enforced() {
+    return "true".equals(enforce);
   }
 }

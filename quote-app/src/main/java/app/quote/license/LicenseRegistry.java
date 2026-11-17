@@ -19,8 +19,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * 报价源授权登记（技术方案 08 页，TQ-11 A）：表 quote_source_license 的内存快照，改完立即重新加载，另外每分钟重新加载一次（到期日按天生效）。
+ * <b>是否检查只看 {@code FX_QUOTE_LICENSE_ENFORCE}，默认关（所有环境，Amos 2026-11-17）</b>；关的时候下面两项都不限制，登记只做记录和显示。
  * <ul>
- *   <li>{@link #tradingUse}：生产（启用检查时）只有"交易用途"已授权的源的报价能用来<b>开仓</b>；报价照常推（只显示），
+ *   <li>{@link #tradingUse}：启用检查时只有"交易用途"已授权的源的报价能用来<b>开仓</b>；报价照常推（只显示），
  *       {@code QuoteRouter} 在两家都有新价时优先用有授权的那家；</li>
  *   <li>{@link #allowed}：三项里任意一项（登录后展示、转售给第 3 批用）。</li>
  * </ul>
@@ -35,20 +36,17 @@ public class LicenseRegistry implements TradingLicenses {
   private final boolean enforced;
   private volatile Map<String, QuoteLicense> byKey = Map.of();
 
-  LicenseRegistry(JdbcTemplate jdbc, Clock clock, LicenseProperties props, QuoteProperties quote, app.quote.feed.QuoteFeedsProperties feeds) {
+  LicenseRegistry(JdbcTemplate jdbc, Clock clock, LicenseProperties props) {
     this.jdbc = jdbc;
     this.clock = clock;
-    // 一律检查的情况（第 3 批审查）：报价模式 live（生产），或者在用真实报价源（任何一家配了 token / 打开了开关）——只要用的是报价商的真实数据，
-    // 交易用途和转售都要授权，不管这台机器叫不叫"生产"；FX_QUOTE_LICENSE_ENFORCE=false 只在只用模拟源时有效
-    boolean live = realData(quote, feeds);
-    if (live && "false".equals(props.enforce())) {
-      org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).warn("在用真实报价数据（报价模式 live 或配了真实报价源），忽略 FX_QUOTE_LICENSE_ENFORCE=false，授权检查照常启用");
-    }
-    this.enforced = live || "true".equals(props.enforce());
+    // 是否检查只看 FX_QUOTE_LICENSE_ENFORCE（Amos 2026-11-17 决定"授权检查彻底关掉"，所有环境默认关，含报价模式 live、配了真实报价源；
+    // 推翻第 3 批审查"在用真实数据时一律检查"）。只有明确设 true 才检查；登记照常可以录、照常显示
+    this.enforced = props.enforced();
+    if (!enforced) org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).info("报价源授权检查没启用（FX_QUOTE_LICENSE_ENFORCE 不是 true）：开仓、转售不看授权登记");
     reload();
   }
 
-  /** 在用报价商的真实数据：报价模式 live，或者任何一家真实报价源配了 token / 打开了开关 */
+  /** 在用报价商的真实数据：报价模式 live，或者任何一家真实报价源配了 token / 打开了开关（现在只给开发者文档 /docs/ 的 auto 用，不再决定授权检查） */
   public static boolean realData(QuoteProperties quote, app.quote.feed.QuoteFeedsProperties feeds) {
     if (QuoteRouter.mode(quote.source()) == QuoteRouter.Mode.LIVE) return true;
     if (feeds == null) return false;
