@@ -4,11 +4,17 @@
 # 部署方案 v1 07 页（TD4-20 = B）：测试环境用现有的阿里云 2 核 2G，和 TopUP **轮流跑、不同时跑**（sudo trading on / off）；
 # Trading 自己占 80、443，自己的 MySQL、Redis，不动 TopUP 的任何容器、配置和数据。
 # trading-app 只绑本机 127.0.0.1:8080 给部署脚本看健康检查；quote-app、MySQL、Redis 不映射任何端口。
-# 内存（Amos 11/17 选 B：在现有 2G 上单独模式硬跑，接受约 7% 余量，是 Amos 批准的 C75 例外）：
-#   trading-app 380、quote-app 264、mysql 224、redis 16、web 16，合计 900 MB（11/17 复审：quote-app 实测 235/248 余量太小，从 trading-app、redis、web 匀过去） + Docker 约 80 = 980 MB；2G 机器停掉所有项目后可用约 1,050 MB。
-#   每个容器 mem_limit = memswap_limit（不用交换分区）；JVM 各区（堆、元空间、代码缓存、直接内存、线程栈）显式写在 JAVA_TOOL_OPTIONS，
-#   按开发机实测（11/17，并发请求 3 分钟后的用量，实际执行）分配，数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等）。
-#   两个 JVM 都按 2 核算（-XX:ActiveProcessorCount=2，和服务器一样，GC、编译线程数固定）。
+# 内存（Amos 11/17 选 B：在现有 2G 上单独模式硬跑，是 Amos 批准的 C75 例外；11/17 测试服务器实测后调整，合计待 Amos 确认）：
+#   trading-app 348、quote-app 264、mysql 320、redis 16、web 16，合计 964 MB（原 900：trading-app 380、mysql 224）。
+#   为什么改：测试服务器 setup 第 ⑤ 步备份时 mysql 用到 208/224（mysqldump 跑在 mysql 容器里，也算进它的上限），顶到上限又不能用交换分区，
+#   内核反复回收页面（系统态 CPU 92.7%、负载 48），卡了 20 多分钟后 mysqldump 断连。同一时刻 trading-app 286/380、quote-app 121/264、web 11、redis 8。
+#   trading-app 余量最大（服务器和开发机实测都约 287），降 32 给 mysql；quote-app 开发机并发实测约 243，不降。
+#   门槛：install 时实测可用 1,029 MB（那时 Docker 守护进程已在内存里，原来"Docker 约 80"大部分已含在这个数里，推断），
+#   合计 964 + 每个容器的运行开销约 36（推断，未实测）= 1,000，启动门槛 TR_MIN_MEM_MB 仍是 1,000。
+#   除 mysql 外每个容器 mem_limit = memswap_limit（不用交换分区：JVM 被换出去会卡死 GC，宁可超限被杀重启）；
+#   mysql 例外：内存 320 + 最多 128 MB 交换分区（memswap_limit 448，主机有 2 GB 交换分区），顶到上限时把不常用的页换出去，不再卡死在回收上。
+#   JVM 各区（堆、元空间、代码缓存、直接内存、线程栈）显式写在 JAVA_TOOL_OPTIONS，按开发机实测（11/17，并发请求 3 分钟后的用量，实际执行）分配，
+#   数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等）。两个 JVM 都按 2 核算（-XX:ActiveProcessorCount=2，和服务器一样，GC、编译线程数固定）。
 #   trading on / install 要可用内存 ≥ 1,000 MB 才启动；内存守护（trading memguard，每 30 秒）可用内存低于阈值时只停 Trading，不碰 TopUP。
 # 三张自己的网络：
 #   internal（不能出公网）：mysql、redis、trading-app、quote-app。trading-web 不接，碰不到数据库
@@ -68,7 +74,7 @@ services:
       FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 380（开发机实测并发后约 287）
+      # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 348（开发机实测并发后约 287，测试服务器跑 30 分钟约 286）
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
       # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
@@ -117,8 +123,8 @@ services:
         condition: service_started
     # 单实例：停机时先停止接收新订单、处理完队列再退出
     stop_grace_period: 60s
-    mem_limit: ${TR_MEM_APP:-380m}
-    memswap_limit: ${TR_MEM_APP:-380m}
+    mem_limit: ${TR_MEM_APP:-348m}
+    memswap_limit: ${TR_MEM_APP:-348m}
     logging: *logging
 
   quote-app:
@@ -133,7 +139,7 @@ services:
       FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，线程栈 256K × 约 70 + 本机内存，容器 264（开发机实测并发后约 243，元空间用到约 78）
+      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，线程栈 256K × 约 70 + 本机内存，容器 264（开发机实测并发后约 243，元空间用到约 78；测试服务器跑 30 分钟约 121）
       JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
       FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
       FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
@@ -198,8 +204,9 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    mem_limit: ${TR_MEM_MYSQL:-224m}
-    memswap_limit: ${TR_MEM_MYSQL:-224m}
+    # 内存 320（服务器上 224 时备份卡死，见开头）；只有 mysql 允许用交换分区，最多 128 MB（memswap_limit = 内存 + 交换）
+    mem_limit: ${TR_MEM_MYSQL:-320m}
+    memswap_limit: ${TR_MEMSWAP_MYSQL:-448m}
     logging: *logging
 
   redis:

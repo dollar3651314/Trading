@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 部署工具包的静态检查（第 4 批）：CI 的 deploy-check job 运行，本机也可以运行：bash deploy/check.sh
 #   1. shellcheck（服务器脚本）  2. docker compose config（用 .env.example 的变量名填一次性假值）
-#   3. 同版本 nginx 镜像里 nginx -t（四个假域名、临时自签证书）  4. compose 约束：每个容器 mem_limit = memswap_limit、只有 web 映射公网端口、
-#      trading-app 只绑 127.0.0.1、quote-app 不映射端口、内存合计 2,208 MB
+#   3. 同版本 nginx 镜像里 nginx -t（四个假域名、临时自签证书）  4. compose 约束：除 mysql 外每个容器 mem_limit = memswap_limit（mysql 正好多 128 MB 交换分区）、只有 web 映射公网端口、
+#      trading-app 只绑 127.0.0.1、quote-app 不映射端口、内存合计 964 MB
 # 不需要任何密钥；假值只在临时目录里，跑完删掉。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,9 +21,13 @@ cfg() { docker compose --project-name trading --project-directory deploy/kit -f 
 check "compose 能解析" cfg -q
 cfg --format json > "$tmp/compose.json"
 jqc() { jq -e "$1" "$tmp/compose.json" > /dev/null; }
-check "每个容器 mem_limit = memswap_limit" jqc '[.services[] | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
-check "默认内存上限合计 900 MB（+ Docker 约 80 = 980；Amos 批准的 C75 例外，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (900 * 1024 * 1024)'
-check "JVM 堆 + 元空间 + 代码缓存 + 直接内存 < 容器上限（trading-app 304 < 380、quote-app 196 < 264）" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=\${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-16m}" deploy/kit/docker-compose.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-8m}" deploy/kit/docker-compose.yml'
+check "除 mysql 外每个容器 mem_limit = memswap_limit（不用交换分区）" jqc '[.services | to_entries[] | select(.key != "mysql") | .value | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
+check "mysql 内存 320 MB、交换分区正好 128 MB（memswap_limit 448）" jqc '(.services.mysql.mem_limit | tonumber) == (320 * 1024 * 1024) and ((.services.mysql.memswap_limit | tonumber) - (.services.mysql.mem_limit | tonumber)) == (128 * 1024 * 1024)'
+check "默认内存上限合计 964 MB（+ 容器运行开销约 36 = 启动门槛 1,000；Amos 批准的 C75 例外，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (964 * 1024 * 1024)'
+check "启动门槛默认 1,000 MB、恢复演练临时库默认 320 MB" bash -c 'grep -q "^MIN_MEM_MB=\${TR_MIN_MEM_MB:-1000}$" deploy/kit/trading && grep -q "^DRILL_MEM_MB=\${TR_DRILL_MEM_MB:-320}$" deploy/kit/trading'
+check "备份导出超时（默认 300 秒）明显小于自动更新服务的 15 分钟" bash -c 'grep -q "^DUMP_TIMEOUT=\${TR_DUMP_TIMEOUT:-300}$" deploy/kit/trading && grep -q "^TimeoutStartSec=15min$" deploy/kit/systemd/trading-deploy.service'
+check "JVM 堆 + 元空间 + 代码缓存 + 直接内存 < 容器上限（trading-app 304 < 348、quote-app 196 < 264）" jqc '(.services["trading-app"].mem_limit | tonumber) == (348 * 1024 * 1024) and (.services["quote-app"].mem_limit | tonumber) == (264 * 1024 * 1024)'
+check "JVM 各区的默认值没变（和上一条的 304、196 对得上）" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=\${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-16m}" deploy/kit/docker-compose.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-8m}" deploy/kit/docker-compose.yml'
 check "只有 trading-web 映射公网端口（80、443）" jqc '[.services | to_entries[] | select(.value.ports != null) | .value.ports[] | select((.host_ip // "") != "127.0.0.1") | .published] | sort == ["443","80"]'
 check "trading-app 只绑 127.0.0.1:8080" jqc '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"8080","protocol":"tcp"}]'
 check "quote-app、mysql、redis 不映射端口" jqc '[.services["quote-app","mysql","redis"].ports] | all(. == null)'
