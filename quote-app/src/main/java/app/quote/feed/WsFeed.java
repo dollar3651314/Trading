@@ -147,6 +147,11 @@ public abstract class WsFeed implements QuoteFeed {
   /** 心跳消息；为空时这次不发（只做空闲检测） */
   protected abstract String heartbeat(Conn c);
 
+  /** 一次握手（TCP 连接 + HTTP 升级到收到 101）最多等多久，超过算失败、按退避重连；默认 10 秒，测试可以改短 */
+  protected Duration connectTimeout() {
+    return CONNECT_TIMEOUT;
+  }
+
   /** 一条连接最长用多久，到点主动换新连接；为空 = 不限（默认） */
   protected Duration maxConnectionAge() {
     return null;
@@ -272,7 +277,7 @@ public abstract class WsFeed implements QuoteFeed {
     c.subscribed = false;
     CompletableFuture<WebSocket> f;
     try {
-      f = handshake(http.newWebSocketBuilder().connectTimeout(CONNECT_TIMEOUT)).buildAsync(c.uri, new Listener(c, gen));
+      f = handshake(http.newWebSocketBuilder().connectTimeout(connectTimeout())).buildAsync(c.uri, new Listener(c, gen));
     } catch (RuntimeException e) {
       failed(c, gen, describe(e));
       return;

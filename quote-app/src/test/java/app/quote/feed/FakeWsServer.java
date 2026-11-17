@@ -21,6 +21,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -142,8 +143,12 @@ final class FakeWsServer implements AutoCloseable {
   volatile Consumer<Conn> onConnect = c -> {};
   /** 收到客户端消息时调用（在读线程上） */
   volatile BiConsumer<Conn, String> onMessage = (c, m) -> {};
-  /** 握手次数（含被拒绝的） */
-  volatile int handshakes;
+  /** 握手次数（含被拒绝的、挂住的）；每条连接一个线程，所以用原子计数 */
+  final AtomicInteger handshakes = new AtomicInteger();
+  /** 接下来这么多次握手"挂住"：读完请求后既不回 101 也不关连接（模拟握手卡住），直到客户端自己断开 */
+  final AtomicInteger hangHandshakes = new AtomicInteger();
+  /** 被挂住过的握手次数 */
+  final AtomicInteger hungHandshakes = new AtomicInteger();
 
   FakeWsServer() throws IOException {
     server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
@@ -171,7 +176,7 @@ final class FakeWsServer implements AutoCloseable {
       if (conns.size() >= n) return conns.get(n - 1);
       Thread.sleep(10);
     }
-    throw new AssertionError("等了 " + timeout + " 也没有第 " + n + " 条连接（现在 " + conns.size() + " 条，握手 " + handshakes + " 次）");
+    throw new AssertionError("等了 " + timeout + " 也没有第 " + n + " 条连接（现在 " + conns.size() + " 条，握手 " + handshakes.get() + " 次）");
   }
 
   /** 等到某个路径的连接数达到 n，返回最后一条 */
@@ -209,7 +214,14 @@ final class FakeWsServer implements AutoCloseable {
         int i = l.indexOf(':');
         if (i > 0) headers.put(l.substring(0, i).strip().toLowerCase(Locale.ROOT), l.substring(i + 1).strip());
       }
-      handshakes++;
+      handshakes.incrementAndGet();
+      if (hangHandshakes.getAndUpdate(n -> n > 0 ? n - 1 : 0) > 0) {
+        hungHandshakes.incrementAndGet();
+        while (in.read() != -1) {
+          // 不回应，等客户端放弃（读到 -1 或连接被重置）
+        }
+        return;
+      }
       String target = requestLine.split(" ")[1];
       String path = target.contains("?") ? target.substring(0, target.indexOf('?')) : target;
       String query = target.contains("?") ? target.substring(target.indexOf('?') + 1) : "";
