@@ -42,6 +42,7 @@ check "Redis 只在 internal 网络、不映射端口" jqc '(.services.redis.net
 check "给 TopUP 的约定：trading-deploy 定时器的服务指向 /opt/trading/、有 backup.sh" bash -c 'grep -q "^ExecStart=/opt/trading/" deploy/kit/systemd/trading-deploy.service && test -x deploy/kit/backup.sh'
 check "内存守护定时器在、trading on 会打开它" bash -c 'grep -q "^ExecStart=/opt/trading/trading memguard" deploy/kit/systemd/trading-memguard.service && grep -q "trading-memguard.timer" deploy/kit/trading'
 check "trading-web 只挂 Trading 自己的证书目录（不挂整个 /etc/letsencrypt）" jqc '[.services[].volumes[]? | select(.source | startswith("/etc/letsencrypt")) | .source] | sort == ["/etc/letsencrypt/archive/trading","/etc/letsencrypt/live/trading"]'
+check "报价源授权检查关（FX_QUOTE_LICENSE_ENFORCE 写死 \"false\"，Amos 2026-11-17）" jqc '.services["quote-app"].environment.FX_QUOTE_LICENSE_ENFORCE == "false"'
 # 测试环境验收 T-1：FX_QUOTE_OPEN_DOCS=auto 在"配了任何真实报价源"时也藏文档，测试环境币安默认打开（TD4-11），所以必须写死 true
 check "测试环境开发者文档 /docs/ 能看（FX_QUOTE_OPEN_DOCS 写死 true，不能是 auto）" jqc '.services["quote-app"].environment.FX_QUOTE_OPEN_DOCS == "true"'
 check "测试环境官网不让搜索引擎收录（trading-web 的 FX_NGINX_NOINDEX 写死 true）" jqc '.services["trading-web"].environment.FX_NGINX_NOINDEX == "true"'

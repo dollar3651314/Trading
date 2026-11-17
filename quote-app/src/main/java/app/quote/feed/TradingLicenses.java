@@ -5,7 +5,7 @@ package app.quote.feed;
  */
 public interface TradingLicenses {
 
-  /** 没有启用授权检查（测试环境）：所有源都当作已授权 */
+  /** 没有启用授权检查：所有源都当作已授权（所有环境默认就是这样，Amos 2026-11-17） */
   TradingLicenses OFF = new TradingLicenses() {
     @Override
     public boolean enforced() {
@@ -18,7 +18,7 @@ public interface TradingLicenses {
     }
   };
 
-  /** 是否启用授权检查（默认只在报价模式 live，即生产启用） */
+  /** 是否启用授权检查：只有 FX_QUOTE_LICENSE_ENFORCE=true 才启用，所有环境默认关（Amos 2026-11-17） */
   boolean enforced();
 
   /** 这家报价商这个品种今天有没有"交易用途"授权；没启用检查时一律 true */

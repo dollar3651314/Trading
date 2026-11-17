@@ -151,7 +151,8 @@ services:
       FX_QUOTE_MARKET_SOURCE: simulated
       FX_QUOTE_BINANCE_ENABLED: ${FX_QUOTE_BINANCE_ENABLED:-true}
       FX_QUOTE_BINANCE_FUTURES_ENABLED: "false"
-      FX_QUOTE_LICENSE_ENFORCE: auto
+      # 报价源授权检查关（Amos 2026-11-17"授权检查彻底关掉"，所有环境默认关；代码默认也是 false，这里写明）
+      FX_QUOTE_LICENSE_ENFORCE: "false"
       # 开发者文档 /docs/：测试环境明确打开（测试环境验收 T-1）。auto 在"配了任何真实报价源"时也不给看，而测试环境币安默认打开（TD4-11），
       # auto 会让 /docs/ 返回 404；需求是"对外开放前只在测试环境能看"，所以这里写死 true。生产不能照抄，用 auto 或 false
       FX_QUOTE_OPEN_DOCS: "true"
