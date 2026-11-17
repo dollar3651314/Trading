@@ -4,3 +4,6 @@ target/
 .env
 .env.*
 !.env.example
+dist/
+coverage/
+backend/data/
