@@ -163,6 +163,8 @@ class QuoteStatusPushTest {
     try {
       assertThat(sent).as("连上先推全部报价，再推一次当前状态").anyMatch(m -> m.contains("\"type\":\"quotes\""));
       assertThat(sent).anyMatch(m -> m.contains("\"type\":\"quoteStatus\"") && m.contains("\"available\":true"));
+      // 先让定时推送也看到"可以成交"（不然它记的上一次状态可能还是连上之前的，拨表后就看不到"变化"）
+      assertThat(status(sent, true)).isTrue();
       sent.clear();
       ((MutableClock) clock).advance(Duration.ofSeconds(4));
       await("4 秒没有新报价，不能成交", () -> !push.quoteAvailable());
