@@ -5,6 +5,7 @@ import * as real from './real/wallet';
 import type { DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from './types';
 
 export const getDepositAddresses = (): Promise<DepositAddress[]> => (IS_MOCK ? mock.getDepositAddresses() : real.getDepositAddresses());
+export const requestDepositAddress = (network: Network): Promise<DepositAddress> => (IS_MOCK ? mock.requestDepositAddress(network) : real.requestDepositAddress(network));
 export const listDeposits = (): Promise<DepositRecord[]> => (IS_MOCK ? mock.listDeposits() : real.listDeposits());
 export const listLedger = (q: LedgerQuery): Promise<Page<LedgerItem>> => (IS_MOCK ? mock.listLedger(q) : real.listLedger(q));
 export const getWithdrawInfo = (): Promise<WithdrawInfo> => (IS_MOCK ? mock.getWithdrawInfo() : real.getWithdrawInfo());

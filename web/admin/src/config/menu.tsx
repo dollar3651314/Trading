@@ -42,6 +42,7 @@ export const MENU: MenuItemDef[] = [
       { key: 'deposits', labelKey: 'menu.deposits', path: '/funds/deposits', permission: 'deposit:view' },
       { key: 'withdrawals', labelKey: 'menu.withdrawals', path: '/funds/withdrawals', permission: 'withdrawal:view', badge: 'withdrawals' },
       { key: 'reconciliation', labelKey: 'menu.reconciliation', path: '/funds/reconciliation', permission: 'recon:view' },
+      { key: 'walletProvider', labelKey: 'menu.walletProvider', path: '/funds/provider', permission: 'provider:view' },
       { key: 'tasks', labelKey: 'menu.tasks', path: '/funds/tasks', permission: 'task:view' },
     ],
   },

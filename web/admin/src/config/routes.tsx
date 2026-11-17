@@ -11,6 +11,7 @@ import { DepositsPage } from '../pages/funds/DepositsPage';
 import { WithdrawalsPage } from '../pages/funds/WithdrawalsPage';
 import { AutoApprovePage } from '../pages/funds/AutoApprovePage';
 import { ReconPage } from '../pages/funds/ReconPage';
+import { ProviderPage } from '../pages/funds/ProviderPage';
 import { TasksPage } from '../pages/funds/TasksPage';
 import { OrdersPage } from '../pages/trading/OrdersPage';
 import { PositionsPage } from '../pages/trading/PositionsPage';
@@ -47,6 +48,7 @@ export const APP_ROUTES: RouteDef[] = [
   // v2 自动审批规则（原型；真实接口模式下显示"未上线"），从出金审核页进入，归在出金审核菜单下
   { path: '/funds/withdrawals/auto-rules', menuKey: 'withdrawals', element: <AutoApprovePage /> },
   { path: '/funds/reconciliation', menuKey: 'reconciliation', element: <ReconPage /> },
+  { path: '/funds/provider', menuKey: 'walletProvider', element: <ProviderPage /> },
   // v2 资金归集（原型；真实接口模式下显示"未上线"），从对账页进入，归在入金对账菜单下
   { path: '/funds/tasks', menuKey: 'tasks', element: <TasksPage /> },
   { path: '/trading/orders', menuKey: 'orders', element: <OrdersPage /> },

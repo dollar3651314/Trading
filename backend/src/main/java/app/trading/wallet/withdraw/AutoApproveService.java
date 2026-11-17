@@ -57,6 +57,8 @@ public class AutoApproveService implements AutoApproveAdminApi {
   private final CustomerFlowApi flows;
   private final MarketApi market;
   private final RiskApi risk;
+  /** 钱包提供方的总余额（不分链）在 {@link HotWalletApi} 里的链名 */
+  static final String TOTAL = "ALL";
   private final HotWalletApi hot;
   private final ObjectMapper json;
   private final TransactionTemplate tx;
@@ -245,15 +247,23 @@ public class AutoApproveService implements AutoApproveAdminApi {
       return risk.globalOpenPaused();
     }
 
+    /**
+     * 这条链的余额；没有按链的余额时用钱包提供方的总余额（链 = ALL，第 1 批：TopUP 只有一个 USDT 总数，TD-12）。
+     */
     @Override
     public Optional<AutoApproveEngine.HotBalance> hotBalance(String network) {
-      return hot.hotBalances().stream().filter(b -> b.chain().equals(network) && !b.gas()).findFirst()
+      var all = hot.hotBalances();
+      return all.stream().filter(b -> b.chain().equals(network) && !b.gas()).findFirst()
+          .or(() -> all.stream().filter(b -> TOTAL.equals(b.chain()) && !b.gas()).findFirst())
           .map(b -> new AutoApproveEngine.HotBalance(b.balance(), b.checkedAt(), b.error()));
     }
 
+    /** 按链余额时只算同一条链排在前面的；用提供方总余额时算所有链"已审核待放款"和"延迟中"的合计（已通过未付合计） */
     @Override
     public BigDecimal queuedNet(String network) {
-      return mapper.queuedNet(network);
+      var all = hot.hotBalances();
+      boolean total = all.stream().noneMatch(b -> b.chain().equals(network) && !b.gas()) && all.stream().anyMatch(b -> TOTAL.equals(b.chain()) && !b.gas());
+      return mapper.queuedNet(total ? null : network);
     }
   };
 

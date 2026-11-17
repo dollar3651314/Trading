@@ -27,12 +27,13 @@ class WalletAdmin implements WalletAdminApi {
 
   private Deposit deposit(WalletAdminMapper.DepositRow r) {
     int need = confirmations.of(Chain.valueOf(r.chain));
-    return new Deposit(r.id, r.publicNo, r.userId, r.chain, r.txHash, r.amount, Math.min(r.confirmations, need), need, r.status, r.createdAt, r.creditedAt);
+    return new Deposit(r.id, r.publicNo, r.userId, r.chain, r.txHash, r.amount, Math.min(r.confirmations, need), need, r.status, r.createdAt, r.creditedAt,
+        r.provider, r.providerRef);
   }
 
   private static Withdrawal withdrawal(WalletAdminMapper.WithdrawalRow r) {
     return new Withdrawal(r.id, r.publicNo, r.userId, r.amount, r.fee, r.network, r.address, r.firstUse, r.whitelistAddedAt, r.status, r.delayEndsAt, r.createdAt,
-        r.reviewerId, r.rejectReason, r.txHash);
+        r.reviewerId, r.rejectReason, r.txHash, r.statusAt);
   }
 
   /** 客户筛选结果为空、也没有按编号找时直接返回空页（避免 IN () 的 SQL） */
@@ -47,11 +48,12 @@ class WalletAdmin implements WalletAdminApi {
 
   @Override
   @Transactional(readOnly = true)
-  public Page<Deposit> deposits(String chain, Collection<String> statuses, String txHash, Collection<Long> userIds, Long no, int offset, int limit) {
+  public Page<Deposit> deposits(String chain, Collection<String> statuses, String txHash, Collection<Long> userIds, Long no, String ref, LocalDateTime from,
+      LocalDateTime to, int offset, int limit) {
     if (nothing(userIds, no)) return new Page<>(List.of(), 0);
     Collection<Long> us = users(userIds);
-    return new Page<>(mapper.deposits(chain, statuses, txHash, us, no, offset, limit).stream().map(this::deposit).toList(),
-        mapper.countDeposits(chain, statuses, txHash, us, no));
+    return new Page<>(mapper.deposits(chain, statuses, txHash, us, no, ref, from, to, offset, limit).stream().map(this::deposit).toList(),
+        mapper.countDeposits(chain, statuses, txHash, us, no, ref, from, to));
   }
 
   @Override
@@ -93,7 +95,7 @@ class WalletAdmin implements WalletAdminApi {
   @Transactional(readOnly = true)
   public CustomerFunds customerFunds(long userId, int recent) {
     List<Long> one = List.of(userId);
-    return new CustomerFunds(mapper.totalDeposit(userId), mapper.deposits(null, List.of("CREDITED"), null, one, null, 0, recent).stream().map(this::deposit).toList(),
+    return new CustomerFunds(mapper.totalDeposit(userId), mapper.deposits(null, List.of("CREDITED"), null, one, null, null, null, null, 0, recent).stream().map(this::deposit).toList(),
         mapper.withdrawals(List.of("COMPLETED"), null, null, null, one, null, null, null, 0, recent).stream().map(WalletAdmin::withdrawal).toList());
   }
 

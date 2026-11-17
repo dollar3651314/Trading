@@ -1,6 +1,7 @@
 /**
- * 后台浅色 / 深色主题（v2 E2）：默认跟随系统（prefers-color-scheme），右上角可以选"跟随系统 / 浅色 / 深色"，选择记在本机浏览器。
- * - 选择存 localStorage（键 fx-admin-theme）；隐私模式、禁用存储时读写都可能抛错，一律按"跟随系统"处理，页面照常显示。
+ * 后台浅色 / 深色主题（v2 E2；第 1 批按 TY-7 改：Amos 11/17"默认都是浅色，客户自己可以调整"）：默认浅色，右上角可以选"跟随系统 / 浅色 / 深色"，
+ * 选择记在本机浏览器。
+ * - 选择存 localStorage（键 fx-admin-theme，三种都存）；隐私模式、禁用存储时读写都可能抛错，一律按默认浅色处理，页面照常显示。
  * - 当前主题写在根元素的 data-theme 上（global.css 按它切换 CSS 变量），同时设 color-scheme（滚动条、原生控件跟着变）。
  * - index.html 里有一小段同样逻辑的脚本，在页面脚本加载前先设好 data-theme，避免深色用户先看到一闪白屏。
  */
@@ -15,17 +16,16 @@ const QUERY = '(prefers-color-scheme: dark)';
 export function readThemePref(): ThemePref {
   try {
     const v = globalThis.localStorage?.getItem(THEME_KEY);
-    if (v === 'light' || v === 'dark') return v;
+    if (v === 'light' || v === 'dark' || v === 'system') return v;
   } catch {
-    /* 读不到存储：跟随系统 */
+    /* 读不到存储：默认浅色 */
   }
-  return 'system';
+  return 'light';
 }
 
 export function writeThemePref(pref: ThemePref): void {
   try {
-    if (pref === 'system') globalThis.localStorage?.removeItem(THEME_KEY);
-    else globalThis.localStorage?.setItem(THEME_KEY, pref);
+    globalThis.localStorage?.setItem(THEME_KEY, pref);
   } catch {
     /* 存不了：只在这次打开的页面里生效 */
   }
@@ -61,7 +61,7 @@ interface ThemeModeValue {
   setPref: (p: ThemePref) => void;
 }
 
-const Ctx = createContext<ThemeModeValue>({ pref: 'system', theme: 'light', setPref: () => {} });
+const Ctx = createContext<ThemeModeValue>({ pref: 'light', theme: 'light', setPref: () => {} });
 
 export function ThemeModeProvider({ children }: { children: ReactNode }) {
   const [pref, setPrefState] = useState<ThemePref>(readThemePref);

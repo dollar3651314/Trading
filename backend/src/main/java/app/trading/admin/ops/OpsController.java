@@ -39,7 +39,14 @@ class OpsController {
   private final NotifyOps notify;
   private final AutoApproveOps autoApprove;
 
-  OpsController(CustomerOps customers, FundsOps funds, NotifyOps notify, AutoApproveOps autoApprove) {
+  record NetworkBody(Boolean open, String reason) {}
+
+  record SwitchBody(String provider, String reason) {}
+
+  private final PaymentOps payment;
+
+  OpsController(CustomerOps customers, FundsOps funds, NotifyOps notify, AutoApproveOps autoApprove, PaymentOps payment) {
+    this.payment = payment;
     this.customers = customers;
     this.funds = funds;
     this.notify = notify;
@@ -136,8 +143,9 @@ class OpsController {
   @RequiresPermission(Permission.DEPOSIT_VIEW)
   @GetMapping("/api/admin/deposits")
   Ops.Page<FundsOps.DepositView> deposits(@RequestParam(required = false) String chain, @RequestParam(required = false) String status,
-      @RequestParam(required = false) String keyword, @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
-    return funds.deposits(chain, status, keyword, page, pageSize);
+      @RequestParam(required = false) String keyword, @RequestParam(required = false) String providerRef, @RequestParam(required = false) String from,
+      @RequestParam(required = false) String to, @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize) {
+    return funds.deposits(chain, status, keyword, providerRef, from, to, page, pageSize);
   }
 
   @RequiresPermission(Permission.WITHDRAWAL_VIEW)
@@ -193,6 +201,13 @@ class OpsController {
     return funds.reject(AdminContext.current(), id, body == null ? null : body.reason());
   }
 
+  /** 向钱包提供方重新查一次付款状态（"未知"红色置顶的那笔只能这样处理，不能退款） */
+  @RequiresPermission(Permission.WITHDRAWAL_REVIEW)
+  @PostMapping("/api/admin/withdrawals/{id}/requery")
+  FundsOps.WithdrawalView requery(@PathVariable long id) {
+    return funds.requery(AdminContext.current(), id);
+  }
+
   @RequiresPermission(Permission.WITHDRAWAL_EMERGENCY_CANCEL)
   @PostMapping("/api/admin/withdrawals/{id}/emergency-cancel")
   FundsOps.WithdrawalView emergencyCancel(@PathVariable long id, @RequestBody ReasonBody body) {
@@ -206,7 +221,47 @@ class OpsController {
     return funds.recon(status, page, pageSize);
   }
 
-  /** 热钱包当前余额和告警下限（对账页上方）；下限在系统配置页改 */
+  /** 最近一次对账（顶部"上次对账、核对笔数、提供方通不通"） */
+  @RequiresPermission(Permission.RECON_VIEW)
+  @GetMapping("/api/admin/recon/status")
+  FundsOps.ReconStatus reconStatus() {
+    return funds.reconStatus();
+  }
+
+  /** 立即对账 */
+  @RequiresPermission(Permission.RECON_RESOLVE)
+  @PostMapping("/api/admin/recon/run")
+  java.util.Map<String, Integer> runRecon() {
+    return java.util.Map.of("fresh", funds.runRecon(AdminContext.current()));
+  }
+
+  // ---------- 钱包提供方（第 1 批） ----------
+
+  @RequiresPermission(Permission.PROVIDER_VIEW)
+  @GetMapping("/api/admin/payment")
+  PaymentOps.Overview payment() {
+    return payment.overview();
+  }
+
+  @RequiresPermission(Permission.PROVIDER_VIEW)
+  @PostMapping("/api/admin/payment/check")
+  PaymentOps.ProviderView checkPayment() {
+    return payment.check();
+  }
+
+  @RequiresPermission(Permission.PROVIDER_OPERATE)
+  @PutMapping("/api/admin/payment/networks/{network}")
+  void setNetwork(@PathVariable String network, @RequestBody NetworkBody body) {
+    payment.setNetwork(AdminContext.current(), network, body == null ? null : body.open(), body == null ? null : body.reason());
+  }
+
+  @RequiresPermission(Permission.PROVIDER_OPERATE)
+  @PostMapping("/api/admin/payment/switch")
+  void switchProvider(@RequestBody SwitchBody body) {
+    payment.switchProvider(AdminContext.current(), body == null ? null : body.provider(), body == null ? null : body.reason());
+  }
+
+  /** 付款余额（对账页上方）：第 1 批是 Trading 在钱包提供方的可用余额（链 = ALL，不分链） */
   @RequiresPermission(Permission.RECON_VIEW)
   @GetMapping("/api/admin/hot-wallets")
   List<FundsOps.HotWalletView> hotWallets() {

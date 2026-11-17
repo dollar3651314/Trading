@@ -1,12 +1,15 @@
 /**
- * 对账：列出钱包记录、账本、链上三方不一致的问题，标记已处理（必填说明）。修复 fxsystem F5。
- * 自带钱包的热钱包余额卡片和"资金归集"入口不搬（热钱包、归集由 TopUP 负责）。
- * 问题类型和字段按后端（后台方案第 8 节）：7 种类型，字段 type、ref、expected、actual、diff、detail；后端只支持按状态筛选。
+ * 对账（第 1 批原型 P6）：列出钱包记录、账本、钱包提供方（TopUP）不一致的问题，标记已处理（必填说明，修复 fxsystem F5）。
+ * 顶部固定写"按单号逐笔核对，不是全量对账"（TopUP 还不能按时间段拉流水，TG-2）；显示上次对账时间、核对笔数、提供方通不通；"立即对账"。
+ * 问题类型和字段按后端：钱包 ↔ 账本 7 种 + 和提供方逐笔核对 6 种，字段 type、ref、expected、actual、diff、detail；后端只支持按状态筛选。
  */
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Alert, Select } from 'antd';
+import { useApi } from '../../hooks/useApi';
+import { useAction } from '../../hooks/useConfirmDialogs';
+import { fullTime } from '../../utils/display';
 import { useTranslation } from 'react-i18next';
-import { listRecon, resolveRecon } from '../../api';
+import { getReconStatus, listRecon, resolveRecon, runRecon } from '../../api';
 import type { ReconItem, ReconQuery } from '../../api/types';
 import { usePagedList } from '../../hooks/usePagedList';
 import { useNoteDialog } from '../../hooks/useConfirmDialogs';
@@ -28,10 +31,55 @@ export function ReconPage() {
   const [draft, setDraft] = useState<Filters>(INITIAL);
   const note = useNoteDialog();
   const typeLabel = (v: string) => (i18n.exists(`reconType.${v}`) ? t(`reconType.${v}`) : v);
+  const statusFetcher = useCallback(() => getReconStatus(), []);
+  const status = useApi(statusFetcher);
+  const run = useAction();
+  const st = status.data;
 
   return (
     <>
       <PageHeader title={t('recon.title')} sub={t('recon.sub')} />
+      <Alert type="warning" showIcon className="recon-byorder" message={t('recon.byOrderTitle')} description={t('recon.byOrderDesc')} />
+      <section className="kpis" aria-label={t('recon.lastRun')}>
+        <div className="card kpi">
+          <div className="k">{t('recon.lastRun')}</div>
+          <div className="v">
+            <b className="num">{st?.lastRunAt ? fullTime(st.lastRunAt) : '—'}</b>
+          </div>
+        </div>
+        <div className="card kpi">
+          <div className="k">{t('recon.checked')}</div>
+          <div className="v">
+            <b className="num">{st ? st.checked : '—'}</b>
+          </div>
+        </div>
+        <div className={`card kpi${st && !st.providerOk ? ' orange' : ''}`}>
+          <div className="k">{t('recon.provider')}</div>
+          <div className="v">
+            <b>{st ? (st.providerOk ? t('recon.providerOk') : t('recon.providerDown')) : '—'}</b>
+          </div>
+        </div>
+        <div className="card kpi">
+          <div className="k">{t('recon.totalCheck')}</div>
+          <div className="v">
+            <span className="muted">{t('recon.totalCheckTbd')}</span>
+          </div>
+        </div>
+      </section>
+      <div className="recon-run">
+        <PermButton
+          perm="recon:resolve"
+          type="primary"
+          onClick={() =>
+            run(() => runRecon(), t('recon.runDone'), () => {
+              status.reload();
+              list.reload();
+            })
+          }
+        >
+          {t('recon.runNow')}
+        </PermButton>
+      </div>
       <Alert type="info" showIcon message={t('recon.hint')} />
       <FilterBar onSearch={() => list.setFilters(draft)} onReset={() => { setDraft(INITIAL); list.setFilters(INITIAL); }}>
         <FilterItem label={t('recon.status')}>

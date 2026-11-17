@@ -276,3 +276,24 @@
 .wd-rule { margin: -4px 0 12px; }
 .form-summary.mx, .notice.mx { margin: 12px 12px 0; }
 @media (min-width: 1024px) { .form-summary.mx, .notice.mx { margin: 0 0 12px; } }
+
+/* ---------- 第 1 批：充值按需生成地址、两道审、资金记录（原型 P1、P2） ---------- */
+.notice.ok { background: var(--ok-bg); border-color: var(--ok-border); color: var(--text); }
+.wd-two, .wd-done, .dep-fail { flex-direction: column; gap: 4px; }
+.wd-two p, .wd-done p, .dep-fail p { margin: 0; }
+.dep-fail .btn { align-self: flex-start; }
+.wd-done { margin: 0 0 12px; }
+.net { position: relative; }
+.net .gen { position: absolute; top: 2px; right: 4px; font-size: 10px; color: var(--up); font-weight: 700; }
+.gen-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 8px; text-align: center; }
+.gen-box .spin { width: 22px; height: 22px; border: 2.5px solid var(--border); border-top-color: var(--cyan); border-radius: 50%; animation: dep-spin .8s linear infinite; }
+@keyframes dep-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gen-box .spin { animation: none; } }
+.steps li.hl b { background: var(--warn-bg); color: var(--warn-text); }
+.tl { list-style: none; margin: 6px 0 0; padding: 0 0 0 12px; border-left: 2px solid var(--hair); font-size: 12px; color: var(--subtle); }
+.tl li { padding: 2px 0; }
+.tl li.cur { color: var(--text); font-weight: 600; }
+.page-records .filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+.page-records .chip-select { width: auto; height: 28px; font-size: 12.5px; }
+.fund-recs .d { justify-content: flex-start; }
+.card-head .more.small { margin-left: auto; }

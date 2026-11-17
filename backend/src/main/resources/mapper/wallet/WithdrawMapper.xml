@@ -88,6 +88,19 @@
     SELECT id FROM wallet_withdrawal WHERE status = #{status} ORDER BY id
   </select>
 
+  <resultMap id="event" type="app.trading.wallet.withdraw.WithdrawMapper$EventRow">
+    <constructor>
+      <arg column="withdrawal_id" javaType="_long"/>
+      <arg column="to_status" javaType="string"/>
+      <arg column="created_at" javaType="java.time.LocalDateTime"/>
+    </constructor>
+  </resultMap>
+
+  <select id="eventsOf" resultMap="event">
+    SELECT withdrawal_id, to_status, created_at FROM wallet_withdraw_event
+    WHERE withdrawal_id IN <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach> ORDER BY id
+  </select>
+
   <insert id="insertEvent">
     INSERT INTO wallet_withdraw_event (withdrawal_id, from_status, to_status, actor, note) VALUES (#{withdrawalId}, #{from}, #{to}, #{actor}, #{note})
   </insert>

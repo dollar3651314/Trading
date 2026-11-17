@@ -163,11 +163,11 @@ class WithdrawFlowTest {
     assertThat(code(() -> withdraws.submit(uid, String.valueOf(w0), "100"))).as("别人的白名单").isEqualTo("NOT_WHITELISTED");
     assertThat(code(() -> withdraws.submit(uid, String.valueOf(fresh), "100"))).as("未满 24 小时").isEqualTo("WHITELIST_NOT_ACTIVE");
     assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "9.99"))).isEqualTo("AMOUNT_BELOW_MIN");
-    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "10000.01"))).isEqualTo("AMOUNT_ABOVE_MAX");
-    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "10000"))).isEqualTo("OK");
-    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "10000"))).isEqualTo("OK");
-    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "10000"))).as("累计到 30,000（必须小于）").isEqualTo("DAILY_LIMIT_EXCEEDED");
-    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "9999"))).isEqualTo("OK");
+    // 第 1 批：单笔上限按 TD-15 A（= TQ-13 A）从 10,000 降到 5,000（TopUP 单笔只能付 5,000）；当日累计 < 30,000 不变
+    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "5000.01"))).isEqualTo("AMOUNT_ABOVE_MAX");
+    for (int i = 0; i < 5; i++) assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "5000"))).isEqualTo("OK");
+    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "5000"))).as("累计到 30,000（必须小于）").isEqualTo("DAILY_LIMIT_EXCEEDED");
+    assertThat(code(() -> withdraws.submit(uid, String.valueOf(active), "4999"))).isEqualTo("OK");
 
     long poor = user("50", true);
     long pa = activeAddress(poor, "ERC20", ETH_ADDR);

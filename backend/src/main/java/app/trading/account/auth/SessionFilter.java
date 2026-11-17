@@ -24,10 +24,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 class SessionFilter extends OncePerRequestFilter {
 
-  /** 不需要登录的接口。/api/public/quotes 是官网公开行情（v2，只读，只有几个品种的卖价和涨跌幅，见 market.web.PublicQuoteController） */
+  /** 不需要登录的接口。/api/public/quotes 是官网公开行情（v2，只读，只有几个品种的卖价和涨跌幅，见 market.web.PublicQuoteController）；
+   * /api/pay/callback/topup 是 TopUP 的回调（不靠登录，靠验签，见 payment.core.PaymentCallbackController） */
   static final Set<String> PUBLIC = Set.of(
       "/api/health", "/api/auth/email-code", "/api/auth/register", "/api/auth/login", "/api/auth/logout", "/api/auth/password/reset",
-      "/api/public/quotes");
+      "/api/public/quotes", "/api/pay/callback/topup");
 
   private final SessionService sessions;
   private final AuthProperties props;

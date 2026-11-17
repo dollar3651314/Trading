@@ -85,6 +85,16 @@ export const getAutoApproveSettings: typeof real.getAutoApproveSettings = IS_MOC
 export const listAutoApproveChanges: typeof real.listAutoApproveChanges = IS_MOCK ? mock.listAutoApproveChanges : real.listAutoApproveChanges;
 /** PUT /api/admin/withdraw-auto-approve（高危，withdrawal:auto_rule_edit；版本不对 409 CONFIG_CHANGED） */
 export const updateAutoApproveSettings: typeof real.updateAutoApproveSettings = IS_MOCK ? mock.updateAutoApproveSettings : real.updateAutoApproveSettings;
+/** POST /api/admin/withdrawals/{id}/requery（第 1 批：向钱包提供方重新查付款状态） */
+export const requeryWithdrawal: typeof real.requeryWithdrawal = IS_MOCK ? mock.requeryWithdrawal : real.requeryWithdrawal;
+/** GET /api/admin/recon/status、POST /api/admin/recon/run（第 1 批） */
+export const getReconStatus: typeof real.getReconStatus = IS_MOCK ? mock.getReconStatus : real.getReconStatus;
+export const runRecon: typeof real.runRecon = IS_MOCK ? mock.runRecon : real.runRecon;
+/** 第 1 批钱包提供方页：GET /api/admin/payment、POST /payment/check、PUT /payment/networks/{network}、POST /payment/switch（后两个高危） */
+export const getPayment: typeof real.getPayment = IS_MOCK ? mock.getPayment : real.getPayment;
+export const checkPayment: typeof real.checkPayment = IS_MOCK ? mock.checkPayment : real.checkPayment;
+export const setPaymentNetwork: typeof real.setPaymentNetwork = IS_MOCK ? mock.setPaymentNetwork : real.setPaymentNetwork;
+export const switchPaymentProvider: typeof real.switchPaymentProvider = IS_MOCK ? mock.switchPaymentProvider : real.switchPaymentProvider;
 /** GET /api/admin/recon */
 export const listRecon: typeof real.listRecon = IS_MOCK ? mock.listRecon : real.listRecon;
 /** GET /api/admin/hot-wallets：热钱包余额和告警下限 */

@@ -109,13 +109,25 @@ trading:
     alert-emails: ${FX_RISK_ALERT_EMAILS:}
   # 钱包（第 0 批过渡）：只留充值入账、提现、自动审批、对账的业务规则；地址派生、扫链、归集、热钱包已去掉，
   # 第 1 批换成支付接口层（TopUP）。仓库里只有变量名，值只由负责人填进服务器
+  # 支付接口层（第 1 批）：充值地址、到账回调、提现付款都交给钱包提供方，第一版只有 TopUP（Trading 是 TopUP 的内部商户）。
+  # 三个值由 Amos 填进服务器环境变量（底线 1），仓库只有变量名；没填时 TopUP 算"未接入"：充值页显示"暂时无法获取充值地址"，
+  # 提现审核通过后停在"已审核待放款"（不退款），配好后自动继续。回调地址 https://<客户端域名>/api/pay/callback/topup 由 Amos 在 TopUP 后台填
+  payment:
+    # 每 30 秒查一次提供方余额（自动审批 R12 用）并判断接口通不通（健康检查 wallet.topup）
+    monitor-enabled: true
+    topup:
+      base-url: ${FX_TOPUP_BASE_URL:}
+      api-key: ${FX_TOPUP_API_KEY:}
+      api-secret: ${FX_TOPUP_API_SECRET:}
+      timeout: 10s
   wallet:
     # 最小充值 1 USDT（负责人 确认，充值方案 D4）
     min-deposit: 1
     # 提现（S13，内部文档）：限额沿用现有系统（N-08），手续费 负责人 确认（W3），从提现金额里扣
     withdraw:
       min-amount: 10
-      max-per-tx: 10000
+      # 单笔上限 5,000（TQ-13 = TD-15 A：TopUP 单笔只能付 5,000）
+      max-per-tx: 5000
       daily-limit: 30000
       large-amount: 3000
       large-delay: 6h

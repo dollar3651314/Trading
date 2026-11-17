@@ -38,8 +38,8 @@ public class GlobalExceptionHandler {
       Map.entry("EMAIL_TAKEN", HttpStatus.CONFLICT),
       // 带版本号的配置被别人先改了（提现自动审批规则），刷新后再改
       Map.entry("CONFIG_CHANGED", HttpStatus.CONFLICT),
-      // v2 资金归集：这条链有进行中的批次，等它完成
-      Map.entry("SWEEP_BATCH_ACTIVE", HttpStatus.CONFLICT),
+      // 钱包提供方暂时不通（拿不到充值地址等），稍后重试
+      Map.entry("WALLET_UNAVAILABLE", HttpStatus.SERVICE_UNAVAILABLE),
       Map.entry("NOT_FOUND", HttpStatus.NOT_FOUND));
 
   @ExceptionHandler(BizException.class)

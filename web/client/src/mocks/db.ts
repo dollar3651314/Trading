@@ -51,6 +51,8 @@ export interface Db {
   withdrawals: Withdrawal[];
   notifications: StoredNotification[];
   deposit: Record<Network, string>;
+  /** 已经生成过地址的网络（第 1 批：第一次选网络才生成） */
+  depositGenerated: Network[];
 }
 
 function makePosition(id: string, symbol: string, side: Side, lots: string, leverage: number, openPrice: string, minutes: number, tp?: string, sl?: string): Position {
@@ -223,7 +225,11 @@ function seedWithdrawals(): Withdrawal[] {
     W(1, '2500.00', 'reviewing', 'TRC20', T, 180),
     W(2, '800.00', 'approved', 'BSC', E, 300),
     W(3, '5000.00', 'delayed', 'TRC20', T, 420, { delayEndsAt: hoursFromNow(3.5) }),
-    W(4, '1200.50', 'broadcasting', 'ERC20', E, 720, { txHash: '0x9b1e4c7a2f3d8e6b5a0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a' }),
+    // 第 1 批两道审：已交 TopUP，一笔等待放款审核、一笔放款中（付款编号是 TopUP 的提现单号）
+    W(4, '1200.50', 'broadcasting', 'ERC20', E, 720, { payoutNo: 'WD-20261116-7731', payoutStatus: 'awaitingRelease', steps: [
+      { status: 'cooling', at: minutesAgo(720) }, { status: 'reviewing', at: minutesAgo(600) }, { status: 'approved', at: minutesAgo(560) }, { status: 'broadcasting', at: minutesAgo(559) },
+    ] }),
+    W(11, '640.00', 'broadcasting', 'TRC20', T, 900, { payoutNo: 'WD-20261116-7702', payoutStatus: 'paying' }),
     W(5, '200.00', 'completed', 'BSC', E, 4300, { txHash: '0x7f3a9c2e5b8d1a4f6c3e9b2d5a8f1c4e7b0d3a6f9c2e5b8d1a4f7c0e3b6de21b' }),
     W(6, '3000.00', 'failedRefunded', 'ERC20', E, 7200),
     W(7, '9999.99', 'rejected', 'TRC20', T, 10000, { rejectReason: 'addressRisk' }),
@@ -280,6 +286,7 @@ export function seed(): Db {
       BSC: '0x8f3C2a9B4e7D1c6F5a0B9e8D7c2F1a4B3e6D9c0A',
       TRC20: 'TXr7mKp3Vd9qLw2HcN8eYb4FjGs6AuZt5R',
     },
+    depositGenerated: ['ERC20', 'TRC20'],
   };
 }
 

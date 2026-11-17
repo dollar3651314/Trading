@@ -265,12 +265,19 @@ export interface Deposit {
   status: DepositStatus;
   detectedAt: string;
   creditedAt: string | null;
+  /** 第 1 批：哪个钱包提供方通知的到账（TOPUP）、提供方到账编号（原型 P5）；自带钱包时代的旧数据为空 */
+  provider?: string | null;
+  providerRef?: string | null;
 }
 
 export interface DepositQuery extends PageQuery {
   chain?: Chain;
   status?: DepositStatus;
   keyword?: string;
+  /** 第 1 批：提供方到账编号、到账时间范围（到秒，本地时间 "YYYY-MM-DD HH:mm:ss"） */
+  providerRef?: string;
+  from?: string;
+  to?: string;
 }
 
 export type WithdrawalStatus =
@@ -303,6 +310,44 @@ export interface Withdrawal {
   txHash: string | null;
   /** v2 自动审批（内部文档）：最近一次规则判定的摘要；没有判定记录（功能上线前的提现）时为空 */
   autoReview?: AutoReviewSummary | null;
+  /** 第 1 批两道审：钱包提供方、付款编号、付款状态（unknown 标红、不能退款）、原因、进入当前状态的时间（到秒） */
+  provider?: string | null;
+  payoutNo?: string | null;
+  payoutStatus?: PayoutStatus | null;
+  payoutReason?: string | null;
+  statusAt?: string | null;
+}
+
+/** 钱包提供方那边的付款状态：提交中 / 待放款审核 / 已批准、已广播（放款中）/ 成功 / 失败、驳回、取消 / 未知（查不清，不退款） */
+export type PayoutStatus = 'submitting' | 'pending' | 'approved' | 'broadcast' | 'completed' | 'failed' | 'rejected' | 'cancelled' | 'unknown';
+
+/** 第 1 批：钱包提供方页（GET /api/admin/payment，原型 P7） */
+export interface PaymentProvider {
+  code: string;
+  name: string;
+  connected: boolean;
+  current: boolean;
+  up: boolean;
+  lastOkAt: string | null;
+  lastCallbackAt: string | null;
+  available: string | null;
+  balanceAt: string | null;
+  error: string | null;
+}
+
+export interface PaymentOverview {
+  providers: PaymentProvider[];
+  networks: { network: Chain; open: boolean }[];
+  audits: { id: string; admin: string; action: 'SWITCH_PROVIDER' | 'NETWORK_ON' | 'NETWORK_OFF' | string; detail: string; reason: string; at: string }[];
+}
+
+/** 最近一次对账（GET /api/admin/recon/status）：checked 和提供方逐笔核对的笔数；providerOk = false 时提供方不通、按单号核对没跑成 */
+export interface ReconStatus {
+  lastRunAt: string | null;
+  checked: number;
+  providerOk: boolean;
+  providerError: string | null;
+  open: number;
 }
 
 // ---------- v2 提现自动审批（内部文档 第 7.2 节；后端 admin/ops/AutoApproveOps.java） ----------
@@ -408,18 +453,21 @@ export interface WithdrawalSummary {
   completedToday: { count: number; amount: string };
 }
 
-/** 对账问题类型：按后端的 7 种（数据库设计第 16 节、后台方案第 8 节），不再用原型的 4 种；v2 资金归集加 3 种（方案第 4.8 节） */
+/** 对账问题类型：钱包 ↔ 账本 7 种（数据库设计第 16 节、后台方案第 8 节）；第 1 批和钱包提供方按单号逐笔核对 6 种（归集的 3 种随自带钱包淘汰） */
 export type ReconType =
-  | 'sweep_unknown_outflow'
-  | 'sweep_dest_mismatch'
-  | 'sweep_amount_mismatch'
   | 'deposit_ledger_mismatch'
   | 'deposit_unknown_credit'
   | 'deposit_reversal_mismatch'
   | 'deposit_not_on_chain'
   | 'suspense_open'
   | 'withdraw_ledger_mismatch'
-  | 'withdraw_frozen_mismatch';
+  | 'withdraw_frozen_mismatch'
+  | 'deposit_provider_missing'
+  | 'deposit_provider_mismatch'
+  | 'deposit_trading_missing'
+  | 'payout_provider_missing'
+  | 'payout_amount_mismatch'
+  | 'payout_status_mismatch';
 
 /** 对账问题（后台方案第 8 节）：ref 是关联的业务编号，expected 应有、actual 实际、diff = actual - expected */
 export interface ReconItem {
@@ -880,239 +928,4 @@ export interface SystemConfig {
   updatedAt: string | null;
 }
 
-// ---------- v2 资金归集（原型，内部文档 路线 (b)；真实接口上线前只有模拟层提供） ----------
-export type SweepChain = 'ERC20' | 'BSC' | 'TRC20';
-/** 归集方式：以太坊、BSC 是合约转发地址 + 服务器自动归集；TRON 是普通地址 + 负责人 离线签名 */
-export type SweepMode = 'contract' | 'offline';
-export type SweepBatchStatus =
-  /** 真实接口：已建批次、交易还没发出 */
-  | 'pending'
-  | 'sent'
-  | 'confirmed'
-  | 'partial'
-  | 'failed'
-  | 'deferred'
-  | 'topping_up'
-  | 'awaiting_signature'
-  | 'signed'
-  | 'broadcasting'
-  | 'cancelled'
-  | 'expired';
-export type SweepItemStatus = 'pending' | 'swept' | 'failed' | 'topup_sent' | 'ready' | 'signed' | 'sign_rejected' | 'broadcast' | 'expired' | 'cancelled';
-/** 预览里这个地址这次为什么不归集 */
-export type SweepSkipReason =
-  | 'pendingDeposit'
-  | 'recentCredit'
-  | 'inBatch'
-  | 'feeRatio'
-  | 'belowThreshold'
-  | 'overAddressCap'
-  | 'overBatchCap'
-  /** 真实接口：超过每批地址数（100） */
-  | 'batchFull'
-  /** 真实接口：旧一套合约参数的地址（换过工厂 / parent / 批量合约），这一批不处理 */
-  | 'otherScheme';
-/** TRON 租能量的状态（方案 v1.1 第 4.3 节）：广播前给每个充值地址租能量，确认到账再广播 */
-export type SweepRentStatus = 'none' | 'ordered' | 'delivered' | 'fallbackBurn' | 'notDelivered' | 'expired';
-export interface SweepRent {
-  status: SweepRentStatus;
-  /** 租的能量 */
-  energy: number;
-  /** 租金（TRX）；回退烧 TRX 时是热钱包补的 TRX */
-  trx: string;
-  /** 租赁到期时间 */
-  expiresAt: string | null;
-}
 
-export interface SweepOverview {
-  chain: SweepChain;
-  mode: SweepMode;
-  /** 达到门槛的地址的 USDT 合计 */
-  pendingUsdt: string;
-  eligibleCount: number;
-  /** 有余额但没到门槛的地址数 */
-  belowCount: number;
-  /** 冷钱包地址（以太坊、BSC 是合约里的 parent，TRON 是后台配置的） */
-  destination: string | null;
-  /** 以太坊、BSC 发起账户的手续费币余额；TRON 为空 */
-  operatorBalance: string | null;
-  gasAsset: string;
-  lastSweepAt: string | null;
-  /** 进行中的批次号 */
-  activeBatch: string | null;
-  /** 真实接口：这条链现在能不能执行归集；不能时 unavailable 是原因（例如没配合约地址、TRON 下一阶段） */
-  available?: boolean;
-  unavailable?: string | null;
-  /** 真实接口：待归集金额的查询时间（每 5 分钟或打开预览时） */
-  checkedAt?: string | null;
-}
-
-export interface SweepCandidate {
-  userId: number;
-  customerName: string;
-  address: string;
-  /** TRON：派生序号（= 用户 ID） */
-  index: number;
-  usdt: string;
-  /** 以太坊、BSC：这次是否要顺便部署转发合约 */
-  deploy: boolean;
-  /** TRON：热钱包转入的 TRX（只有没激活的地址要转 1 TRX 激活）；以太坊、BSC 为 "0" */
-  topup: string;
-  /** TRON：这个地址还没激活（只收过 TRC20 不会激活账户），要先转 TRX */
-  activate: boolean;
-  /** TRON：预计租金（TRX）；以太坊、BSC 为 "0" */
-  rentTrx: string;
-  /** 预估手续费（手续费币） */
-  estFee: string;
-  estFeeUsd: string;
-  skip: SweepSkipReason | null;
-}
-
-export interface SweepPreview {
-  chain: SweepChain;
-  mode: SweepMode;
-  destination: string | null;
-  threshold: string;
-  maxFeeRatioPct: string;
-  /** 当前 gas 价格（显示用文字） */
-  gasPrice: string;
-  gasAsset: string;
-  candidates: SweepCandidate[];
-  totals: { count: number; usdt: string; fee: string; feeUsd: string; feePct: string; topup: string; rent: string; skipped: number };
-  /** TRON：租能量的报价（以太坊、BSC 为空） */
-  tronRent: { mode: SweepTronEnergyMode; provider: string; priceSun: string; energyPerItem: number; durationMin: number; burnSun: string } | null;
-  /** 真实接口：提示，例如 priceMissing（查不到 ETH / BNB 价格，没有检查手续费占比） */
-  warnings?: string[];
-}
-
-export interface SweepBatch {
-  no: string;
-  chain: SweepChain;
-  mode: SweepMode;
-  status: SweepBatchStatus;
-  trigger: 'manual' | 'auto';
-  addressCount: number;
-  expectedUsdt: string;
-  sweptUsdt: string;
-  fee: string;
-  gasAsset: string;
-  destination: string;
-  createdBy: string;
-  createdAt: string;
-  finishedAt: string | null;
-  /** TRON：待签名清单的有效期 */
-  expiresAt: string | null;
-  /** 以太坊、BSC：批量交易的哈希 */
-  txHash: string | null;
-}
-
-export interface SweepItem {
-  itemNo: number;
-  userId: number;
-  customerName: string;
-  address: string;
-  amount: string;
-  deploy: boolean;
-  topup: string;
-  status: SweepItemStatus;
-  txHash: string | null;
-  /** 失败或核对不通过的原因：原型是翻译键 sweepFail.* 的后缀；真实接口是后端给的中文说明 */
-  failReason: string | null;
-  /** 真实接口：执行前查到的余额（amount 是链上实际转走的金额） */
-  balanceBefore?: string;
-  /** TRON：这个地址的能量租赁（以太坊、BSC 为空） */
-  rent: SweepRent | null;
-}
-
-export interface SweepBatchDetail extends SweepBatch {
-  reason: string;
-  /** 真实接口：批次失败或部分成功的原因 */
-  failReason?: string | null;
-  items: SweepItem[];
-  unsignedSha256: string | null;
-  signedSha256: string | null;
-  events: { time: string; actor: string; text: string }[];
-}
-
-export interface SweepImportResult {
-  accepted: number;
-  rejected: { itemNo: number; reason: string }[];
-}
-
-export interface SweepTronTarget {
-  address: string | null;
-  pending: { address: string; requestedAt: string; effectiveAt: string; requestedBy: string; reason: string } | null;
-}
-
-export interface SweepSettings {
-  thresholds: Record<SweepChain, string>;
-  maxFeeRatioPct: string;
-  autoEnabled: boolean;
-  autoHourUtc: number;
-  ethMaxBaseFeeGwei: string;
-  operatorMin: { ERC20: string; BSC: string };
-  remind: Record<SweepChain, string>;
-  tronTopupPerItem: string;
-  tronTopupPerDay: string;
-  tronExpireHours: number;
-  tronTargetDelayHours: number;
-  /** TRON 能量（负责人 10-20：直接租能量） */
-  tronEnergy: SweepTronEnergy;
-  /** 以太坊、BSC 上线初期的金额上限（SW-4 不审计的替代措施）；"0" = 不限 */
-  evmCaps: { perAddress: string; perBatch: string };
-  /** 以太坊、BSC 的合约和冷钱包（从链上读，只读） */
-  evm: {
-    parent: string;
-    safeThreshold: string;
-    factory: string;
-    implementation: string;
-    batcher: string;
-    operator: string;
-    operatorBalances: { ERC20: string; BSC: string };
-    readAt: string;
-    /** 真实接口：合约地址参数配齐并检查通过；problem 是配置问题 */
-    configured?: boolean;
-    problem?: string | null;
-    /** 真实接口：发起账户私钥和地址都配了并且对得上；operatorProblem 是原因 */
-    operatorReady?: boolean;
-    operatorProblem?: string | null;
-  };
-  tronTarget: SweepTronTarget;
-  version: number;
-  updatedAt: string | null;
-  updatedBy: string | null;
-}
-
-export type SweepSettingsInput = Pick<
-  SweepSettings,
-  'thresholds' | 'maxFeeRatioPct' | 'autoEnabled' | 'autoHourUtc' | 'ethMaxBaseFeeGwei' | 'operatorMin' | 'remind' | 'tronTopupPerItem' | 'tronTopupPerDay' | 'tronExpireHours' | 'evmCaps'
-> & { tronEnergy: SweepTronEnergyInput; reason: string; expectedVersion: number };
-
-export type SweepTronEnergyMode = 'rent' | 'burn';
-
-export interface SweepTronEnergy {
-  /** rent = 租能量（默认）；burn = 热钱包补 TRX、烧 TRX */
-  mode: SweepTronEnergyMode;
-  /** 租赁平台（显示用，平台本身在服务器配置） */
-  provider: string;
-  /** 最高单价（sun / 能量），报价高于它就不租 */
-  maxPriceSun: string;
-  /** 每天租金上限（TRX） */
-  perDayTrx: string;
-  /** 租不到 / 没到账时回退到烧 TRX（热钱包补 TRX） */
-  fallbackBurn: boolean;
-  /** 每笔租多少分钟 */
-  durationMin: number;
-  /** 平台账户余额（只读，从平台接口读） */
-  providerBalance: string;
-  /** 平台余额告警下限，0 = 不告警 */
-  providerBalanceMin: string;
-  /** 今天已花的租金（只读） */
-  spentTodayTrx: string;
-}
-
-export type SweepTronEnergyInput = Pick<SweepTronEnergy, 'mode' | 'maxPriceSun' | 'perDayTrx' | 'fallbackBurn' | 'durationMin' | 'providerBalanceMin'>;
-
-export interface SweepBatchQuery extends PageQuery {
-  chain?: SweepChain;
-}

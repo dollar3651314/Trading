@@ -78,6 +78,8 @@
 
   <!-- R12：同一条链上排在前面要付的钱（已审核待上链、延迟中的到账金额） -->
   <select id="queuedNet" resultType="java.math.BigDecimal">
-    SELECT COALESCE(SUM(amount - fee), 0) FROM wallet_withdrawal WHERE network = #{network} AND status IN ('APPROVED', 'DELAYED')
+    <!-- network 为空：所有链合计（钱包提供方只有一个总余额时，R12 的"已通过未付合计"） -->
+    SELECT COALESCE(SUM(amount - fee), 0) FROM wallet_withdrawal WHERE status IN ('APPROVED', 'DELAYED')
+    <if test="network != null">AND network = #{network}</if>
   </select>
 </mapper>

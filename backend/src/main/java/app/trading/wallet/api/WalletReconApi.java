@@ -19,6 +19,13 @@ public interface WalletReconApi {
   /** 立刻对一次账，返回这次新发现的问题数（定时任务每小时跑一次） */
   int run();
 
+  /**
+   * 最近一次对账（进程重启后为空）。checked 是和钱包提供方逐笔核对的笔数；providerOk = false 表示提供方不通、这一部分没跑成。
+   */
+  record RunInfo(LocalDateTime at, int checked, boolean providerOk, String providerError, int fresh) {}
+
+  java.util.Optional<RunInfo> lastRun();
+
   /** 按状态列出问题（OPEN 待处理 / RESOLVED 已处理），最新的在前 */
   List<Issue> issues(String status, int limit);
 

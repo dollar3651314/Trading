@@ -1,6 +1,6 @@
 /**
  * 模拟钱包：充值地址、资金流水、白名单、提现。
- * 规则（需求 4.4）：最小 10、单笔 ≤10,000、当日累计 <30,000；2 小时冷静期；≥3,000 审核后延迟 6 小时；
+ * 规则（需求 4.4，第 1 批 TD-15 A）：最小 10、单笔 ≤5,000、当日累计 <30,000；2 小时冷静期；≥3,000 审核后延迟 6 小时；
  * 白名单最多 10 个，新地址 24 小时后生效。
  */
 import { ApiError } from '../api/errors';
@@ -36,17 +36,18 @@ const CONFIRMATIONS: Record<Network, { n: number; eta: number }> = {
 /** 最小充值 1 USDT（负责人 确认，充值方案 D4） */
 const MIN_DEPOSIT = '1';
 
+/** 第 1 批：第一次选某条网络时才生成地址（AC-W1）。原型里 ERC20、TRC20 已经生成过，BSC 没有（点了才生成，db.depositGenerated） */
 export function getDepositAddresses(): Promise<DepositAddress[]> {
-  // 地址在注册时生成，空数据场景下也存在
   return respond(() =>
-    (['ERC20', 'TRC20', 'BSC'] as Network[]).map((network) => ({
-      network,
-      address: db.deposit[network],
-      confirmations: CONFIRMATIONS[network].n,
-      etaMinutes: CONFIRMATIONS[network].eta,
-      minDeposit: MIN_DEPOSIT,
-    })),
+    (['ERC20', 'TRC20', 'BSC'] as Network[]).map((network) => ({ network, address: db.depositGenerated.includes(network) ? db.deposit[network] : null, minDeposit: MIN_DEPOSIT })),
   );
+}
+
+export function requestDepositAddress(network: Network): Promise<DepositAddress> {
+  return mutate(() => {
+    if (!db.depositGenerated.includes(network)) db.depositGenerated.push(network);
+    return { network, address: db.deposit[network], minDeposit: MIN_DEPOSIT };
+  });
 }
 
 const MOCK_TX = (i: number): string => `0x${(0x7f3a00 + i).toString(16)}${'0'.repeat(52)}e21b${i}`;
@@ -108,7 +109,7 @@ function info(): WithdrawInfo {
     available: withdrawable(),
     usedToday: usedToday(),
     minAmount: '10',
-    maxPerTx: '10000',
+    maxPerTx: '5000',
     dailyLimit: '30000',
     largeAmount: '3000',
     largeDelayHours: 6,

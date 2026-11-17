@@ -16,6 +16,8 @@ interface WalletAdminMapper {
     long publicNo;
     long userId;
     String chain;
+    String provider;
+    String providerRef;
     String txHash;
     BigDecimal amount;
     int confirmations;
@@ -40,6 +42,8 @@ interface WalletAdminMapper {
     Long reviewerId;
     String rejectReason;
     String txHash;
+    /** 进入当前状态的时间（最后一条提现事件） */
+    LocalDateTime statusAt;
   }
 
   class BucketRow {
@@ -49,10 +53,11 @@ interface WalletAdminMapper {
   }
 
   List<DepositRow> deposits(@Param("chain") String chain, @Param("statuses") Collection<String> statuses, @Param("txHash") String txHash,
-      @Param("userIds") Collection<Long> userIds, @Param("no") Long no, @Param("offset") int offset, @Param("limit") int limit);
+      @Param("userIds") Collection<Long> userIds, @Param("no") Long no, @Param("ref") String ref, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to,
+      @Param("offset") int offset, @Param("limit") int limit);
 
   long countDeposits(@Param("chain") String chain, @Param("statuses") Collection<String> statuses, @Param("txHash") String txHash,
-      @Param("userIds") Collection<Long> userIds, @Param("no") Long no);
+      @Param("userIds") Collection<Long> userIds, @Param("no") Long no, @Param("ref") String ref, @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 
   List<WithdrawalRow> withdrawals(@Param("statuses") Collection<String> statuses, @Param("chain") String chain, @Param("min") BigDecimal min,
       @Param("max") BigDecimal max, @Param("userIds") Collection<Long> userIds, @Param("no") Long no, @Param("id") Long id, @Param("auto") String auto,

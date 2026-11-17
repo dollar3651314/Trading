@@ -36,6 +36,8 @@ export type ApiErrorReason =
   | 'withdrawDailyLimit'
   | 'withdrawInsufficient'
   | 'walletNotReady'
+  | 'walletUnavailable'
+  | 'networkClosed'
   | 'notFound'
   | 'marginInsufficient'
   | 'quoteUnavailable'
@@ -122,6 +124,8 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   MARGIN_INSUFFICIENT: 'marginInsufficient',
   // 钱包
   WALLET_NOT_READY: 'walletNotReady',
+  WALLET_UNAVAILABLE: 'walletUnavailable',
+  NETWORK_CLOSED: 'networkClosed',
   WHITELIST_FULL: 'whitelistFull',
   WHITELIST_DUPLICATE: 'whitelistDuplicate',
   NOT_WHITELISTED: 'notWhitelisted',
