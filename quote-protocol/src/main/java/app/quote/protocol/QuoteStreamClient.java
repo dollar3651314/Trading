@@ -55,12 +55,25 @@ public final class QuoteStreamClient implements AutoCloseable {
    * 连接参数。
    *
    * @param idleTimeout 多久没收到任何消息就断开重连（服务器每秒一条心跳）
+   * @param sendTimeout 发一条消息最多等多久；超时说明连接半死，断开并重连（不让发送一直占着锁、卡住重连和定时检查）
    */
-  public record Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout) {
+  public record Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout, Duration sendTimeout) {
+    public Options {
+      sendTimeout = sendTimeout == null || sendTimeout.isZero() || sendTimeout.isNegative() ? DEFAULT_SEND_TIMEOUT : sendTimeout;
+    }
+
+    /** 发送超时用默认值（{@link #DEFAULT_SEND_TIMEOUT}） */
+    public Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout) {
+      this(reconnectInitial, reconnectMax, idleTimeout, connectTimeout, DEFAULT_SEND_TIMEOUT);
+    }
+
     public static Options defaults() {
       return new Options(Duration.ofMillis(500), Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(5));
     }
   }
+
+  /** 发送超时的默认值 */
+  public static final Duration DEFAULT_SEND_TIMEOUT = Duration.ofSeconds(3);
 
   private final URI uri;
   private final String key;
@@ -85,6 +98,8 @@ public final class QuoteStreamClient implements AutoCloseable {
   private Duration backoff;
   /** 连接代数：旧连接的回调晚到时不处理 */
   private volatile long generation;
+  /** 发送锁：只管"上一条发完再发下一条"，和重连用的对象锁分开，发送卡住时不挡重连 */
+  private final Object sendLock = new Object();
 
   public QuoteStreamClient(URI uri, String key, Listener listener, Options options, Clock clock) {
     this.uri = uri;
@@ -196,13 +211,34 @@ public final class QuoteStreamClient implements AutoCloseable {
     }
   }
 
-  /** JDK WebSocket 上一条没发完不能发下一条：加锁、等发完（消息都很小） */
-  private synchronized void send(WebSocket w, Message m) {
-    try {
-      w.sendText(QuoteCodec.encode(m), true).join();
-    } catch (RuntimeException e) {
-      log.debug("发给报价服务失败：{}", e.getClass().getSimpleName());
+  /**
+   * JDK WebSocket 上一条没发完不能发下一条：用发送锁串行，最多等 {@code sendTimeout}。
+   * 超时说明连接半死（对方不读、网络卡住）：断开这条连接（abort）并按正常的退避重连；发送锁只在这段时间内占着，
+   * 而且和重连用的锁分开，所以不会卡住重连和定时检查。
+   */
+  void send(WebSocket w, Message m) {
+    synchronized (sendLock) {
+      try {
+        w.sendText(QuoteCodec.encode(m), true).orTimeout(options.sendTimeout().toMillis(), TimeUnit.MILLISECONDS).join();
+      } catch (java.util.concurrent.CompletionException e) {
+        if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
+          log.warn("发给报价服务 {} 毫秒还没发完，断开重连", options.sendTimeout().toMillis());
+          lastError = "send-timeout";
+          w.abort();
+          if (w == ws) scheduleReconnect(generation);
+        } else {
+          log.debug("发给报价服务失败：{}", e.getCause() == null ? e.getClass().getSimpleName() : e.getCause().getClass().getSimpleName());
+        }
+      } catch (RuntimeException e) {
+        log.debug("发给报价服务失败：{}", e.getClass().getSimpleName());
+      }
     }
+  }
+
+  /** 测试用：把当前连接换成给定的（模拟连接半死） */
+  void useConnectionForTest(WebSocket w) {
+    ws = w;
+    connected = true;
   }
 
   private void handle(WebSocket w, String text) {

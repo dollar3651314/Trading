@@ -58,7 +58,7 @@ public class RemoteQuotes implements AlertCheck {
     this.startedAt = clock.instant();
     if (props.url().isEmpty()) throw new IllegalStateException("trading.market.source=remote 时要配置 trading.market.quote-app.url（FX_QUOTE_APP_URL）");
     this.stream = new QuoteStreamClient(client.streamUri(), props.key(), new Listener(),
-        new QuoteStreamClient.Options(props.reconnectInitial(), props.reconnectMax(), props.idleTimeout(), Duration.ofSeconds(5)), Clock.systemUTC());
+        new QuoteStreamClient.Options(props.reconnectInitial(), props.reconnectMax(), props.idleTimeout(), Duration.ofSeconds(5), props.sendTimeout()), Clock.systemUTC());
     catalog.onReload(this::requestSync);
   }
 

@@ -12,9 +12,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param reconnectMax 断线重连最长等多久
  * @param idleTimeout 多久没收到任何消息（服务器每秒一条心跳）就断开重连
  * @param syncRetry 同步品种和时段失败后多久重试
+ * @param sendTimeout 给报价服务发一条消息最多等多久，超时断开重连
  */
 @ConfigurationProperties(prefix = "trading.market.quote-app")
-public record QuoteAppProperties(String url, String key, Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration syncRetry) {
+public record QuoteAppProperties(String url, String key, Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration syncRetry, Duration sendTimeout) {
   public QuoteAppProperties {
     url = url == null ? "" : url.strip().replaceAll("/+$", "");
     key = key == null ? "" : key.strip();
@@ -22,5 +23,6 @@ public record QuoteAppProperties(String url, String key, Duration reconnectIniti
     reconnectMax = reconnectMax == null ? Duration.ofSeconds(30) : reconnectMax;
     idleTimeout = idleTimeout == null ? Duration.ofSeconds(10) : idleTimeout;
     syncRetry = syncRetry == null ? Duration.ofSeconds(30) : syncRetry;
+    sendTimeout = sendTimeout == null ? Duration.ofSeconds(3) : sendTimeout;
   }
 }
