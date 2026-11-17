@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trading 后端父工程：一个 Maven 工程、两个进程。
+     backend/   = trading-app（交易主进程；第 0 批是从前身项目搬来的单体，含行情模块。目录名沿用 backend，路径和前身一致）
+     quote-app/ = 报价进程（第 0 批只有模块壳，行情代码第 2 批再拆过去） -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>app.trading</groupId>
+  <artifactId>trading-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>trading-parent</name>
+
+  <modules>
+    <module>backend</module>
+    <module>quote-app</module>
+  </modules>
+
+  <properties>
+    <java.version>25</java.version>
+    <archunit.version>1.5.1</archunit.version>
+    <mybatis.version>4.1.0</mybatis.version>
+  </properties>
+</project>

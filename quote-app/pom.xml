@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- quote-app：报价进程（多家报价商整合、质量守卫、K 线、对外 REST + WebSocket、Key / 限额 / 计量）。
+     第 0 批只有模块壳；行情代码现在还在 trading-app 的 market 模块里，第 2 批拆过来并单独启动。 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>app.trading</groupId>
+    <artifactId>trading-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>quote-app</artifactId>
+  <name>quote-app</name>
+</project>

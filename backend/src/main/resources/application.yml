@@ -1,0 +1,347 @@
+# 配置只写变量名，值由环境变量提供；密钥只由 负责人 填在服务器上（底线：密钥不经过 AI）。
+trading:
+  # 健康检查返回的版本：部署时镜像构建把 git 提交号写进 FX_VERSION；没有时用 Maven 的 project.version（构建时替换 @...@）
+  version: '${FX_VERSION:@project.version@}'
+  # 测试环境标识（S20）：测试环境设 FX_ENV_LABEL=test，生产不设。非空时健康检查返回 env 字段，页面顶部显示"测试环境"标识条，
+  # 邮件和推送标题前加"[测试] / [TEST] "
+  env-label: ${FX_ENV_LABEL:}
+  # 对外编号（雪花 ID，v2 第 11.4 节，common/id/Snowflake）：节点号 0–1023，单实例默认 1；以后多实例时每个实例必须不同
+  id:
+    node: ${FX_ID_NODE:1}
+  # 监控告警（v2 E8，common/health/AlertCheck）：行情全部断流、扫块停滞、链节点连不上、邮件连续发送失败。
+  # 健康检查 /api/health 的 alerts 里显示每一项（不影响 status 和 HTTP 状态码，部署脚本不会因此回滚）；异常和恢复时给告警邮箱发邮件。
+  # 告警邮箱 FX_ALERT_EMAILS 逗号分隔，代码里没有默认值（默认值在部署配置 deploy/kit/docker-compose.yml），为空时只记日志
+  alert:
+    enabled: true
+    emails: ${FX_ALERT_EMAILS:}
+    # 同一项告警多长时间内不重复发邮件
+    throttle: 30m
+    # 开市的品种多长时间没收到任何报价算"行情全部断流"
+    market-silence: 30s
+    # 扫块多长时间没推进（或者落后的区块折合超过这个时间）算"停滞"
+    scan-stall: 10m
+    # 连续几次连不上节点算"节点不通"（扫块每 15 秒一次）
+    node-failures: 3
+    # 连续几封邮件发送失败算"邮件发送失败"
+    mail-failures: 5
+  # 登录参数，默认值沿用现有系统（内部文档 2.5–2.7）
+  auth:
+    login-failure-limit: 5
+    lock-minutes: 15
+    session-ttl-hours: 72
+    code-ttl-minutes: 10
+    code-resend-seconds: 60
+    code-max-attempts: 5
+    # 安全审查 SEC-03：同一邮箱同一用途 24 小时最多发 10 次验证码；同一 IP 每小时最多请求 30 次（大陆移动网络很多人共用一个出口 IP，留足余量）
+    code-daily-limit: 10
+    code-ip-hourly-limit: 30
+    cookie-name: fx_session
+    cookie-secure: ${FX_COOKIE_SECURE:true}
+  # 通用限流（功能取舍对照表 P-05，common/ratelimit）：Redis 计数，Redis 不可用时放行。超限返回 429 RATE_LIMITED 和 Retry-After。
+  # Nginx 外层还有一道更宽松的限流（deploy/nginx/site.conf.template）。上限填 0 表示这一层不限。
+  # IP 是 Nginx 传来的真实客户端 IP；大陆移动网络很多人共用一个出口 IP，按 IP 的上限留足余量
+  rate-limit:
+    enabled: true
+    key-prefix: "fx:rl:"
+    # 同一 IP 每分钟最多请求 /api/** 几次（不含 /api/health 和 WebSocket 握手）
+    ip-per-minute: 600
+    # 同一 IP 每分钟最多几次 WebSocket 握手（行情、交易推送；只数握手，已建立的连接不受影响）
+    ws-handshake-per-minute: 120
+    # 同一客户每分钟最多几次交易和资金写操作（下单、改单、撤单、平仓、改止盈止损、追加保证金、提现提交、白名单增删，合计）
+    user-write-per-minute: 60
+    # 后台登录：同一 IP 15 分钟内最多请求 20 次（成功失败都算，安全审查 SEC-15）
+    admin-login-per-ip: 20
+    admin-login-window: 15m
+    # Redis 出错后 30 秒内不再访问 Redis、直接放行
+    redis-down-skip: 30s
+  # 行情（内部文档 第 8 节）。质量守卫阈值沿用现有系统（功能地图 M-05、M-06）
+  market:
+    # 报价模式（内部文档 第 3.2 节）：none（默认，不启动报价源，防止生产忘了配置时用上模拟价格）；
+    # simulated（开发、测试环境：配了 token 的真实报价源接管它覆盖的品种，其余模拟）；live（生产：只用真实报价源，绝不用模拟价成交）
+    source: ${FX_MARKET_SOURCE:none}
+    simulated-interval: 500ms
+    stale-after: 5s
+    unchanged-max-age: 1m
+    max-spread-rate: 0.05
+    max-tick-jump-rate: 0.10
+    max-volatility-rate: 0.05
+    volatility-window: 60s
+    push-interval: 250ms
+    # 真实报价源（内部文档）：外汇、指数、贵金属、原油、美股 AllTick 主、iTick 备；10 个加密货币币安现货主、AllTick 备（第 12 节）。
+    # AllTick、iTick 的 token 只由 负责人 填进服务器 .env，空 = 不用这家；币安不要 token，用开关 FX_QUOTE_BINANCE_ENABLED（默认关闭）。
+    # 都没配时和接入以前完全一样（simulated 模式下全部模拟）。只要报价，不抛单
+    feeds:
+      # AllTick、iTick 谁在前：alltick 或 itick（填 itick 时这两家在所有品种里对调；币安的位置不受影响）
+      primary: ${FX_QUOTE_PRIMARY:alltick}
+      # 主源一个品种多久没报价切备源；主源恢复多久后切回
+      failover-after: ${FX_QUOTE_FAILOVER_AFTER:10s}
+      failback-after: ${FX_QUOTE_FAILBACK_AFTER:30s}
+      # 两家中间价偏差超过这个比例（0.005 = 0.5%）→ 这个品种暂停开仓并告警（平仓、止盈止损、强平照常，用主源价格）；两家的报价都在 cross-check-max-age 以内才比较
+      max-deviation: ${FX_QUOTE_MAX_DEVIATION:0.005}
+      cross-check-max-age: 5s
+      # USDT 计价的映射（代码以 USDT 结尾）乘的系数：负责人 2026-10-17 确认 USDT 按 1:1 当 USD
+      usdt-usd-rate: ${FX_QUOTE_USDT_USD_RATE:1}
+      # 开市时一家报价源多久没给任何报价算告警（quote.alltick / quote.itick / quote.binance）
+      silence-alert: 60s
+      # 断线重连：1 秒起每次翻倍，最长 60 秒；一条连接 60 秒没有任何消息就断开重连
+      reconnect-initial: 1s
+      reconnect-max: 60s
+      idle-timeout: 60s
+      alltick:
+        token: ${FX_QUOTE_ALLTICK_TOKEN:}
+        fx-url: ${FX_QUOTE_ALLTICK_FX_URL:wss://quote.alltick.co/quote-b-ws-api}
+        stock-url: ${FX_QUOTE_ALLTICK_STOCK_URL:wss://quote.alltick.co/quote-stock-b-ws-api}
+        heartbeat: 10s
+        channel-gap: 3s
+      itick:
+        token: ${FX_QUOTE_ITICK_TOKEN:}
+        url: ${FX_QUOTE_ITICK_URL:wss://api.itick.org}
+        heartbeat: 20s
+      # 币安公开行情（第 12 节）：不需要 API Key。默认关闭（不改变现有行为，也避开条款风险：币安公开数据是非商业许可），负责人 决定后在 .env 打开。
+      # 现货地址是只读行情专用域名（美国服务器也能连）。永续（futures）代码保留但默认关闭：负责人 2026-10-17 决定不用币安永续给贵金属、原油、美股报价，
+      # 映射里没有任何品种用它
+      binance:
+        enabled: ${FX_QUOTE_BINANCE_ENABLED:false}
+        spot-url: ${FX_QUOTE_BINANCE_SPOT_WS_URL:wss://data-stream.binance.vision}
+        futures-enabled: ${FX_QUOTE_BINANCE_FUTURES_ENABLED:false}
+        futures-url: ${FX_QUOTE_BINANCE_FUTURES_WS_URL:wss://fstream.binance.com/public}
+        # 每 30 秒发一次 LIST_SUBSCRIPTIONS 确认连接活着（现货每条连接每秒最多 5 条客户端消息）
+        heartbeat: 30s
+        # 一条连接最多几个流（官方上限 1024），超过分多条连接
+        max-streams-per-connection: 200
+        # 官方：一条连接只保持 24 小时。23 小时主动换新连接
+        max-connection-age: 23h
+      # 品种 → [主源, 备源, 第三候补]，每项 "报价源:连接:代码"。AllTick 连接 fx / stock；iTick 连接 forex / indices / crypto / stock（代码写成 代码$地区）。
+      # 币安连接 spot / futures（代码大写，例如 BTCUSDT）。只用最前面两个能用的源：加密货币在币安开关关闭时就是以前的"AllTick 主、iTick 备"，
+      # 打开后是"币安主、AllTick 备"（iTick 不订阅，AllTick 没 token 时 iTick 补上当备源）。
+      # 代码依据和标【推断】的项见技术方案第 2 节，拿到 token 后要核对。没写的品种（例如后台新增的）只走模拟源
+      routes:
+        EURUSD: ["alltick:fx:EURUSD", "itick:forex:EURUSD$GB"]
+        GBPUSD: ["alltick:fx:GBPUSD", "itick:forex:GBPUSD$GB"]
+        USDJPY: ["alltick:fx:USDJPY", "itick:forex:USDJPY$GB"]
+        USDCHF: ["alltick:fx:USDCHF", "itick:forex:USDCHF$GB"]
+        USDCAD: ["alltick:fx:USDCAD", "itick:forex:USDCAD$GB"]
+        AUDUSD: ["alltick:fx:AUDUSD", "itick:forex:AUDUSD$GB"]
+        NZDUSD: ["alltick:fx:NZDUSD", "itick:forex:NZDUSD$GB"]
+        EURGBP: ["alltick:fx:EURGBP", "itick:forex:EURGBP$GB"]
+        EURJPY: ["alltick:fx:EURJPY", "itick:forex:EURJPY$GB"]
+        GBPJPY: ["alltick:fx:GBPJPY", "itick:forex:GBPJPY$GB"]
+        EURCHF: ["alltick:fx:EURCHF", "itick:forex:EURCHF$GB"]
+        EURAUD: ["alltick:fx:EURAUD", "itick:forex:EURAUD$GB"]
+        EURCAD: ["alltick:fx:EURCAD", "itick:forex:EURCAD$GB"]
+        AUDJPY: ["alltick:fx:AUDJPY", "itick:forex:AUDJPY$GB"]
+        CADJPY: ["alltick:fx:CADJPY", "itick:forex:CADJPY$GB"]
+        CHFJPY: ["alltick:fx:CHFJPY", "itick:forex:CHFJPY$GB"]
+        AUDCAD: ["alltick:fx:AUDCAD", "itick:forex:AUDCAD$GB"]
+        AUDNZD: ["alltick:fx:AUDNZD", "itick:forex:AUDNZD$GB"]
+        GBPAUD: ["alltick:fx:GBPAUD", "itick:forex:GBPAUD$GB"]
+        GBPCHF: ["alltick:fx:GBPCHF", "itick:forex:GBPCHF$GB"]
+        USDCNH: ["alltick:fx:USDCNH", "itick:forex:USDCNH$GB"]
+        XAUUSD: ["alltick:fx:GOLD", "itick:forex:XAUUSD$GB"]
+        XAGUSD: ["alltick:fx:Silver", "itick:forex:XAGUSD$GB"]
+        XTIUSD: ["alltick:fx:USOIL", "itick:forex:XTIUSD$GB"]
+        XBRUSD: ["alltick:fx:UKOIL", "itick:forex:XBRUSD$GB"]
+        US30: ["alltick:fx:US30", "itick:indices:US30USD$GB"]
+        US500: ["alltick:fx:US500", "itick:indices:SPX500USD$GB"]
+        NAS100: ["alltick:fx:NAS100", "itick:indices:NAS100$GB"]
+        US2000: ["alltick:fx:US2000"]
+        GER40: ["alltick:fx:GER30", "itick:indices:GER40$GB"]
+        UK100: ["alltick:fx:UK100", "itick:indices:UK100$GB"]
+        FRA40: ["alltick:fx:FRA40", "itick:indices:FR40EUR$GB"]
+        JPN225: ["alltick:fx:JPN225", "itick:indices:JPN225$GB"]
+        HK50: ["alltick:fx:HK50", "itick:indices:HKG33$GB"]
+        AUS200: ["alltick:fx:AUS200", "itick:indices:AUS200$GB"]
+        BTCUSD: ["binance:spot:BTCUSDT", "alltick:fx:BTCUSDT", "itick:crypto:BTCUSDT$BA"]
+        ETHUSD: ["binance:spot:ETHUSDT", "alltick:fx:ETHUSDT", "itick:crypto:ETHUSDT$BA"]
+        SOLUSD: ["binance:spot:SOLUSDT", "alltick:fx:SOLUSDT", "itick:crypto:SOLUSDT$BA"]
+        XRPUSD: ["binance:spot:XRPUSDT", "alltick:fx:XRPUSDT", "itick:crypto:XRPUSDT$BA"]
+        BNBUSD: ["binance:spot:BNBUSDT", "alltick:fx:BNBUSDT", "itick:crypto:BNBUSDT$BA"]
+        DOGEUSD: ["binance:spot:DOGEUSDT", "alltick:fx:DOGEUSDT", "itick:crypto:DOGEUSDT$BA"]
+        ADAUSD: ["binance:spot:ADAUSDT", "alltick:fx:ADAUSDT", "itick:crypto:ADAUSDT$BA"]
+        LTCUSD: ["binance:spot:LTCUSDT", "alltick:fx:LTCUSDT", "itick:crypto:LTCUSDT$BA"]
+        DOTUSD: ["binance:spot:DOTUSDT", "alltick:fx:DOTUSDT", "itick:crypto:DOTUSDT$BA"]
+        BCHUSD: ["binance:spot:BCHUSDT", "alltick:fx:BCHUSDT", "itick:crypto:BCHUSDT$BA"]
+        AAPL: ["alltick:stock:AAPL.US", "itick:stock:AAPL$US"]
+        MSFT: ["alltick:stock:MSFT.US", "itick:stock:MSFT$US"]
+        NVDA: ["alltick:stock:NVDA.US", "itick:stock:NVDA$US"]
+        TSLA: ["alltick:stock:TSLA.US", "itick:stock:TSLA$US"]
+        AMZN: ["alltick:stock:AMZN.US", "itick:stock:AMZN$US"]
+    # 没有对应外汇品种的币种：港币按联系汇率（1 USD = 7.78 HKD）
+    fixed-usd-rates:
+      HKD: 0.12853470
+    # K 线保留条数（v2 第 11.2 节，market/kline/KlineRetention）：每个品种每个周期只保留最近 N 根，每天 UTC 20:10 分批清理一次
+    kline-retention:
+      enabled: true
+      cron: "0 10 20 * * *"
+      batch-size: 5000
+      keep:
+        1m: 10080
+        5m: 8640
+        15m: 8640
+        1h: 8760
+        4h: 4380
+        1d: 3650
+    # 官网公开行情 GET /api/public/quotes（v2 需求 4.2，不需要登录）：只返回这些品种的卖价和当日涨跌幅，按这个顺序；
+    # 整份结果缓存 cache-ttl，所有访客共用。改品种只改这里（需求要求 8–12 个）。
+    # source：官网用哪种价格。simulated（默认）一律模拟价、显示"示例行情"；live 用交易报价（真实报价源的价格），
+    # 两家数据商的条款都禁止未授权的公开展示，拿到书面展示授权以后才能改成 live（内部文档 第 6 节）
+    public-quotes:
+      source: ${FX_PUBLIC_QUOTES_SOURCE:simulated}
+      symbols: [XAUUSD, XAGUSD, EURUSD, GBPUSD, USDJPY, USDCNH, NAS100, XTIUSD, BTCUSD, ETHUSD]
+      cache-ttl: 1s
+  trading:
+    # 单个用户的持仓上限（USD 名义价值，含挂单），沿用原型的 3,000,000；S16 改为后台可配置
+    position-limit-usd: 3000000
+    # 撮合引擎：行情驱动的挂单成交、止盈止损、强平（S9）
+    engine-enabled: true
+    engine-threads: 8
+    engine-workers: 8
+    # 隔夜费（S10）：每天 UTC 22:00 结算（沿用现有系统），费率在品种配置里（swap_long / swap_short，待 负责人 提供，现在都是 0）
+    swap:
+      enabled: true
+      rollover-time: "22:00"
+      catch-up-days: 3
+    # 追保预警（S15a，通知方案 N4）：每 10 秒检查，保证金水平低于追保线通知一次；同一客户两次至少隔 5 分钟（沿用现有系统）
+    margin-call:
+      enabled: true
+      line: 1.00
+      min-interval: 5m
+  # 风控（S11）：每 5 秒检查净敞口，超过阈值自动禁开。阈值在后台设置（S16），没有设置的不监控
+  risk:
+    monitor-enabled: true
+    # 自动禁开时通知的风控人员邮箱，逗号分隔（负责人 提供，H7）
+    alert-emails: ${FX_RISK_ALERT_EMAILS:}
+  # 钱包（第 0 批过渡）：只留充值入账、提现、自动审批、对账的业务规则；地址派生、扫链、归集、热钱包已去掉，
+  # 第 1 批换成支付接口层（TopUP）。仓库里只有变量名，值只由负责人填进服务器
+  wallet:
+    # 最小充值 1 USDT（负责人 确认，充值方案 D4）
+    min-deposit: 1
+    # 提现（S13，内部文档）：限额沿用现有系统（N-08），手续费 负责人 确认（W3），从提现金额里扣
+    withdraw:
+      min-amount: 10
+      max-per-tx: 10000
+      daily-limit: 30000
+      large-amount: 3000
+      large-delay: 6h
+      cooling: 2h
+      whitelist-delay: 24h
+      max-whitelist: 10
+      fees:
+        ERC20: 5
+        TRC20: 1
+        BSC: 0.5
+    chains:
+      ERC20:
+        usdt-contract: ${FX_WALLET_ERC20_USDT_CONTRACT:}
+        usdt-decimals: 6
+        confirmations: 12
+        block-seconds: 12
+        # 主网 USDT 每个区块有上百笔转账，每次少扫一些，避免节点服务的返回条数上限
+        scan-batch: 20
+      BSC:
+        usdt-contract: ${FX_WALLET_BSC_USDT_CONTRACT:}
+        # BSC 上的 USDT 是 18 位小数，按需求要上链实测确认（S20）
+        usdt-decimals: 18
+        confirmations: 15
+        # BSC 出块已经缩短到约 0.45 秒（2026-10-21 在测试网和主网各取 1,000 个区块实测：450 秒），原来按 3 秒配置，
+        # 每 15 秒只扫 50 个区块，几乎追不上出块，停机后积压永远补不完（scan.BSC 一直 DOWN）。
+        # 每 15 秒扫 150 个区块 ≈ 10 个/秒，是出块速度（约 2.2 个/秒）的 4 倍多；主网 USDT 转账多，一次不扫太多区块
+        block-seconds: 0.45
+        scan-batch: 150
+      TRC20:
+        usdt-contract: ${FX_WALLET_TRC20_USDT_CONTRACT:}
+        usdt-decimals: 6
+        confirmations: 19
+        block-seconds: 3
+        # TRON 按区块逐个查，每个区块 2 次请求
+        scan-batch: 10
+  # 通知（S15a，内部文档）。邮件用 SMTP（N1），服务商待定（N-05）；没有配置 FX_MAIL_HOST 时邮件只记录、不发送。
+  # 密码只由 负责人 填进服务器环境变量
+  notify:
+    worker-enabled: true
+    mail:
+      host: ${FX_MAIL_HOST:}
+      port: ${FX_MAIL_PORT:587}
+      username: ${FX_MAIL_USERNAME:}
+      password: ${FX_MAIL_PASSWORD:}
+      from: ${FX_MAIL_FROM:}
+      # STARTTLS（587 端口）或 SSL（465 端口）
+      security: ${FX_MAIL_SECURITY:STARTTLS}
+    # Web Push（S15b，通知方案 N2）：VAPID 密钥由 负责人 在自己电脑上生成（例如 npx web-push generate-vapid-keys）后填进服务器；
+    # 私钥只由 负责人 填。测试和生产各用一对，生成后不要换（换了所有客户要重新订阅）。没填时不发推送
+    push:
+      vapid-public-key: ${FX_PUSH_VAPID_PUBLIC_KEY:}
+      vapid-private-key: ${FX_PUSH_VAPID_PRIVATE_KEY:}
+      vapid-subject: ${FX_PUSH_VAPID_SUBJECT:}
+      ttl: 24h
+      max-devices: 10
+  # 后台（S16a，内部文档）。登录锁定次数和时长、IP 白名单在后台的系统配置里改
+  admin:
+    session-ttl: 8h
+    idle-timeout: 30m
+    cookie-name: fx_admin_session
+    cookie-secure: ${FX_COOKIE_SECURE:true}
+    # 第一个超级管理员（G1）：系统里还没有管理员时启动会用它建；密码只由 负责人 填，建好后可以删掉这两个变量
+    init-username: ${FX_ADMIN_INIT_USERNAME:}
+    init-password: ${FX_ADMIN_INIT_PASSWORD:}
+  # 对象存储（证件照片）。现在是本地目录，正式环境在 S20 换成对象存储服务
+  storage:
+    local-dir: ${FX_STORAGE_DIR:./data/storage}
+
+server:
+  port: ${FX_HTTP_PORT:8080}
+  # 客户端真实 IP 取自 Nginx 传来的 X-Forwarded-For，只信任内网地址的代理（登录失败按 IP 计数要用）
+  forward-headers-strategy: native
+
+spring:
+  application:
+    name: trading
+  datasource:
+    url: ${FX_DB_URL}
+    username: ${FX_DB_USERNAME}
+    password: ${FX_DB_PASSWORD}
+    hikari:
+      # 每个连接都用 UTC，数据库默认时间和 UTC_TIMESTAMP() 一致
+      connection-init-sql: SET time_zone = '+00:00'
+      # 撮合执行线程（8）+ 检查线程 + 接口请求共用；默认 10 不够。空闲时只保留 5 个
+      maximum-pool-size: ${FX_DB_POOL_SIZE:30}
+      minimum-idle: 5
+  data:
+    redis:
+      host: ${FX_REDIS_HOST:localhost}
+      port: ${FX_REDIS_PORT:6379}
+      password: ${FX_REDIS_PASSWORD:}
+      # Redis 只用于限次计数（登录失败、发验证码、通用限流）和健康检查；卡住时 2 秒就放弃，不让请求一直等（默认 60 秒）
+      timeout: 2s
+      connect-timeout: 2s
+  # KYC 每张图最大 2MB（AC-05），一次提交 3 张
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 7MB
+  # 表结构只通过 Flyway 迁移脚本修改（src/main/resources/db/migration），表结构说明见 内部文档
+  flyway:
+    locations: classpath:db/migration
+
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+# 日志：级别后面带追踪号（v2 E9，common/trace/TraceId）：[32 位十六进制]（HTTP 请求和 WebSocket 连接，和响应头 X-Request-Id 相同）、
+# [job-…]（定时任务每次执行一个），没有时是 [-]。按追踪号查一个请求的全部日志：grep 追踪号
+logging:
+  pattern:
+    correlation: "[%X{traceId:--}] "
+
+# 应用管理端点只在内网端口监听，Nginx 不转发（修复 fxsystem S3）。
+# 指标（v2 E10）：GET http://127.0.0.1:8081/actuator/prometheus（Prometheus 格式）、/actuator/metrics；自定义指标都以 fx_ 开头，
+# 见 内部文档 第 15 节。只在服务器本机（容器里）能访问，不对外
+management:
+  server:
+    port: ${FX_MANAGEMENT_PORT:8081}
+    address: 127.0.0.1
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
