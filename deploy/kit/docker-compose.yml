@@ -47,6 +47,9 @@ services:
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?缺少 ADMIN_DOMAIN}
       WWW_DOMAIN: ${WWW_DOMAIN:?缺少 WWW_DOMAIN}
       QUOTE_DOMAIN: ${QUOTE_DOMAIN:?缺少 QUOTE_DOMAIN}
+      # 测试环境官网不让搜索引擎收录（X-Robots-Tag: noindex + robots.txt 全部禁止，测试环境验收 T-2）；生产要让官网被收录时设 "false"。
+      # 这个开关只管官网，客户端、后台、报价子域名在 Nginx 配置里写死永远不收录
+      FX_NGINX_NOINDEX: "true"
     volumes:
       # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来
       - /etc/letsencrypt/live/trading:/etc/letsencrypt/live/trading:ro
@@ -149,7 +152,9 @@ services:
       FX_QUOTE_BINANCE_ENABLED: ${FX_QUOTE_BINANCE_ENABLED:-true}
       FX_QUOTE_BINANCE_FUTURES_ENABLED: "false"
       FX_QUOTE_LICENSE_ENFORCE: auto
-      FX_QUOTE_OPEN_DOCS: auto
+      # 开发者文档 /docs/：测试环境明确打开（测试环境验收 T-1）。auto 在"配了任何真实报价源"时也不给看，而测试环境币安默认打开（TD4-11），
+      # auto 会让 /docs/ 返回 404；需求是"对外开放前只在测试环境能看"，所以这里写死 true。生产不能照抄，用 auto 或 false
+      FX_QUOTE_OPEN_DOCS: "true"
       FX_QUOTE_ALLTICK_TOKEN: ${FX_QUOTE_ALLTICK_TOKEN:-}
       FX_QUOTE_ITICK_TOKEN: ${FX_QUOTE_ITICK_TOKEN:-}
     networks:
