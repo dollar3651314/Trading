@@ -55,9 +55,6 @@ interface MarketAdminMapper {
 
   List<SymbolRow> symbols();
 
-  /** 填了模拟起始价的品种（模拟报价源启动时读） */
-  List<SymbolRow> symbolsWithSimStartPrice();
-
   SymbolRow symbol(@Param("code") String code);
 
   void updateSymbol(SymbolRow r);

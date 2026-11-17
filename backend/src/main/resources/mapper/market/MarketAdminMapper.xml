@@ -12,11 +12,6 @@
     SELECT <include refid="symbolCols"/> FROM market_symbol ORDER BY sort_order, code
   </select>
 
-  <!-- 模拟报价源启动时读（V23） -->
-  <select id="symbolsWithSimStartPrice" resultType="app.trading.market.admin.MarketAdminMapper$SymbolRow">
-    SELECT <include refid="symbolCols"/> FROM market_symbol WHERE sim_start_price IS NOT NULL ORDER BY sort_order, code
-  </select>
-
   <select id="symbol" resultType="app.trading.market.admin.MarketAdminMapper$SymbolRow">
     SELECT <include refid="symbolCols"/> FROM market_symbol WHERE code = #{code} FOR UPDATE
   </select>

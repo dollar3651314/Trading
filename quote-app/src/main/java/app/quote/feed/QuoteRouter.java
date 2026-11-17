@@ -1,0 +1,318 @@
+package app.quote.feed;
+
+import app.quote.QuoteProperties;
+import app.quote.catalog.QuoteSymbol;
+import app.quote.catalog.SymbolCatalog;
+import app.quote.pipeline.QuoteProcessor;
+import app.quote.pipeline.RawQuote;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+/**
+ * 按品种选报价源（内部文档 第 3、4 节）：
+ * <ul>
+ *   <li>每个品种的映射来自 {@link QuoteFeedsProperties#parsedRoutes()}，<b>只保留能用的报价源</b>（配了 token；币安看启用开关），
+ *       再取<b>最前面的两个</b>作为主源、备源（第三个只在前两个有一个不能用时补上，例如加密货币"币安、AllTick、iTick"：
+ *       币安开关关闭时就是以前的"AllTick 主、iTick 备"）。一个都没有的品种：{@code simulated} 模式下继续走模拟源，{@code live} 模式下没有报价；</li>
+ *   <li>主备：主源这个品种超过 {@code failover-after} 没报价、备源有新报价 → 切备源；主源重新连续报价满 {@code failback-after} → 切回；
+ *       切换在每条报价进来时判断，不用定时器；</li>
+ *   <li>交叉校验：两家的报价都在 {@code cross-check-max-age} 以内时比较中间价，偏差超过 {@code max-deviation} →
+ *       {@link QuoteProcessor#setDeviationPaused}（这个品种<b>只暂停开仓</b>，负责人 2026-10-17 选 B），并且这段时间<b>只用主源的价格</b>
+ *       （正在用备源时立即切回主源），平仓、止盈止损、强平照常按主源价格执行；回到阈值以内或一边没有新价时恢复开仓；</li>
+ *   <li>进主链路前：USDT 计价的映射乘 {@code usdt-usd-rate}；按品种小数位取整，买价向下、卖价向上（点差只会变宽）；</li>
+ *   <li>报价源授权（第 2 批，技术方案 08 页）：授权检查启用时（生产），在用的源没有"交易用途"授权而另一家有授权且有新价，就用有授权的那家；
+ *       两家都没有就照常推（报价带 tradable=false，trading-app 只显示不开仓）。最多用几家见 {@link #MAX_ACTIVE_FEEDS}。</li>
+ * </ul>
+ * 只有"当前使用的源"的报价交给 {@link QuoteProcessor}，之后的交易时段、质量守卫不变（拆进程后加点在 trading-app）。时间都用注入的时钟。
+ */
+@Component
+
+public class QuoteRouter implements QuoteSink {
+
+  private static final Logger log = LoggerFactory.getLogger(QuoteRouter.class);
+  private static final MathContext MC = MathContext.DECIMAL64;
+
+  /** 报价模式（quote.market.source） */
+  public enum Mode {
+    /** 不启动任何报价源（后端测试） */
+    NONE,
+    /** 配了 token 的报价源接管它覆盖的品种，其余模拟（开发、测试环境） */
+    SIMULATED,
+    /** 只用真实报价源（生产） */
+    LIVE
+  }
+
+  private record Last(BigDecimal bid, BigDecimal ask, Instant receivedAt, Instant streakSince) {
+    BigDecimal mid() {
+      return bid.add(ask).divide(BigDecimal.TWO, MC);
+    }
+  }
+
+  /** 一个品种的状态（按品种加锁） */
+  private static final class Route {
+    final String symbol;
+    /** 能用的报价源里最前面的两个，主源在前 */
+    final List<QuoteFeedsProperties.Route> feeds;
+    final Map<String, Last> last = new HashMap<>();
+    /** 当前用 feeds 里的第几个 */
+    int active;
+    boolean blocked;
+    BigDecimal deviation;
+
+    Route(String symbol, List<QuoteFeedsProperties.Route> feeds) {
+      this.symbol = symbol;
+      this.feeds = feeds;
+    }
+
+    String activeFeed() {
+      return feeds.get(active).feed();
+    }
+  }
+
+  /**
+   * 每个品种最多用几家（主源 + 备源）。第一版沿用"前两家"（技术方案 02 页第 3 节，TD-13 A）；映射本来就是有序列表，
+   * 以后拿到第三家的授权，把这里和 {@link #choose} 的主备规则扩成 N 家即可，配置和报价源接口不用改。
+   */
+  static final int MAX_ACTIVE_FEEDS = 2;
+
+  private final Mode mode;
+  private final TradingLicenses licenses;
+  private final QuoteFeedsProperties props;
+  private final QuoteProcessor processor;
+  private final SymbolCatalog catalog;
+  private final Clock clock;
+  /** 有可用真实源的品种 */
+  private final Map<String, Route> routes = new LinkedHashMap<>();
+  /** 报价源|代码（大写） → 品种 */
+  private final Map<String, Route> byCode = new HashMap<>();
+  /** 报价源 → 连接 → 代码 */
+  private final Map<String, Map<String, List<String>>> subscriptions = new LinkedHashMap<>();
+
+  /** 不检查授权（测试里直接构造用） */
+  public QuoteRouter(QuoteProperties market, QuoteFeedsProperties props, QuoteProcessor processor, SymbolCatalog catalog, Clock clock, MeterRegistry metrics) {
+    this(market, props, processor, catalog, clock, metrics, TradingLicenses.OFF);
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public QuoteRouter(QuoteProperties market, QuoteFeedsProperties props, QuoteProcessor processor, SymbolCatalog catalog, Clock clock, MeterRegistry metrics,
+      TradingLicenses licenses) {
+    this.mode = mode(market.source());
+    this.licenses = licenses;
+    this.props = props;
+    this.processor = processor;
+    this.catalog = catalog;
+    this.clock = clock;
+    Map<String, List<QuoteFeedsProperties.Route>> parsed = props.parsedRoutes();
+    for (var e : parsed.entrySet()) {
+      for (QuoteFeedsProperties.Route r : e.getValue()) validate(e.getKey(), r);
+    }
+    if (mode != Mode.NONE) {
+      for (var e : parsed.entrySet()) {
+        List<QuoteFeedsProperties.Route> usable = e.getValue().stream().filter(props::usable).limit(MAX_ACTIVE_FEEDS).toList();
+        if (usable.isEmpty()) continue;
+        Route route = new Route(e.getKey(), usable);
+        routes.put(e.getKey(), route);
+        for (QuoteFeedsProperties.Route r : usable) {
+          Route dup = byCode.put(key(r.feed(), r.code()), route);
+          if (dup != null) {
+            throw new IllegalArgumentException("quote.feeds.routes：" + r.feed() + " 的代码 " + r.code() + " 同时用在 " + dup.symbol + " 和 " + e.getKey());
+          }
+          subscriptions.computeIfAbsent(r.feed(), k -> new LinkedHashMap<>()).computeIfAbsent(r.channel(), k -> new ArrayList<>()).add(r.code());
+        }
+      }
+    }
+    Gauge.builder("fx.quote.route.backup", this, x -> x.onBackup().size()).description("正在用备源的品种数").register(metrics);
+    Gauge.builder("fx.quote.route.deviation", this, x -> x.deviations().size()).description("两家报价偏差过大、暂停开仓的品种数").register(metrics);
+    if (!routes.isEmpty()) log.info("真实报价源接管 {} 个品种（报价模式 {}，报价源 {}）", routes.size(), mode, subscriptions.keySet());
+  }
+
+  public static Mode mode(String source) {
+    if (source == null) return Mode.NONE;
+    return switch (source.strip().toLowerCase(Locale.ROOT)) {
+      case "simulated" -> Mode.SIMULATED;
+      case "live" -> Mode.LIVE;
+      default -> Mode.NONE;
+    };
+  }
+
+  private static void validate(String symbol, QuoteFeedsProperties.Route r) {
+    Set<String> channels = switch (r.feed()) {
+      case AllTickFeed.NAME -> AllTickFeed.CHANNELS;
+      case ITickFeed.NAME -> ITickFeed.CHANNELS;
+      case BinanceFeed.NAME -> BinanceFeed.CHANNELS;
+      default -> throw new IllegalArgumentException("quote.feeds.routes." + symbol + " 用了不认识的报价源 " + r.feed());
+    };
+    if (!channels.contains(r.channel())) {
+      throw new IllegalArgumentException("quote.feeds.routes." + symbol + " 的 " + r.feed() + " 连接 " + r.channel() + " 不对，只能是 " + channels);
+    }
+  }
+
+  private static String key(String feed, String code) {
+    return feed + "|" + code.toUpperCase(Locale.ROOT);
+  }
+
+  public Mode mode() {
+    return mode;
+  }
+
+  /** 这个品种的交易报价来自真实源（不是模拟源）：{@code live} 模式下全部是，{@code simulated} 模式下有配了 token 的映射的才是 */
+  public boolean liveTrading(String symbol) {
+    return mode == Mode.LIVE || (mode == Mode.SIMULATED && routes.containsKey(symbol));
+  }
+
+  /** 每家报价源要订阅的代码（按连接分）；没有配 token、没打开开关、或者没排进前两个的报价源不在里面 */
+  public Map<String, Map<String, List<String>>> subscriptions() {
+    return subscriptions;
+  }
+
+  /** 品种当前在用的报价源（后台品种页）；没有报价源时为空 */
+  public Optional<QuoteSource> current(String symbol) {
+    Route r = routes.get(symbol);
+    if (r == null) return mode == Mode.SIMULATED ? Optional.of(new QuoteSource("simulated", null)) : Optional.empty();
+    synchronized (r) {
+      String state = r.blocked ? "deviation" : r.active == 0 ? "primary" : "backup";
+      return Optional.of(new QuoteSource(r.activeFeed(), state));
+    }
+  }
+
+  /** 正在用备源的品种 */
+  public List<String> onBackup() {
+    List<String> out = new ArrayList<>();
+    for (Route r : routes.values()) {
+      synchronized (r) {
+        if (r.active != 0) out.add(r.symbol + "（" + r.activeFeed() + "）");
+      }
+    }
+    return out;
+  }
+
+  /** 偏差过大、暂停开仓的品种和偏差（百分比） */
+  public List<String> deviations() {
+    List<String> out = new ArrayList<>();
+    for (Route r : routes.values()) {
+      synchronized (r) {
+        if (r.blocked) out.add(r.symbol + " " + r.deviation.movePointRight(2).setScale(2, RoundingMode.HALF_UP).toPlainString() + "%");
+      }
+    }
+    return out;
+  }
+
+  /** 这家报价源负责的品种（告警看"开市的品种有没有报价"用） */
+  public List<String> symbolsOf(String feed) {
+    return routes.values().stream().filter(r -> r.feeds.stream().anyMatch(x -> x.feed().equals(feed))).map(r -> r.symbol).toList();
+  }
+
+  @Override
+  public void onQuote(String feed, String code, BigDecimal bid, BigDecimal ask, Instant time) {
+    Route r = byCode.get(key(feed, code));
+    if (r == null) return; // 没订阅的代码
+    Optional<QuoteSymbol> spec = catalog.get(r.symbol);
+    if (spec.isEmpty()) return; // 停用的品种
+    if (code.toUpperCase(Locale.ROOT).endsWith("USDT") && props.usdtUsdRate().compareTo(BigDecimal.ONE) != 0) {
+      bid = bid.multiply(props.usdtUsdRate(), MC);
+      ask = ask.multiply(props.usdtUsdRate(), MC);
+    }
+    int digits = spec.get().digits();
+    bid = bid.setScale(digits, RoundingMode.FLOOR);
+    ask = ask.setScale(digits, RoundingMode.CEILING);
+    if (bid.signum() <= 0 || ask.signum() <= 0) return;
+    Instant now = clock.instant();
+    RawQuote out = null;
+    synchronized (r) {
+      Last prev = r.last.get(feed);
+      boolean gap = prev == null || Duration.between(prev.receivedAt(), now).compareTo(props.failoverAfter()) > 0;
+      r.last.put(feed, new Last(bid, ask, now, gap ? now : prev.streakSince()));
+      choose(r, now);
+      crossCheck(r, now);
+      if (feed.equals(r.activeFeed())) out = new RawQuote(r.symbol, bid, ask, time == null ? now : time);
+    }
+    if (out != null) processor.submit(out);
+  }
+
+  private boolean fresh(Last l, Instant now, Duration within) {
+    return l != null && Duration.between(l.receivedAt(), now).compareTo(within) <= 0;
+  }
+
+  /** 主备切换 */
+  private void choose(Route r, Instant now) {
+    if (r.feeds.size() < 2) return;
+    Last p = r.last.get(r.feeds.get(0).feed());
+    Last b = r.last.get(r.feeds.get(1).feed());
+    boolean pFresh = fresh(p, now, props.failoverAfter());
+    boolean bFresh = fresh(b, now, props.failoverAfter());
+    if (r.active == 0) {
+      if (!pFresh && bFresh) {
+        r.active = 1;
+        log.warn("品种 {} 主报价源 {} 超过 {} 秒没有报价，切到备源 {}", r.symbol, r.feeds.get(0).feed(), props.failoverAfter().toSeconds(), r.feeds.get(1).feed());
+      }
+    } else if (pFresh && (!bFresh || Duration.between(p.streakSince(), now).compareTo(props.failbackAfter()) >= 0) && !keepLicensedBackup(r, bFresh)) {
+      r.active = 0;
+      log.info("品种 {} 主报价源 {} 已恢复，切回主源", r.symbol, r.feeds.get(0).feed());
+    }
+    preferLicensed(r, pFresh, bFresh);
+  }
+
+  /** 授权检查启用时：备源有交易用途授权、主源没有，备源又有新价，就不切回主源 */
+  private boolean keepLicensedBackup(Route r, boolean bFresh) {
+    return licenses.enforced() && bFresh && !licenses.tradingUse(r.feeds.get(0).feed(), r.symbol) && licenses.tradingUse(r.feeds.get(1).feed(), r.symbol);
+  }
+
+  /**
+   * 授权检查启用时（生产）：在用的源没有"交易用途"授权、另一家有授权并且有新价 → 改用有授权的那家（技术方案 08 页：当前源没授权就切到有授权的备源）。
+   * 两家都没有授权时不动（报价照常推，trading-app 只显示不开仓）。
+   */
+  private void preferLicensed(Route r, boolean pFresh, boolean bFresh) {
+    if (!licenses.enforced()) return;
+    int other = 1 - r.active;
+    boolean otherFresh = other == 0 ? pFresh : bFresh;
+    if (!licenses.tradingUse(r.activeFeed(), r.symbol) && otherFresh && licenses.tradingUse(r.feeds.get(other).feed(), r.symbol)) {
+      r.active = other;
+      log.info("品种 {} 改用有交易用途授权的报价源 {}", r.symbol, r.activeFeed());
+    }
+  }
+
+  /** 交叉校验：偏差超过阈值 → 暂停开仓，并固定用主源（主源这时一定有 5 秒内的新价） */
+  private void crossCheck(Route r, Instant now) {
+    if (r.feeds.size() < 2) return;
+    Last p = r.last.get(r.feeds.get(0).feed());
+    Last b = r.last.get(r.feeds.get(1).feed());
+    boolean block = false;
+    BigDecimal dev = null;
+    if (fresh(p, now, props.crossCheckMaxAge()) && fresh(b, now, props.crossCheckMaxAge())) {
+      dev = p.mid().subtract(b.mid()).abs().divide(b.mid(), MC);
+      block = dev.compareTo(props.maxDeviation()) > 0;
+    }
+    if (block != r.blocked) {
+      r.blocked = block;
+      if (block) {
+        log.warn("品种 {} 两家报价偏差 {}（{} {} / {} {}），超过阈值 {}，暂停开仓，用主源价格", r.symbol, dev.toPlainString(), r.feeds.get(0).feed(), p.mid(),
+            r.feeds.get(1).feed(), b.mid(), props.maxDeviation());
+      } else {
+        log.info("品种 {} 两家报价偏差恢复正常，恢复开仓", r.symbol);
+      }
+      processor.setDeviationPaused(r.symbol, block);
+    }
+    if (block && r.active != 0) {
+      r.active = 0;
+      log.info("品种 {} 两家报价偏差期间切回主源 {}", r.symbol, r.feeds.get(0).feed());
+    }
+    if (block) r.deviation = dev;
+  }
+}

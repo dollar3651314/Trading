@@ -13,9 +13,10 @@ trading:
     ws-handshake-per-minute: 1000000
     user-write-per-minute: 1000000
     admin-login-per-ip: 1000000
-  # 模拟行情源：50 个品种都有报价；测试用 /api/e2e/market/move 推动某个品种的价格
+  # 行情：连报价服务（e2e/start-backend.sh 先启动 quote-app，模拟模式，50 个品种都有报价）；测试用 /api/e2e/market/move 推动某个品种的价格
+  # （转给报价服务的 /internal/e2e/move）。内部 Key 是 start-backend.sh 里的一次性测试值
   market:
-    source: simulated
+    source: remote
   # 钱包：合约地址是三条链官方 USDT 合约的公开地址。充值地址由 e2e 的地址替身按用户号生成（E2eAddressBook），
   # 到账和广播由 e2e 的链替身代替，不连任何真实节点
   wallet:
