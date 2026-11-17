@@ -16,8 +16,8 @@ trading:
   # 模拟行情源：50 个品种都有报价；测试用 /api/e2e/market/move 推动某个品种的价格
   market:
     source: simulated
-  # 钱包：合约地址是三条链官方 USDT 合约的公开地址。充值地址由 e2e 的地址替身按用户号生成（E2eAddressBook），
-  # 到账和广播由 e2e 的链替身代替，不连任何真实节点
+  # 钱包：TopUP 由 e2e 的假 TopUP 代替（payment.fake.E2ePayment，本机随机端口、随机 Key），充值地址、到账回调、提现付款都走支付接口层；
+  # 不连任何真实节点和真实 TopUP
   wallet:
     chains:
       ERC20:

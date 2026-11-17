@@ -3,20 +3,29 @@ package app.trading.wallet.withdraw;
 import java.math.BigDecimal;
 
 /**
- * 把一笔提现签名并广播到链上。真实实现在 S13b（热钱包、nonce、三条链），S13a 用替身。
- * 结果只有三种，决定提现单下一步：
+ * 把一笔已审核的提现交出去付款。第 1 批的真实实现是支付接口层（{@code PaymentWithdrawSender}：交给 TopUP，由 Amos 在 TopUP 再审一次后放款）；
+ * 测试用替身。结果决定提现单下一步：
  * <ul>
- *   <li>{@link Sent}：已广播，等链上确认</li>
+ *   <li>{@link Submitted}：已交给钱包提供方（拿到付款编号），等提供方放款；客户看到"等待放款审核"</li>
+ *   <li>{@link Sent}：已广播，等链上确认（自带钱包时代的结果，测试替身仍在用）</li>
  *   <li>{@link Wait}：暂时不能发（例如热钱包余额不够，提现方案 W4），留在"已审核待上链"，下次再试，不退款</li>
  *   <li>{@link Rejected}：确定没有上链（例如节点直接拒绝），失败退款（AC-20）</li>
  * </ul>
  */
 public interface WithdrawSender {
 
-  /** 要发的一笔：链上转出 amount − fee 到 address */
-  record Order(long withdrawalId, String network, String address, BigDecimal sendAmount) {}
+  /** 要发的一笔：付 amount − fee 到 address。publicNo 是提现对外编号（交给提供方的防重键、商户单号） */
+  record Order(long withdrawalId, long publicNo, long userId, String network, String address, BigDecimal sendAmount) {
 
-  sealed interface Outcome permits Sent, Wait, Rejected {}
+    public Order(long withdrawalId, String network, String address, BigDecimal sendAmount) {
+      this(withdrawalId, withdrawalId, 0, network, address, sendAmount);
+    }
+  }
+
+  sealed interface Outcome permits Submitted, Sent, Wait, Rejected {}
+
+  /** 已交给钱包提供方，providerRef 是提供方的付款编号（不是链上交易哈希） */
+  record Submitted(String providerRef) implements Outcome {}
 
   record Sent(String txHash) implements Outcome {}
 

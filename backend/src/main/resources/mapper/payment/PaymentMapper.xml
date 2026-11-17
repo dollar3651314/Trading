@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 支付接口层（pay_* 表）。只有 payment 模块使用。 -->
+<mapper namespace="app.trading.payment.core.PaymentMapper">
+
+  <select id="config" resultType="string">SELECT value FROM common_config WHERE config_key = #{key}</select>
+
+  <insert id="saveConfig">
+    INSERT INTO common_config (config_key, value) VALUES (#{key}, #{value}) ON DUPLICATE KEY UPDATE value = VALUES(value)
+  </insert>
+
+  <resultMap id="addr" type="app.trading.payment.core.PaymentMapper$AddressRow">
+    <constructor>
+      <arg column="user_id" javaType="_long"/>
+      <arg column="network" javaType="string"/>
+      <arg column="provider" javaType="string"/>
+      <arg column="customer_id" javaType="string"/>
+      <arg column="address" javaType="string"/>
+    </constructor>
+  </resultMap>
+
+  <select id="address" resultMap="addr">
+    SELECT user_id, network, provider, customer_id, address FROM pay_address WHERE user_id = #{userId} AND network = #{network}
+  </select>
+
+  <!-- 以太坊体系的地址不分大小写；TRON 区分 -->
+  <select id="addressByValue" resultMap="addr">
+    SELECT user_id, network, provider, customer_id, address FROM pay_address
+    WHERE network = #{network} AND (CASE WHEN #{network} = 'TRC20' THEN address = #{address} ELSE LOWER(address) = LOWER(#{address}) END)
+    LIMIT 1
+  </select>
+
+  <!-- 两个请求同时为同一个客户同一条链要到地址时只留第一条（提供方对同一客户同一条链本来就给同一个地址） -->
+  <insert id="insertAddress">
+    INSERT IGNORE INTO pay_address (user_id, network, provider, customer_id, address) VALUES (#{userId}, #{network}, #{provider}, #{customerId}, #{address})
+  </insert>
+
+  <sql id="payoutCols">id, withdrawal_id, user_id, provider, idem_key, merchant_ref, network, address, amount, provider_ref, status, tx_hash, reason,
+    first_submit_at, last_submit_at, submit_count, last_query_at, updated_at</sql>
+
+  <select id="payout" resultType="app.trading.payment.core.PaymentMapper$PayoutRow">
+    SELECT <include refid="payoutCols"/> FROM pay_payout WHERE withdrawal_id = #{withdrawalId}
+  </select>
+
+  <select id="lockPayout" resultType="app.trading.payment.core.PaymentMapper$PayoutRow">
+    SELECT <include refid="payoutCols"/> FROM pay_payout WHERE withdrawal_id = #{withdrawalId} FOR UPDATE
+  </select>
+
+  <select id="payouts" resultType="app.trading.payment.core.PaymentMapper$PayoutRow">
+    SELECT <include refid="payoutCols"/> FROM pay_payout WHERE withdrawal_id IN <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach>
+  </select>
+
+  <select id="payoutByRef" resultType="app.trading.payment.core.PaymentMapper$PayoutRow">
+    SELECT <include refid="payoutCols"/> FROM pay_payout WHERE provider = #{provider} AND provider_ref = #{ref}
+  </select>
+
+  <select id="payoutByMerchantRef" resultType="app.trading.payment.core.PaymentMapper$PayoutRow">
+    SELECT <include refid="payoutCols"/> FROM pay_payout WHERE provider = #{provider} AND merchant_ref = #{merchantRef}
+  </select>
+
+  <insert id="insertPayout" useGeneratedKeys="true" keyProperty="id">
+    INSERT IGNORE INTO pay_payout (withdrawal_id, user_id, provider, idem_key, merchant_ref, network, address, amount, status, first_submit_at, updated_at)
+    VALUES (#{withdrawalId}, #{userId}, #{provider}, #{idemKey}, #{merchantRef}, #{network}, #{address}, #{amount}, #{status}, #{firstSubmitAt}, #{firstSubmitAt})
+  </insert>
+
+  <update id="submitted">
+    UPDATE pay_payout SET last_submit_at = #{at}, submit_count = submit_count + 1 WHERE id = #{id}
+  </update>
+
+  <update id="savePayout">
+    UPDATE pay_payout SET provider_ref = COALESCE(#{providerRef}, provider_ref), status = #{status}, tx_hash = COALESCE(#{txHash}, tx_hash),
+      reason = COALESCE(#{reason}, reason), updated_at = #{at} WHERE id = #{id}
+  </update>
+
+  <update id="queried">UPDATE pay_payout SET last_query_at = #{at} WHERE id = #{id}</update>
+
+  <insert id="insertCallback">
+    INSERT IGNORE INTO pay_callback (provider, event_id, event_type, ref) VALUES (#{provider}, #{eventId}, #{type}, #{ref})
+  </insert>
+
+  <select id="lastCallback" resultType="java.time.LocalDateTime">SELECT MAX(received_at) FROM pay_callback WHERE provider = #{provider}</select>
+
+  <insert id="insertAudit">
+    INSERT INTO pay_audit (admin_id, action, detail, reason) VALUES (#{adminId}, #{action}, #{detail}, #{reason})
+  </insert>
+
+  <resultMap id="audit" type="app.trading.payment.core.PaymentMapper$AuditRow">
+    <constructor>
+      <arg column="id" javaType="_long"/>
+      <arg column="admin_id" javaType="_long"/>
+      <arg column="action" javaType="string"/>
+      <arg column="detail" javaType="string"/>
+      <arg column="reason" javaType="string"/>
+      <arg column="created_at" javaType="java.time.LocalDateTime"/>
+    </constructor>
+  </resultMap>
+
+  <select id="audits" resultMap="audit">
+    SELECT id, admin_id, action, detail, reason, created_at FROM pay_audit ORDER BY id DESC LIMIT #{limit}
+  </select>
+</mapper>

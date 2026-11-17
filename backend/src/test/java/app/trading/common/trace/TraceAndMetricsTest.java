@@ -148,8 +148,9 @@ class TraceAndMetricsTest {
   void 指标只在内网管理端口_有自定义指标_对外端口没有() throws Exception {
     HttpResponse<String> prom = get(managementPort, "/actuator/prometheus", null);
     assertThat(prom.statusCode()).isEqualTo(200);
-    assertThat(prom.body()).contains("fx_quotes_received_total").contains("fx_tasks_backlog").contains("fx_chain_scan_lag_blocks{chain=\"ERC20\"")
-        .contains("fx_chain_node_failures{chain=\"TRC20\"");
+    // 第 1 批：自带钱包的扫块指标（fx_chain_scan_lag_blocks、fx_chain_node_failures）随扫块一起去掉，换成钱包提供方的指标
+    assertThat(prom.body()).contains("fx_quotes_received_total").contains("fx_tasks_backlog").contains("fx_payment_provider_failing_seconds{provider=\"current\"")
+        .contains("fx_payment_provider_available{provider=\"current\"");
     assertThat(get(managementPort, "/actuator/metrics/fx.tasks.backlog", null).statusCode()).isEqualTo(200);
     assertThat(get(port, "/actuator/prometheus", null).statusCode()).isEqualTo(404);
     assertThat(get(port, "/actuator/metrics", null).statusCode()).isEqualTo(404);

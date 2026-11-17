@@ -10,6 +10,7 @@ import app.trading.common.task.TaskItem;
 import app.trading.common.task.TaskService;
 import app.trading.common.task.TaskStatus;
 import app.trading.trading.api.TradingAdminApi;
+import app.trading.payment.api.PaymentApi;
 import app.trading.wallet.api.HotWalletApi;
 import app.trading.wallet.api.WalletAdminApi;
 import app.trading.wallet.api.WalletReconApi;
@@ -36,14 +37,18 @@ class FundsOps {
   /** 交易哈希：以太坊体系 0x + 64 位，TRON 64 位十六进制 */
   private static final Pattern TX_HASH = Pattern.compile("(0x)?[0-9a-fA-F]{64}");
 
-  /** 字段和原型 Deposit 一致 */
+  /** 字段和原型 Deposit 一致；第 1 批加 provider 提供方、providerRef 提供方到账编号（原型 P5） */
   record DepositView(String id, long customerId, String customerName, String email, String chain, String txHash, String amount, int confirmations,
-      int requiredConfirmations, String status, String detectedAt, String creditedAt) {}
+      int requiredConfirmations, String status, String detectedAt, String creditedAt, String provider, String providerRef) {}
 
   /** 字段和原型 Withdrawal 一致；autoReview 是最近一次自动审批判定的摘要（v2），没有判定记录时为空。自动通过的 reviewer 为空 */
+  /**
+   * 第 1 批加（原型 P4）：provider、payoutNo 提供方付款编号、payoutStatus 付款状态（submitting 提交中 / pending 待放款审核 / approved、broadcast 放款中 /
+   * completed 成功 / failed、rejected、cancelled / unknown 未知，标红、不能退款）、payoutReason、statusAt 进入当前状态的时间（到秒）
+   */
   record WithdrawalView(String id, long customerId, String customerName, String email, String amount, String fee, String chain, String address,
       boolean firstUse, String whitelistAddedAt, String status, Long delayRemainingMinutes, String submittedAt, String reviewer, String reason,
-      String txHash, AutoApproveOps.ReviewView autoReview) {}
+      String txHash, AutoApproveOps.ReviewView autoReview, String provider, String payoutNo, String payoutStatus, String payoutReason, String statusAt) {}
 
   record Recent(String time, String chain, String amount) {}
 
@@ -64,6 +69,9 @@ class FundsOps {
    * 热钱包余额（对账页上方，2026-10-17）。status：ok 正常、low 低于下限（在告警）、off 下限为 0 不告警、unknown 还没查到余额。
    * threshold 是后台系统配置里的下限（{@code hotWallet.*}）。error 是最近一次查询失败的原因（不含节点地址）
    */
+  /** 最近一次对账（对账页顶部）：checked 和提供方逐笔核对的笔数；providerOk = false 时提供方不通、按单号核对没跑成 */
+  record ReconStatus(String lastRunAt, int checked, boolean providerOk, String providerError, long open) {}
+
   record HotWalletView(String chain, String asset, boolean gas, String address, String balance, String threshold, String status, String checkedAt,
       String error) {}
 
@@ -87,9 +95,11 @@ class FundsOps {
   private final Audit audit;
   private final AutoApproveOps autoApprove;
   private final Clock clock;
+  private final PaymentApi payments;
 
   FundsOps(WalletAdminApi wallet, WithdrawAdminApi withdraws, WalletReconApi recon, HotWalletApi hot, CustomerAdminApi customers, AccountApi accounts,
-      TradingAdminApi trading, TaskService tasks, AdminNames names, Audit audit, AutoApproveOps autoApprove, Clock clock) {
+      TradingAdminApi trading, TaskService tasks, AdminNames names, Audit audit, AutoApproveOps autoApprove, Clock clock, PaymentApi payments) {
+    this.payments = payments;
     this.wallet = wallet;
     this.withdraws = withdraws;
     this.recon = recon;
@@ -138,17 +148,37 @@ class FundsOps {
 
   @Transactional(readOnly = true)
   Ops.Page<DepositView> deposits(String chain, String status, String keyword, int page, int pageSize) {
+    return deposits(chain, status, keyword, null, null, null, page, pageSize);
+  }
+
+  /** providerRef：按提供方到账编号查；from、to：到账时间（到秒，"yyyy-MM-dd HH:mm:ss" 或 ISO，UTC） */
+  @Transactional(readOnly = true)
+  Ops.Page<DepositView> deposits(String chain, String status, String keyword, String providerRef, String from, String to, int page, int pageSize) {
     Ops.Slice s = Ops.slice(page, pageSize);
     String kw = Ops.blank(keyword);
     String tx = kw != null && TX_HASH.matcher(kw).matches() ? kw : null;
     List<Long> users = tx == null ? userFilter(kw) : null;
-    var p = wallet.deposits(Ops.blank(chain), depositStatuses(status), tx, users, tx == null ? Ops.number(kw) : null, s.offset(), s.size());
+    var p = wallet.deposits(Ops.blank(chain), depositStatuses(status), tx, users, tx == null ? Ops.number(kw) : null, Ops.blank(providerRef), when(from), when(to),
+        s.offset(), s.size());
     var cs = customers.customers(p.items().stream().map(WalletAdminApi.Deposit::userId).toList());
     return new Ops.Page<>(p.items().stream().map(d -> {
       var c = cs.get(d.userId());
       return new DepositView(String.valueOf(d.no()), d.userId(), c == null ? null : c.name(), c == null ? null : c.email(), d.chain(), d.txHash(),
-          Ops.money(d.amount()), d.confirmations(), d.requiredConfirmations(), depositStatus(d.status()), Ops.time(d.detectedAt()), Ops.time(d.creditedAt()));
+          Ops.money(d.amount()), d.confirmations(), d.requiredConfirmations(), depositStatus(d.status()), Ops.time(d.detectedAt()), Ops.time(d.creditedAt()),
+          d.provider(), d.providerRef());
     }).toList(), p.total(), s.page(), s.size());
+  }
+
+  /** 时间参数：空 → 不筛选；格式不对 → 400 */
+  static LocalDateTime when(String v) {
+    String t = Ops.blank(v);
+    if (t == null) return null;
+    try {
+      return t.contains("T") ? java.time.OffsetDateTime.parse(t.endsWith("Z") || t.matches(".*[+-]\\d\\d:\\d\\d$") ? t : t + "Z").withOffsetSameInstant(java.time.ZoneOffset.UTC).toLocalDateTime()
+          : LocalDateTime.parse(t.replace(' ', 'T'));
+    } catch (java.time.format.DateTimeParseException e) {
+      throw new app.trading.common.error.ValidationException(List.of(new app.trading.common.error.ValidationException.Field("time", "invalid")));
+    }
   }
 
   // ---------- 出金 ----------
@@ -178,13 +208,18 @@ class FundsOps {
     var cs = customers.customers(ws.stream().map(WalletAdminApi.Withdrawal::userId).toList());
     Map<Long, String> reviewers = names.of(ws.stream().map(WalletAdminApi.Withdrawal::reviewerId).filter(Objects::nonNull).toList());
     Map<Long, AutoApproveOps.ReviewView> reviews = autoApprove.summaries(ws.stream().map(WalletAdminApi.Withdrawal::id).toList());
+    Map<Long, PaymentApi.PayoutInfo> pays = new java.util.HashMap<>();
+    for (PaymentApi.PayoutInfo i : payments.payoutInfos(ws.stream().map(WalletAdminApi.Withdrawal::id).toList())) pays.put(i.withdrawalId(), i);
     LocalDateTime now = now();
     return ws.stream().map(w -> {
+      PaymentApi.PayoutInfo pay = pays.get(w.id());
       var c = cs.get(w.userId());
       Long remaining = "DELAYED".equals(w.status()) && w.delayEndsAt() != null ? Math.max(0, Duration.between(now, w.delayEndsAt()).toMinutes()) : null;
       return new WithdrawalView(String.valueOf(w.no()), w.userId(), c == null ? null : c.name(), c == null ? null : c.email(), Ops.money(w.amount()),
           Ops.money(w.fee()), w.chain(), w.address(), w.firstUse(), Ops.time(w.whitelistAddedAt()), withdrawStatus(w.status()), remaining,
-          Ops.time(w.submittedAt()), w.reviewerId() == null ? null : reviewers.get(w.reviewerId()), w.rejectReason(), w.txHash(), reviews.get(w.id()));
+          Ops.time(w.submittedAt()), w.reviewerId() == null ? null : reviewers.get(w.reviewerId()), w.rejectReason(), w.txHash(), reviews.get(w.id()),
+          pay == null ? null : pay.provider(), pay == null ? null : pay.providerRef(), pay == null ? null : pay.state().name().toLowerCase(),
+          pay == null ? null : pay.reason(), Ops.time(w.statusAt() == null ? w.submittedAt() : w.statusAt()));
     }).toList();
   }
 
@@ -259,6 +294,22 @@ class FundsOps {
     return views(List.of(require(id))).getFirst();
   }
 
+  /** 付款状态"未知"或想马上看结果：向钱包提供方查一次（查到成功 → 已完成；失败、驳回 → 退回；还是查不到 → 保持不退款） */
+  WithdrawalView requery(AdminContext actor, long no) {
+    long id = internal(no);
+    audit.run("withdrawal.requery", String.valueOf(no), false, null, () -> {
+      String before = payments.payoutInfo(id).map(i -> i.state().name().toLowerCase()).orElse(null);
+      String after;
+      try {
+        after = payments.refreshPayout(id).name().toLowerCase();
+      } catch (PaymentApi.Unavailable e) {
+        throw new BizException("WALLET_UNAVAILABLE", "钱包提供方暂时不通，请稍后再查");
+      }
+      return Audit.Change.of(null, Map.of("payoutStatus", String.valueOf(before)), Map.of("payoutStatus", after));
+    });
+    return views(List.of(require(id))).getFirst();
+  }
+
   /** 大额延迟期内紧急取消（高危，AC-21） */
   WithdrawalView emergencyCancel(AdminContext actor, long no, String reason) {
     String r = Audit.requireReason(reason);
@@ -288,6 +339,21 @@ class FundsOps {
           Ops.time(i.createdAt()), Ops.time(i.resolvedAt())));
     }
     return new Ops.Page<>(out, recon.countIssues(st), s.page(), s.size());
+  }
+
+  @Transactional(readOnly = true)
+  ReconStatus reconStatus() {
+    var r = recon.lastRun().orElse(null);
+    long open = recon.countIssues("OPEN");
+    return r == null ? new ReconStatus(null, 0, true, null, open) : new ReconStatus(Ops.time(r.at()), r.checked(), r.providerOk(), r.providerError(), open);
+  }
+
+  /** 立即对账（对账页按钮）：返回这次新发现的问题数 */
+  int runRecon(AdminContext actor) {
+    return audit.run("recon.run", "now", false, null, () -> {
+      int fresh = recon.run();
+      return Audit.Change.of(fresh, Map.of(), Map.of("fresh", String.valueOf(fresh)));
+    });
   }
 
   List<HotWalletView> hotWallets() {

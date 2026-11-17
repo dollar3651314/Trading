@@ -36,7 +36,7 @@ public class E2eGuard implements BeanFactoryPostProcessor, EnvironmentAware {
   private static final List<String> REAL_ONLY = List.of(
       "trading.wallet.hot.eth-private-key", "trading.wallet.hot.tron-private-key", "trading.wallet.sweep.evm.operator-key",
       "trading.wallet.chains.ERC20.rpc-url", "trading.wallet.chains.BSC.rpc-url", "trading.wallet.chains.TRC20.rpc-url",
-      "trading.notify.mail.host");
+      "trading.notify.mail.host", "trading.payment.topup.base-url", "trading.payment.topup.api-key", "trading.payment.topup.api-secret");
 
   private Environment env;
 

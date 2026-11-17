@@ -10,7 +10,8 @@ import java.util.Optional;
  */
 public enum ConfigKey {
   WITHDRAW_MIN_AMOUNT("withdraw.minAmount", Unit.USDT, "withdraw", BigDecimal.ZERO),
-  WITHDRAW_MAX_SINGLE("withdraw.maxSingle", Unit.USDT, "withdraw", BigDecimal.ONE),
+  /** 单笔上限最多 5,000（TQ-13 = TD-15 A：TopUP 单笔只能付 5,000，超了会一直卡在 TopUP 待审；以后要放大走 TopUP 按商户设上限 TG-13） */
+  WITHDRAW_MAX_SINGLE("withdraw.maxSingle", Unit.USDT, "withdraw", BigDecimal.ONE, true, BigDecimal.valueOf(5000)),
   WITHDRAW_DAILY_LIMIT("withdraw.dailyLimit", Unit.USDT, "withdraw", BigDecimal.ONE),
   WITHDRAW_COOLING_HOURS("withdraw.coolingHours", Unit.HOURS, "withdraw", BigDecimal.ZERO),
   WITHDRAW_LARGE_THRESHOLD("withdraw.largeThreshold", Unit.USDT, "withdraw", BigDecimal.ONE),
@@ -32,16 +33,6 @@ public enum ConfigKey {
   ADJUST_SINGLE_LIMIT("adjust.singleLimit", Unit.USDT, "adjust", BigDecimal.ZERO),
   ADJUST_DAILY_LIMIT("adjust.dailyLimit", Unit.USDT, "adjust", BigDecimal.ZERO),
   NOTIFY_MARGIN_CALL_THROTTLE_MINUTES("notify.marginCallThrottleMinutes", Unit.MINUTES, "notify", BigDecimal.ONE),
-  /**
-   * 热钱包余额告警的下限（负责人 2026-10-17："告警的默认下限让我可以设置，现在设置成零"）：余额低于它时发 E8 告警邮件。
-   * <b>0（默认，迁移 V25）= 不告警</b>：这一项不检查、告警项不出现；余额照常查询，后台对账页能看到。代码见 wallet/withdraw/HotBalanceMonitor
-   */
-  HOT_MIN_USDT_ERC20("hotWallet.minUsdt.ERC20", Unit.USDT, "hotWallet", BigDecimal.ZERO),
-  HOT_MIN_USDT_BSC("hotWallet.minUsdt.BSC", Unit.USDT, "hotWallet", BigDecimal.ZERO),
-  HOT_MIN_USDT_TRC20("hotWallet.minUsdt.TRC20", Unit.USDT, "hotWallet", BigDecimal.ZERO),
-  HOT_MIN_ETH("hotWallet.minGas.ERC20", Unit.ETH, "hotWallet", BigDecimal.ZERO),
-  HOT_MIN_BNB("hotWallet.minGas.BSC", Unit.BNB, "hotWallet", BigDecimal.ZERO),
-  HOT_MIN_TRX("hotWallet.minGas.TRC20", Unit.TRX, "hotWallet", BigDecimal.ZERO),
   /** 单个客户的持仓上限（USD 名义价值，含挂单）：在风控页改（权限 risk:user_limit），不在系统配置页 */
   RISK_PER_USER_LIMIT("risk.perUserLimitUsd", Unit.USDT, "risk", BigDecimal.ONE, false),
   /** 追保线（保证金水平 %，100 即 100%）：在交易参数页改（权限 params:edit），不在系统配置页 */
@@ -75,27 +66,11 @@ public enum ConfigKey {
   AUTO_APPROVE_R10_MAX_PROFIT_PCT("withdraw.autoApprove.R10.maxProfitPct", Unit.PERCENT, "autoApprove", BigDecimal.ZERO, false),
   AUTO_APPROVE_R11_MAX_COUNT("withdraw.autoApprove.R11.maxCount", Unit.COUNT, "autoApprove", BigDecimal.ZERO, false),
   /** R13 盈利客户的门槛（累计净盈利 &gt; 它就转人工），默认 0，可以是 0 */
-  AUTO_APPROVE_R13_MAX_NET_PROFIT("withdraw.autoApprove.R13.maxNetProfit", Unit.USDT, "autoApprove", BigDecimal.ZERO, false),
-  /**
-   * 资金归集（v2，内部文档 第 4.5、4.9、4.14 节，迁移 V28）：门槛、手续费占比上限（负责人 10-20 SW-6：后台可改，默认 100 / 10 / 100 USDT、3%）、
-   * 以太坊 / BSC 上线初期金额上限（每个地址 5,000、每批 20,000 USDT，0 = 不限；负责人 10-20 保留）、发起账户余额告警下限（0 = 不告警）、版本号。
-   * 在"资金归集 → 归集设置"页一次保存（权限 sweep:config，高危），不在系统配置页；取值范围在 wallet.api.SweepSettings
-   */
-  SWEEP_VERSION("sweep.version", Unit.COUNT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_THRESHOLD_ERC20("sweep.threshold.ERC20", Unit.USDT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_THRESHOLD_BSC("sweep.threshold.BSC", Unit.USDT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_THRESHOLD_TRC20("sweep.threshold.TRC20", Unit.USDT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_MAX_FEE_RATIO_PCT("sweep.maxFeeRatioPct", Unit.PERCENT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_CAP_PER_ADDRESS("sweep.evmCap.perAddress", Unit.USDT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_CAP_PER_BATCH("sweep.evmCap.perBatch", Unit.USDT, "sweep", BigDecimal.ZERO, false),
-  SWEEP_OPERATOR_MIN_ERC20("sweep.operatorMin.ERC20", Unit.ETH, "sweep", BigDecimal.ZERO, false),
-  SWEEP_OPERATOR_MIN_BSC("sweep.operatorMin.BSC", Unit.BNB, "sweep", BigDecimal.ZERO, false);
+  AUTO_APPROVE_R13_MAX_NET_PROFIT("withdraw.autoApprove.R13.maxNetProfit", Unit.USDT, "autoApprove", BigDecimal.ZERO, false);
 
   /** 单位，和原型一致 */
   public enum Unit {
     USDT, HOURS, MINUTES, COUNT, TEXT, PERCENT,
-    /** 热钱包手续费币（余额告警下限），最多 8 位小数 */
-    ETH, BNB, TRX,
     /** 开关：true / false（提现自动审批） */
     BOOL,
     /** 倍数，最多 8 位小数（提现自动审批 R8） */
@@ -111,6 +86,8 @@ public enum ConfigKey {
   public final String group;
   /** 数值的最小值（含）；文本为空 */
   public final BigDecimal min;
+  /** 数值的最大值（含）；为空表示只按单位的通用上限 */
+  public final BigDecimal max;
   /**
    * 是否在系统配置页显示和修改。有专门页面和权限点的（风控、交易参数）不在系统配置页，
    * 否则有 config:edit 的人可以绕过 risk:user_limit、params:edit 去改
@@ -122,11 +99,16 @@ public enum ConfigKey {
   }
 
   ConfigKey(String key, Unit unit, String group, BigDecimal min, boolean configPage) {
+    this(key, unit, group, min, configPage, null);
+  }
+
+  ConfigKey(String key, Unit unit, String group, BigDecimal min, boolean configPage, BigDecimal max) {
     this.key = key;
     this.unit = unit;
     this.group = group;
     this.min = min;
     this.configPage = configPage;
+    this.max = max;
   }
 
   public static Optional<ConfigKey> of(String key) {
@@ -142,8 +124,8 @@ public enum ConfigKey {
     try {
       BigDecimal d = new BigDecimal(v);
       if (d.compareTo(min) < 0) return Optional.empty();
-      if (unit == Unit.USDT || unit == Unit.PERCENT || unit == Unit.ETH || unit == Unit.BNB || unit == Unit.TRX
-          || unit == Unit.MULTIPLE) {
+      if (max != null && d.compareTo(max) > 0) return Optional.empty();
+      if (unit == Unit.USDT || unit == Unit.PERCENT || unit == Unit.MULTIPLE) {
         if (d.scale() > 8 || d.compareTo(new BigDecimal("1000000000")) > 0) return Optional.empty();
         return Optional.of(d.stripTrailingZeros().toPlainString());
       }
