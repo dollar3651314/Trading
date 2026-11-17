@@ -299,8 +299,24 @@ public class WithdrawService implements WithdrawAdminApi {
       log.debug("{} 没有广播器，提现 {} 留在待上链", w.network, id);
       return;
     }
-    WithdrawSender.Outcome out = sender.get().send(new WithdrawSender.Order(w.id, w.network, w.address, w.amount.subtract(w.fee)));
+    WithdrawSender.Outcome out;
+    try {
+      out = sender.get().send(new WithdrawSender.Order(w.id, w.publicNo, w.userId, w.network, w.address, w.amount.subtract(w.fee)));
+    } catch (RuntimeException e) {
+      // 付款器出了意外（例如钱包提供方没配置）：审核结果已经保存，留在待放款，下次定时任务再试；不退款
+      log.error("提现 {} 交出去付款时出错，留在待放款：{}", id, e.toString());
+      out = new WithdrawSender.Wait(e.getClass().getSimpleName());
+    }
     switch (out) {
+      case WithdrawSender.Submitted sub -> {
+        WithdrawalRow r = tx.execute(st -> {
+          WithdrawalRow l = mapper.lock(id);
+          if (!"APPROVED".equals(l.status)) return null;
+          move(l, "BROADCASTING", "system", "已交钱包提供方，付款编号 " + sub.providerRef() + "，等待放款审核");
+          return l;
+        });
+        if (r != null) notify(r);
+      }
       case WithdrawSender.Sent s -> {
         WithdrawalRow r = tx.execute(st -> {
           WithdrawalRow l = mapper.lock(id);
@@ -331,6 +347,49 @@ public class WithdrawService implements WithdrawAdminApi {
         case WithdrawSender.Pending p -> { }
       }
     }
+  }
+
+  /**
+   * 钱包提供方的付款状态变了（回调或后台"重新查询"，在调用方的事务里）：
+   * <ul>
+   *   <li>还在处理（等待放款审核、放款中）：提现单还是"已审核待放款"时（回调比提交的返回先到）改成"放款中"</li>
+   *   <li>成功：记交易哈希，→ 已完成，扣掉冻结</li>
+   *   <li>失败、驳回、取消：→ 失败退回，冻结全部退回客户（AC-W5）</li>
+   *   <li>未知：什么都不做（不退款，后台标红等人查）</li>
+   * </ul>
+   */
+  public void payoutUpdate(long id, String providerRef, String state, String txHash, String reason) {
+    WithdrawalRow w = mapper.byId(id);
+    if (w == null) return;
+    switch (state) {
+      case "UNKNOWN", "SUBMITTING" -> { }
+      case "COMPLETED" -> {
+        submittedByProvider(id, providerRef);
+        if (txHash != null) mapper.setTx(id, txHash);
+        confirmed(id);
+      }
+      case "FAILED", "REJECTED", "CANCELLED" -> {
+        String why = "钱包提供方" + switch (state) {
+          case "REJECTED" -> "驳回放款";
+          case "CANCELLED" -> "取消放款";
+          default -> "放款失败";
+        } + (reason == null ? "" : "：" + reason);
+        if ("APPROVED".equals(w.status)) failed(id, "APPROVED", why);
+        else failed(id, "BROADCASTING", why);
+      }
+      default -> submittedByProvider(id, providerRef);
+    }
+  }
+
+  /** 提供方已经收下这笔（回调先到）：已审核待放款 → 放款中 */
+  private void submittedByProvider(long id, String providerRef) {
+    WithdrawalRow r = tx.execute(st -> {
+      WithdrawalRow l = mapper.lock(id);
+      if (l == null || !"APPROVED".equals(l.status)) return null;
+      move(l, "BROADCASTING", "system", "已交钱包提供方，付款编号 " + providerRef + "，等待放款审核");
+      return l;
+    });
+    if (r != null) notify(r);
   }
 
   /** 链上确认：上链中 → 已完成，扣掉提现冻结（S13b 的确认任务调用） */

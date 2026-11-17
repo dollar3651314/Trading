@@ -11,8 +11,20 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 interface ReconMapper {
 
+  /** provider、providerRef：钱包提供方回调入账的（第 1 批起）；自带钱包时代的旧数据 providerRef 为空 */
   record DepositRow(long id, String chain, String txHash, int logIndex, long userId, BigDecimal amount, String status, long blockNumber, String blockHash,
-      LocalDateTime createdAt) {}
+      LocalDateTime createdAt, String provider, String providerRef, String toAddress) {
+
+    /** 和账本流水的业务号一致：提供方:到账编号；旧数据 链:交易:序号 */
+    String key() {
+      return providerRef != null ? provider + ":" + providerRef : chain + ":" + txHash + ":" + logIndex;
+    }
+  }
+
+  /** 按单号逐笔核对用的提现 */
+  record RecentWithdrawal(long id, long publicNo, long userId, BigDecimal amount, BigDecimal fee, String status) {}
+
+  List<RecentWithdrawal> recentWithdrawals(@Param("since") LocalDateTime since);
 
   record SuspenseRow(long id, long userId, long depositId, BigDecimal amount, String status) {}
 

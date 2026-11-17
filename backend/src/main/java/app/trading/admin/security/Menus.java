@@ -19,6 +19,7 @@ public final class Menus {
           leaf("deposits", "menu.deposits", "/funds/deposits", Permission.DEPOSIT_VIEW),
           leaf("withdrawals", "menu.withdrawals", "/funds/withdrawals", Permission.WITHDRAWAL_VIEW),
           leaf("reconciliation", "menu.reconciliation", "/funds/reconciliation", Permission.RECON_VIEW),
+          leaf("walletProvider", "menu.walletProvider", "/funds/provider", Permission.PROVIDER_VIEW),
           leaf("tasks", "menu.tasks", "/funds/tasks", Permission.TASK_VIEW)),
       group("trading", "menu.trading",
           leaf("orders", "menu.orders", "/trading/orders", Permission.ORDER_VIEW),

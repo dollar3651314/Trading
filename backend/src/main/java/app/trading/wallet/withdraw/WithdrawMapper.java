@@ -56,6 +56,11 @@ interface WithdrawMapper {
 
   List<Long> withStatus(@Param("status") String status);
 
+  /** 一笔提现的一次状态变化（客户端资金记录里每一步的时间） */
+  record EventRow(long withdrawalId, String toStatus, LocalDateTime at) {}
+
+  List<EventRow> eventsOf(@Param("ids") List<Long> withdrawalIds);
+
   int insertEvent(@Param("withdrawalId") long withdrawalId, @Param("from") String from, @Param("to") String to, @Param("actor") String actor,
       @Param("note") String note);
 }

@@ -47,11 +47,10 @@ export const ERROR_KEYS: Record<string, string> = {
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',
-  // v2 资金归集（admin/ops/SweepOps、wallet/sweep/SweepService）
-  SWEEP_UNAVAILABLE: 'errors.sweepUnavailable',
-  SWEEP_NOTHING: 'errors.sweepNothing',
-  SWEEP_BATCH_ACTIVE: 'errors.sweepBatchActive',
-  SWEEP_BATCH_STATE: 'errors.sweepBatchState',
+  // 第 1 批钱包提供方（admin/ops/PaymentOps、payment 模块）
+  WALLET_UNAVAILABLE: 'errors.walletUnavailable',
+  PROVIDER_NOT_CONNECTED: 'errors.providerNotConnected',
+  PROVIDER_ALREADY_CURRENT: 'errors.providerAlreadyCurrent',
   KYC_NOT_FOUND: 'errors.notFound',
   KYC_NOT_PENDING: 'errors.kycNotPending',
   REJECT_REASON_REQUIRED: 'errors.reasonRequired',

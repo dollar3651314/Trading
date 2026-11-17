@@ -1,13 +1,14 @@
 /**
- * 出金审核（效果图 M6）：筛选、待办卡片、列表、详情、通过、拒绝（必填原因）、延迟期内紧急取消（高危）。
- * 流程：客户提交 → 2 小时冷静期（客户可撤销）→ 待审核 → 通过后上链；≥3,000 USDT 通过后再延迟 6 小时，延迟期内可紧急取消。
+ * 出金审核（效果图 M6，第 1 批原型 P4）：筛选、待办卡片、列表、详情、通过、拒绝（必填原因）、延迟期内紧急取消（高危）。
+ * 流程（两道审，TD-1 B）：客户提交 → 2 小时冷静期（客户可撤销）→ 待审核 → 这里审核通过（≥3,000 USDT 再延迟 6 小时，延迟期内可紧急取消）
+ * → 1 分钟内交 TopUP，"等待放款审核" → Amos 在 TopUP 后台审核放款 → TopUP 回成功（已完成）/ 失败、驳回（自动退回）/ 未知（红色置顶，只能重新查询，不能退款）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { App, Button, Empty, Form, Grid, Input, Select, Skeleton } from 'antd';
+import { Alert, App, Button, Empty, Form, Grid, Input, Select, Skeleton, Tooltip } from 'antd';
 import { StopOutlined, FileTextOutlined, WarningOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { approveWithdrawal, emergencyCancelWithdrawal, getAutoApproveSettings, getWithdrawal, getWithdrawalSummary, listWithdrawals, rejectWithdrawal } from '../../api';
+import { approveWithdrawal, emergencyCancelWithdrawal, getAutoApproveSettings, getWithdrawal, getWithdrawalSummary, listWithdrawals, rejectWithdrawal, requeryWithdrawal } from '../../api';
 import type { Withdrawal, WithdrawalDetail, WithdrawalQuery } from '../../api/types';
 import { CHAINS } from '../../config/constants';
 import { usePagedList } from '../../hooks/usePagedList';
@@ -22,7 +23,7 @@ import { ChainTag, Pill } from '../../components/Pill';
 import { Amount, Num } from '../../components/Num';
 import { withdrawalTone } from '../../utils/status';
 import { compareAmounts, formatAmount, isValidAmountInput } from '../../utils/money';
-import { shortHash, shortTime } from '../../utils/display';
+import { fullTime, shortHash, shortTime } from '../../utils/display';
 import { errorText } from '../../utils/errors';
 import { AUTO_RULE_CODES } from '../../config/autoApprove';
 import { AUTO_RULES_PATH, AutoReviewCard, AutoReviewCell } from './AutoReview';
@@ -30,6 +31,14 @@ import { AUTO_RULES_PATH, AutoReviewCard, AutoReviewCell } from './AutoReview';
 type Filters = Omit<WithdrawalQuery, 'page' | 'pageSize'>;
 const INITIAL: Filters = { status: 'open' };
 const STATUSES = ['open', 'pending', 'delayed', 'cooling', 'broadcasting', 'completed', 'rejected', 'cancelled', 'failed'] as const;
+
+/** 状态名：放款中再细分成"等待放款审核 / 放款中"，付款状态未知单独标出（两道审） */
+function statusText(t: (k: string, o?: Record<string, unknown>) => string, w: Withdrawal): string {
+  if (w.status === 'delayed') return t('withdrawals.delayedLeft', { left: formatRemaining(w.delayRemainingMinutes) });
+  if (w.status === 'broadcasting' && w.payoutStatus === 'unknown') return t('payoutStatus.unknownLong');
+  if (w.status === 'broadcasting' && (w.payoutStatus === 'pending' || w.payoutStatus === 'submitting')) return t('payoutStatus.awaitingRelease');
+  return t(`withdrawalStatus.${w.status}`);
+}
 
 export function formatRemaining(minutes: number | null): string {
   if (minutes === null || minutes < 0) return '—';
@@ -76,9 +85,25 @@ export function WithdrawalsPage() {
   };
 
   const s = summary.data;
+  const unknown = list.data?.items.find((w) => w.payoutStatus === 'unknown');
   return (
     <>
       <PageHeader title={t('withdrawals.title')} sub={t('withdrawals.sub')} extra={<AutoApproveEntry />} />
+      {unknown ? (
+        <Alert
+          type="error"
+          showIcon
+          className="wd-unknown"
+          message={t('withdrawals.unknownTitle', { id: unknown.id, amount: formatAmount(unknown.amount) })}
+          description={t('withdrawals.unknownDesc')}
+          action={
+            <Button danger type="primary" onClick={() => select(unknown.id)}>
+              {t('withdrawals.goRequery')}
+            </Button>
+          }
+        />
+      ) : null}
+      <Alert type="info" showIcon className="wd-two" message={t('withdrawals.twoReview')} />
       <FilterBar onSearch={search} onReset={() => { setDraft(INITIAL); setAmountErr(null); list.setFilters(INITIAL); }}>
         <FilterItem label={t('withdrawals.status')}>
           <Select
@@ -178,7 +203,7 @@ export function WithdrawalsPage() {
           pageSize={list.pageSize}
           onPageChange={list.onPageChange}
           emptyText={t('withdrawals.empty')}
-          rowClassName={(r) => `clickable-row${r.id === selectedId ? ' row-selected' : ''}`}
+          rowClassName={(r) => `clickable-row${r.id === selectedId ? ' row-selected' : ''}${r.payoutStatus === 'unknown' ? ' row-danger' : ''}`}
           onRow={(r) => ({
             onClick: () => select(r.id),
             onKeyDown: (e) => {
@@ -215,14 +240,24 @@ export function WithdrawalsPage() {
             {
               title: t('withdrawals.status'),
               dataIndex: 'status',
-              render: (v: string, r) => (
-                <Pill tone={withdrawalTone[v]}>
-                  {v === 'delayed' ? t('withdrawals.delayedLeft', { left: formatRemaining(r.delayRemainingMinutes) }) : t(`withdrawalStatus.${v}`)}
-                </Pill>
-              ),
+              render: (v: string, r) => <Pill tone={r.payoutStatus === 'unknown' ? 'danger' : withdrawalTone[v]}>{statusText(t, r)}</Pill>,
+            },
+            {
+              title: t('withdrawals.payoutNo'),
+              key: 'payout',
+              render: (_: unknown, r: Withdrawal) =>
+                r.payoutNo ? (
+                  <div className="user-cell">
+                    <Num>{r.payoutNo}</Num>
+                    <small className={r.payoutStatus === 'unknown' ? 'text-danger' : undefined}>{r.payoutStatus ? t(`payoutStatus.${r.payoutStatus}`) : ''}</small>
+                  </div>
+                ) : (
+                  '—'
+                ),
             },
             { title: t('autoReview.column'), key: 'autoReview', render: (_: unknown, r: Withdrawal) => <AutoReviewCell review={r.autoReview} /> },
             { title: t('withdrawals.submittedAt'), dataIndex: 'submittedAt', render: (v: string) => <Num>{shortTime(v)}</Num> },
+            { title: t('withdrawals.statusAt'), dataIndex: 'statusAt', render: (v: string | null) => (v ? <Num>{fullTime(v)}</Num> : '—') },
           ]}
         />
         <div ref={detailRef}>
@@ -284,7 +319,16 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
       content: large ? t('withdrawals.approveLarge', { amount: formatAmount(w.amount) }) : t('withdrawals.approveSmall', { amount: formatAmount(w.amount), chain: w.chain }),
       okText: t('withdrawals.approve'),
       cancelText: t('common.cancel'),
-      onOk: () => run(() => approveWithdrawal(w.id), t('withdrawals.approved'), after),
+      onOk: () =>
+        run(
+          async () => {
+            const r = await approveWithdrawal(w.id);
+            if (r.payoutNo) void message.success(t('withdrawals.approvedToProvider', { no: r.payoutNo }));
+            return r;
+          },
+          t('withdrawals.approved'),
+          after,
+        ),
     });
 
   const reject = async () => {
@@ -368,6 +412,29 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
         {t('withdrawals.whitelistAt', { time: shortTime(w.whitelistAddedAt) })}
       </div>
       <AutoReviewCard detail={w.autoReviewDetail} />
+      {w.payoutNo ? (
+        <div className={`addr-box${w.payoutStatus === 'unknown' ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.payoutTitle')}>
+          <b>{t('withdrawals.payoutTitle')}</b>
+          <div>
+            {t('withdrawals.payoutLine', { provider: w.provider ?? 'TopUP', no: w.payoutNo })}{' '}
+            <Pill tone={w.payoutStatus === 'unknown' ? 'danger' : w.payoutStatus === 'completed' ? 'ok' : 'warn'}>{w.payoutStatus ? t(`payoutStatus.${w.payoutStatus}`) : '—'}</Pill>
+          </div>
+          {w.payoutStatus === 'pending' ? <div>{t('withdrawals.goTopup')}</div> : null}
+          {w.payoutReason ? <div>{t('withdrawals.reasonLine', { reason: w.payoutReason })}</div> : null}
+          {w.status === 'broadcasting' ? (
+            <div className="acts">
+              <PermButton perm="withdrawal:review" danger={w.payoutStatus === 'unknown'} type={w.payoutStatus === 'unknown' ? 'primary' : 'default'} onClick={() => run(() => requeryWithdrawal(w.id), t('withdrawals.requeried'), after)}>
+                {t('withdrawals.requery')}
+              </PermButton>
+              {w.payoutStatus === 'unknown' ? (
+                <Tooltip title={t('withdrawals.refundDisabled')}>
+                  <Button disabled>{t('withdrawals.refund')}</Button>
+                </Tooltip>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mini">
         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{t('withdrawals.recentDeposits')}</div>
         {w.recentDeposits.length ? (

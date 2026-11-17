@@ -43,6 +43,9 @@ import type {
   PermissionDef,
   Position,
   HotWalletBalance,
+  PaymentOverview,
+  PaymentProvider,
+  ReconStatus,
   ReconItem,
   ReconQuery,
   RiskEvent,
@@ -159,7 +162,16 @@ export function kycImageUrl(id: string, side: 'front' | 'back' | 'selfie'): stri
 
 // ---------- 资金 ----------
 export function listDeposits(q: DepositQuery): Promise<Page<Deposit>> {
-  return request('/deposits', { query: { chain: q.chain, status: q.status, keyword: q.keyword, page: q.page, pageSize: q.pageSize } });
+  return request('/deposits', {
+    query: { chain: q.chain, status: q.status, keyword: q.keyword, providerRef: q.providerRef, from: localToIso(q.from), to: localToIso(q.to), page: q.page, pageSize: q.pageSize },
+  });
+}
+
+/** 页面上的时间是本地时间（到秒），接口要 ISO（UTC） */
+function localToIso(v?: string): string | undefined {
+  if (!v || !v.trim()) return undefined;
+  const d = new Date(v.trim().replace(' ', 'T'));
+  return Number.isNaN(d.getTime()) ? v : d.toISOString();
 }
 
 export function listWithdrawals(q: WithdrawalQuery): Promise<Page<Withdrawal>> {
@@ -197,6 +209,11 @@ export function rejectWithdrawal(id: string, reason: string): Promise<Withdrawal
 }
 
 /** 大额延迟期内紧急取消（必须填原因，AC-21） */
+/** 第 1 批：向钱包提供方重新查一次付款状态（"未知"的只能这样处理，不能退款） */
+export function requeryWithdrawal(id: string): Promise<Withdrawal> {
+  return request(`/withdrawals/${enc(id)}/requery`, { method: 'POST' });
+}
+
 export function emergencyCancelWithdrawal(id: string, reason: string): Promise<Withdrawal> {
   return request(`/withdrawals/${enc(id)}/emergency-cancel`, { method: 'POST', body: { reason } });
 }
@@ -224,6 +241,34 @@ export function listRecon(q: ReconQuery): Promise<Page<ReconItem>> {
 /** 热钱包当前余额和告警下限（对账页上方）；下限在系统配置页改 */
 export function listHotWallets(): Promise<HotWalletBalance[]> {
   return request('/hot-wallets');
+}
+
+/** 第 1 批：最近一次对账、立即对账 */
+export function getReconStatus(): Promise<ReconStatus> {
+  return request('/recon/status');
+}
+
+export function runRecon(): Promise<{ fresh: number }> {
+  return request('/recon/run', { method: 'POST' });
+}
+
+/** 第 1 批：钱包提供方页 */
+export function getPayment(): Promise<PaymentOverview> {
+  return request('/payment');
+}
+
+export function checkPayment(): Promise<PaymentProvider> {
+  return request('/payment/check', { method: 'POST' });
+}
+
+/** 打开 / 关闭充值网络（高危，原因必填） */
+export async function setPaymentNetwork(network: string, open: boolean, reason: string): Promise<void> {
+  await request(`/payment/networks/${enc(network)}`, { method: 'PUT', body: { open, reason } });
+}
+
+/** 切换钱包提供方（高危，原因必填） */
+export async function switchPaymentProvider(provider: string, reason: string): Promise<void> {
+  await request('/payment/switch', { method: 'POST', body: { provider, reason } });
 }
 
 /** 标记已处理：说明字段是 note（F5） */

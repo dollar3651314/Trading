@@ -15,7 +15,7 @@ public interface WalletAdminApi {
    * 一笔充值。status：PENDING / CREDITED / DROPPED / BELOW_MIN / REVERSED。no 是对外编号（雪花 ID，旧数据等于 id；后台显示和搜索用它）。
    */
   record Deposit(long id, long no, long userId, String chain, String txHash, BigDecimal amount, int confirmations, int requiredConfirmations, String status,
-      LocalDateTime detectedAt, LocalDateTime creditedAt) {}
+      LocalDateTime detectedAt, LocalDateTime creditedAt, String provider, String providerRef) {}
 
   /**
    * 一笔提现。status 是数据库状态（COOLING / REVIEWING / APPROVED / DELAYED / BROADCASTING / COMPLETED / REJECTED / CANCELLED / FAILED_REFUNDED）；
@@ -23,7 +23,7 @@ public interface WalletAdminApi {
    */
   record Withdrawal(long id, long no, long userId, BigDecimal amount, BigDecimal fee, String chain, String address, boolean firstUse,
       LocalDateTime whitelistAddedAt, String status, LocalDateTime delayEndsAt, LocalDateTime submittedAt, Long reviewerId, String rejectReason,
-      String txHash) {}
+      String txHash, LocalDateTime statusAt) {}
 
   /** 某个状态的笔数和金额 */
   record Bucket(long count, BigDecimal amount) {}
@@ -37,7 +37,13 @@ public interface WalletAdminApi {
    * userIds 不为空时只查这些客户；txHash 不为空时按交易哈希匹配；no 不为空时也匹配这个对外编号（和 userIds 是"或"：
    * 后台搜索框输入数字时，既可能是客户号也可能是编号）。userIds 为空列表并且 no 为空时返回空页。
    */
-  Page<Deposit> deposits(String chain, Collection<String> statuses, String txHash, Collection<Long> userIds, Long no, int offset, int limit);
+  default Page<Deposit> deposits(String chain, Collection<String> statuses, String txHash, Collection<Long> userIds, Long no, int offset, int limit) {
+    return deposits(chain, statuses, txHash, userIds, no, null, null, null, offset, limit);
+  }
+
+  /** ref：提供方到账编号；from、to：到账时间范围（含两端，UTC） */
+  Page<Deposit> deposits(String chain, Collection<String> statuses, String txHash, Collection<Long> userIds, Long no, String ref, LocalDateTime from,
+      LocalDateTime to, int offset, int limit);
 
   default Page<Withdrawal> withdrawals(Collection<String> statuses, String chain, BigDecimal minAmount, BigDecimal maxAmount, Collection<Long> userIds, Long no,
       int offset, int limit) {

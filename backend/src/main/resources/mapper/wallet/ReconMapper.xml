@@ -15,6 +15,9 @@
       <arg column="block_number" javaType="_long"/>
       <arg column="block_hash" javaType="string"/>
       <arg column="created_at" javaType="java.time.LocalDateTime"/>
+      <arg column="provider" javaType="string"/>
+      <arg column="provider_ref" javaType="string"/>
+      <arg column="to_address" javaType="string"/>
     </constructor>
   </resultMap>
 
@@ -37,6 +40,23 @@
     </constructor>
   </resultMap>
 
+  <resultMap id="recentWithdrawal" type="app.trading.wallet.recon.ReconMapper$RecentWithdrawal">
+    <constructor>
+      <arg column="id" javaType="_long"/>
+      <arg column="public_no" javaType="_long"/>
+      <arg column="user_id" javaType="_long"/>
+      <arg column="amount" javaType="java.math.BigDecimal"/>
+      <arg column="fee" javaType="java.math.BigDecimal"/>
+      <arg column="status" javaType="string"/>
+    </constructor>
+  </resultMap>
+
+  <!-- 按单号逐笔核对的范围：进行中（已交提供方）的，和 since 以后有变化的 -->
+  <select id="recentWithdrawals" resultMap="recentWithdrawal">
+    SELECT id, public_no, user_id, amount, fee, status FROM wallet_withdrawal
+    WHERE status = 'BROADCASTING' OR (status IN ('COMPLETED', 'FAILED_REFUNDED') AND updated_at &gt;= #{since})
+  </select>
+
   <resultMap id="issue" type="app.trading.wallet.api.WalletReconApi$Issue">
     <constructor>
       <arg column="id" javaType="_long"/>
@@ -57,7 +77,7 @@
   <sql id="issueCols">id, kind, ref_id, user_id, expected, actual, detail, status, created_at, resolved_by, resolved_at, note</sql>
 
   <select id="creditedDeposits" resultMap="deposit">
-    SELECT id, chain, tx_hash, log_index, user_id, amount, status, block_number, block_hash, created_at
+    SELECT id, chain, tx_hash, log_index, user_id, amount, status, block_number, block_hash, created_at, provider, provider_ref, to_address
     FROM wallet_deposit WHERE status IN ('CREDITED', 'REVERSED')
   </select>
 

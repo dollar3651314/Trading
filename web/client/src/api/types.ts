@@ -238,12 +238,14 @@ export type OrderRejectReason =
 // ---------- 资金 ----------
 export type Network = 'ERC20' | 'TRC20' | 'BSC';
 
+/**
+ * 一条开着的充值网络（第 1 批：`GET /api/wallet/networks`）。address 为空表示还没生成过：客户第一次选这条网络时才向钱包提供方要
+ * （`POST /api/wallet/addresses/{network}`，AC-W1）。后台关掉的网络不会出现。确认数由 TopUP 决定，不再给客户显示。
+ */
 export interface DepositAddress {
   network: Network;
-  address: string;
-  confirmations: number;
-  etaMinutes: number;
-  /** 最小充值金额（低于它不入账，AC-41） */
+  address: string | null;
+  /** 最小充值金额（低于它不入账，AC-41 / AC-W11） */
   minDeposit: string;
 }
 
@@ -322,6 +324,12 @@ export interface Withdrawal {
   delayEndsAt?: string;
   txHash?: string;
   rejectReason?: string;
+  /** 钱包提供方（TopUP）的付款编号：交给 TopUP 之后才有 */
+  payoutNo?: string | null;
+  /** 两道审的第二道（放款中时）：等待放款审核（人工）/ 放款中（提供方那边"未知"的客户也看到放款中） */
+  payoutStatus?: 'awaitingRelease' | 'paying' | null;
+  /** 每一步进入的时间（资金记录展开看，到秒） */
+  steps?: { status: WithdrawStatus; at: string }[];
 }
 
 export interface WithdrawInfo {

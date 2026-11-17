@@ -355,7 +355,8 @@
     "frozenWithdraw": "冻结（提现中）",
     "frozenOrders": "冻结（挂单）",
     "showAmounts": "显示金额",
-    "hideAmounts": "隐藏金额"
+    "hideAmounts": "隐藏金额",
+    "records": "资金记录"
   },
   "deposit": {
     "chooseNetwork": "选择充值网络",
@@ -365,15 +366,13 @@
       "TRC20": "波场 TRON",
       "BSC": "BNB Chain"
     },
-    "pickFirst": "请先选择网络，再显示对应的充值地址和二维码。",
+    "pickFirst": "先选一条网络，再显示你在这条网络上的充值地址和二维码。第一次选某条网络时才生成地址，以后一直是同一个。",
     "qrLabel": "{{network}} 充值地址二维码",
     "copied": "地址已复制",
     "copyFailed": "复制失败，请长按地址手动复制",
-    "sameAddress": "ERC20 和 BSC 使用同一个地址，转账时请选对网络。",
     "warnTitle": "充值前请确认",
     "warnOnly": "只能向此地址转入 {{network}} 网络的 USDT",
     "warnWrong": "转错网络或币种，资金无法找回",
-    "warnConfirm": "到账需要 {{n}} 个区块确认，约 {{m}} 分钟，到账后会通知您",
     "warnMin": "单笔最少 {{min}} USDT，低于该金额不会入账",
     "records": "充值记录",
     "recordsEmpty": "暂无充值记录",
@@ -385,7 +384,18 @@
       "reversed": "已冲正"
     },
     "notOpenTitle": "充值暂未开通",
-    "notOpenHint": "充值通道还在准备中，开通后这里会显示你的专属充值地址。如有疑问请联系 info@example.com"
+    "notOpenHint": "充值通道还在准备中，开通后这里会显示你的专属充值地址。如有疑问请联系 info@example.com",
+    "generated": "{{network}} 充值地址已生成",
+    "generatedBody": "以后选这条网络都是这个地址",
+    "generatedTag": "已生成",
+    "generating": "正在生成 {{network}} 充值地址…",
+    "generatingHint": "通常 5 秒内显示，请不要关闭页面",
+    "unavailableTitle": "暂时无法获取充值地址，请稍后再试",
+    "unavailableOthers": "已经生成过的网络照常可用：{{list}}。",
+    "unavailableHint": "钱包服务恢复后点\"重试\"就能拿到地址。",
+    "warnBelow": "低于 {{min}} USDT 的转账不入账、无法找回",
+    "warnNotify": "到账后会通过站内信、推送、邮件通知你",
+    "recordsEmptyHint": "到账后会显示在这里。低于 1 USDT 的转账不入账，也不会出现在这里。"
   },
   "ledger": {
     "filterAll": "全部流水",
@@ -450,28 +460,28 @@
     "receive": "实际到账",
     "limits": "单笔 {{min}} – {{max}} · 今日已用",
     "dailyUsed": "今日已用额度",
-    "largeNotice": "单笔 ≥{{amount}} USDT 审核通过后会再延迟 {{h}} 小时上链。",
+    "largeNotice": "单笔 ≥{{amount}} USDT 审核通过后会再延迟 {{h}} 小时才交给放款。",
     "process": "提现流程",
     "step1": "提交",
     "step2": "{{h}} 小时冷静期，可撤销",
-    "step3": "人工审核",
-    "step4": "上链转出",
-    "processNote": "单笔 ≥{{amount}} USDT 审核通过后再延迟 {{h}} 小时上链，延迟期内可联系客服紧急取消。上链失败自动退回余额。",
+    "step3": "Trading 审核",
+    "step4": "等待放款审核（人工）",
+    "processNote": "单笔 ≥{{amount}} USDT 审核通过后再延迟 {{h}} 小时才交给放款，延迟期内可联系客服紧急取消。放款失败或被驳回，冻结的钱全部退回可用余额，并通知你。",
     "submit": "提交提现",
     "confirmTitle": "确认提现",
     "confirm": "确认提交",
     "confirmNote": "提交后进入 {{h}} 小时冷静期，期间可以撤销。",
     "submitted": "提现已提交",
-    "submittedBody": "{{h}} 小时冷静期内可撤销",
+    "submittedBody": "冷静期 {{h}} 小时，可撤销；审核通过后还要人工放款，东八区 23:00 后的第二天 8:00 后处理",
     "records": "提现记录",
     "recordsTotal": "共 {{total}} 笔",
     "recordsEmpty": "暂无提现记录",
     "status": {
       "cooling": "冷静期中",
       "reviewing": "待审核",
-      "approved": "已批准",
-      "delayed": "已批准 · 延迟上链",
-      "broadcasting": "上链中",
+      "approved": "已批准 · 待放款",
+      "delayed": "已批准 · 大额延迟期",
+      "broadcasting": "放款中",
       "completed": "已完成",
       "failedRefunded": "失败已退款",
       "rejected": "已拒绝",
@@ -481,12 +491,14 @@
       "coolingLeft": "{{time}} 后进入审核",
       "coolingDone": "即将进入审核",
       "reviewing": "等待人工审核",
-      "approved": "等待上链",
-      "delayed": "预计 {{time}} 上链",
+      "approved": "1 分钟内交给放款",
+      "delayed": "预计 {{time}} 交给放款",
       "tx": "交易号 {{hash}}",
-      "refunded": "上链失败，已退回余额",
+      "refunded": "放款失败或被驳回，已退回余额",
       "rejected": "原因：{{reason}}",
-      "cancelled": "已撤销，资金已退回"
+      "cancelled": "已撤销，资金已退回",
+      "payoutNo": "付款编号 {{no}}",
+      "paying": "等待放款"
     },
     "rejectReason": {
       "addressRisk": "收款地址存在风险",
@@ -496,7 +508,17 @@
     "cancelTitle": "撤销提现",
     "cancelConfirm": "确认撤销",
     "cancelBody": "撤销后 {{amount}} USDT 立即退回可用余额。",
-    "cancelled": "提现已撤销，资金已退回"
+    "cancelled": "提现已撤销，资金已退回",
+    "twoReviewTitle": "提现要过两道审核",
+    "twoReviewHours": "Trading 审核通过后还要人工放款，处理时间东八区 8:00–23:00。",
+    "twoReviewNight": "审核通过后还要人工放款，东八区 23:00 后的第二天 8:00 后处理。",
+    "doneBody": "冷静期 {{h}} 小时，可撤销；审核通过后还要人工放款，东八区 23:00 后的第二天 8:00 后处理。进度在提现记录里看，每一步都写了时间。",
+    "step5": "放款到账",
+    "payout": {
+      "awaitingRelease": "等待放款审核",
+      "paying": "放款中"
+    },
+    "doneTitle": "已提交这笔提现（单号 {{id}}）"
   },
   "whitelist": {
     "title": "提现白名单",
@@ -672,7 +694,9 @@
     "validationFailed": "提交的内容不符合要求，请检查后重试",
     "badRequest": "请求无法处理，请刷新页面后重试",
     "forbidden": "没有权限进行此操作",
-    "fileTooLarge": "文件太大，每张不能超过 2MB"
+    "fileTooLarge": "文件太大，每张不能超过 2MB",
+    "walletUnavailable": "暂时无法获取充值地址，请稍后再试",
+    "networkClosed": "这条网络暂时不能充值"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -707,7 +731,7 @@
     "addressNotActive": "该地址添加未满 24 小时，暂不能使用",
     "amountDigits": "金额最多 2 位小数",
     "withdrawMin": "单笔最少 10 USDT",
-    "withdrawMaxPerTx": "单笔最多 10,000 USDT",
+    "withdrawMaxPerTx": "单笔最多 5,000 USDT",
     "withdrawDaily": "今日累计提现需少于 30,000 USDT",
     "withdrawBalance": "超过可提余额",
     "addressTron": "TRC20 地址以 T 开头，共 34 位",
@@ -809,5 +833,39 @@
       ],
       "note": "差价合约带杠杆，可能亏掉全部保证金。"
     }
+  },
+  "records": {
+    "title": "资金记录",
+    "viewAll": "查看全部资金记录",
+    "steps": "每一步的时间",
+    "step": {
+      "cooling": "提交",
+      "reviewing": "冷静期结束，进入审核",
+      "approved": "审核通过",
+      "delayed": "审核通过 · 大额延迟期",
+      "broadcasting": "交给放款（等待放款审核）",
+      "completed": "已完成",
+      "failedRefunded": "已退回",
+      "rejected": "已拒绝",
+      "cancelled": "已撤销"
+    },
+    "filterType": "类型",
+    "filterNetwork": "网络",
+    "filterTime": "时间",
+    "kind": {
+      "all": "全部",
+      "deposit": "充值",
+      "withdraw": "提现"
+    },
+    "allNetworks": "全部网络",
+    "allTime": "全部时间",
+    "note": "时间按你的本地时区显示，到秒。记录永久保留，不能删除。低于 1 USDT 的转账不入账，不会出现在这里。",
+    "empty": "还没有资金记录",
+    "emptyHint": "充值到账、提现后，每一笔都会记在这里，永久保留。",
+    "goDeposit": "去充值",
+    "emptyFiltered": "这个筛选条件下没有记录",
+    "clearFilters": "清除筛选",
+    "creditedAt": "到账时间 {{time}}",
+    "txHash": "交易哈希 {{hash}}"
   }
 }

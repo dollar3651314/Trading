@@ -14,7 +14,9 @@
     "langCurrent": "Current",
     "envTest": "Test environment",
     "backHome": "Back to home",
-    "tbd": "To be provided"
+    "tbd": "To be provided",
+    "themeDark": "Switch to dark theme",
+    "themeLight": "Switch to light theme"
   },
   "risk": {
     "bar": "Risk warning: CFDs are complex instruments. Because of leverage, losses can grow quickly and you may lose all of your margin.",

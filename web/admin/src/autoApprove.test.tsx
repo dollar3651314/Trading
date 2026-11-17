@@ -66,11 +66,11 @@ describe('判定说明的文字', () => {
   it('带具体数值，金额有千分位、去掉 .00', () => {
     expect(ruleLine(t, r('R1', 'failed', { amount: '800.00', limit: '500' }))).toBe('单笔 800 > 上限 500');
     expect(ruleLine(t, r('R1', 'passed', { amount: '500.00', limit: '500' }))).toBe('单笔 500 ≤ 上限 500');
-    expect(ruleLine(t, r('R12', 'failed', { issues: 'quoteDeviation,hotWallet', balance: '820', need: '1099' }))).toBe('有报价偏差告警；热钱包余额 820 < 需要 1,099');
+    expect(ruleLine(t, r('R12', 'failed', { issues: 'quoteDeviation,hotWallet', balance: '820', need: '1099' }))).toBe('有报价偏差告警；Trading 在 TopUP 的可用余额 820 − 已通过未付合计 < 本笔（需要 1,099）');
     expect(ruleLine(t, r('R6', 'failed', { event: 'password_change', ago: '1.5', hours: '48' }))).toBe('1.5 小时前改了密码（窗口 48 小时）');
     expect(ruleLine(t, r('R8', 'disabled'))).toBe('未启用（不参与判定）');
     expect(ruleLine(t, r('R8', 'passed', { volume: '0', deposit: '0', ratio: '—', limit: '1', note: 'noDeposit' }))).toBe('近 30 天没有充值，不检查');
-    expect(ruleLine(t, r('R12', 'failed', { issues: 'hotWalletUnknown', balance: '—', need: '99' }))).toBe('查不到热钱包余额（超过 10 分钟没查成功），按不通过处理');
+    expect(ruleLine(t, r('R12', 'failed', { issues: 'hotWalletUnknown', balance: '—', need: '99' }))).toBe('查不到 Trading 在 TopUP 的可用余额（超过 10 分钟没查成功），按不通过处理');
     expect(ruleLine(t, r('R7', 'failed', { days: '3', limit: '7', kyc: 'pending' }))).toBe('注册 3 天（要求 ≥ 7 天）· KYC 待审核');
     expect(ruleLine(t, r('R3', 'unknown', { why: '数据读取失败' }))).toBe('无法判定：数据读取失败（按未通过处理）');
   });

@@ -5,7 +5,11 @@
 import { del, get, post } from '../http';
 import type { DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from '../types';
 
-export const getDepositAddresses = (): Promise<DepositAddress[]> => get<DepositAddress[]>('/api/wallet/addresses');
+/** 开着的充值网络和已经生成的地址（不访问钱包提供方） */
+export const getDepositAddresses = (): Promise<DepositAddress[]> => get<DepositAddress[]>('/api/wallet/networks');
+
+/** 要这条网络的地址：没有就由后端向钱包提供方要（通常 5 秒内）；提供方不通时 WALLET_UNAVAILABLE */
+export const requestDepositAddress = (network: Network): Promise<DepositAddress> => post<DepositAddress>(`/api/wallet/addresses/${encodeURIComponent(network)}`);
 
 /** 最近 50 条充值记录 */
 export const listDeposits = (): Promise<DepositRecord[]> => get<DepositRecord[]>('/api/wallet/deposits');

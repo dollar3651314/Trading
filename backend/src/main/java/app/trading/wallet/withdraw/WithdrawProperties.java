@@ -8,12 +8,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * 提现参数（application.yml 的 trading.wallet.withdraw），默认值沿用现有系统（N-08）和 负责人 确认的手续费（提现方案 W3）。S16 后台可改。
+ * 提现参数（application.yml 的 trading.wallet.withdraw），默认值沿用现有系统（N-08）和 负责人 确认的手续费（提现方案 W3）；单笔上限 5,000（TQ-13 = TD-15 A，TopUP 单笔只能付 5,000）。S16 后台可改（单笔最多改到 5,000）。
  */
 @ConfigurationProperties("trading.wallet.withdraw")
 record WithdrawProperties(
     @DefaultValue("10") BigDecimal minAmount,
-    @DefaultValue("10000") BigDecimal maxPerTx,
+    @DefaultValue("5000") BigDecimal maxPerTx,
     @DefaultValue("30000") BigDecimal dailyLimit,
     @DefaultValue("3000") BigDecimal largeAmount,
     @DefaultValue("6h") Duration largeDelay,

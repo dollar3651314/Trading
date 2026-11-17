@@ -1,21 +1,22 @@
 /**
- * 充值（效果图 M3）：先选网络，再显示地址、二维码、复制按钮和警示（含最小充值金额，AC-41）。ERC20 与 BSC 是同一个地址。
- * 下方是最近的充值记录（待确认显示确认进度；低于最小充值金额的不入账，AC-41）。
+ * 充值（原型 P1，第 1 批）：先选网络；第一次选某条网络时才向钱包提供方要地址（"正在生成…通常 5 秒内"），以后一直是同一个（AC-W1）。
+ * 拿不到地址时写"暂时无法获取充值地址，请稍后再试"并可重试，已生成的网络照常可用；后台临时关掉的网络不出现。
+ * 地址下方固定写：只能转 USDT、选错网络无法找回、低于 1 USDT 的转账不入账、无法找回（AC-W11）、到账会通知。不再写确认数和"ERC20 和 BSC 相同"。
+ * 下方是最近的充值记录。
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getDepositAddresses, listDeposits } from '../../api/wallet';
+import { Link } from 'react-router-dom';
+import { getDepositAddresses, listDeposits, requestDepositAddress } from '../../api/wallet';
 import type { DepositRecord, Network } from '../../api/types';
-import { isWalletNotReady } from '../../api/errors';
+import { errorKey, isWalletNotReady } from '../../api/errors';
 import { useToast } from '../../app/contexts';
-import { AsyncView, EmptyState } from '../../components/AsyncView';
+import { AsyncView, EmptyState, ErrorState, Loading } from '../../components/AsyncView';
 import { Icon } from '../../components/Icon';
 import { QrCode } from '../../components/QrCode';
 import { useAsync } from '../../hooks/useAsync';
 import { useServerEvent } from '../../hooks/useServerEvent';
 import { formatAmount, formatDateTime, groupAddress } from '../../lib/format';
-
-const NETS: Network[] = ['ERC20', 'TRC20', 'BSC'];
 
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -41,6 +42,34 @@ export function DepositCard() {
   const toast = useToast();
   const s = useAsync(getDepositAddresses, 'deposit');
   const [net, setNet] = useState<Network | null>(null);
+  /** 这次打开页面后新生成的地址 */
+  const [made, setMade] = useState<Partial<Record<Network, string>>>({});
+  const [busy, setBusy] = useState<Network | null>(null);
+  const [failed, setFailed] = useState<Partial<Record<Network, string>>>({});
+  const nets = s.data ?? ALL.map((network) => ({ network, address: null, minDeposit: '1' }));
+  const addressOf = (n: Network) => made[n] ?? nets.find((x) => x.network === n)?.address ?? null;
+  const min = nets[0]?.minDeposit ?? '1';
+
+  const generate = async (n: Network) => {
+    setBusy(n);
+    setFailed((f) => ({ ...f, [n]: undefined }));
+    try {
+      const a = await requestDepositAddress(n);
+      if (a.address) setMade((m) => ({ ...m, [n]: a.address! }));
+      toast.show({ tone: 'success', title: t('deposit.generated', { network: n }), body: t('deposit.generatedBody') });
+    } catch (e) {
+      setFailed((f) => ({ ...f, [n]: errorKey(e) }));
+    } finally {
+      setBusy(null);
+    }
+  };
+  // 选了一条还没有地址的网络：等网络列表加载好以后向钱包提供方要（失败了等客户点"重试"）
+  useEffect(() => {
+    if (net && s.data && !addressOf(net) && busy === null && !failed[net]) void generate(net);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [net, s.data]);
+
+  const address = net ? addressOf(net) : null;
   return (
     <section className="card" id="dep-card" aria-labelledby="dep-title">
       <div className="card-head">
@@ -48,71 +77,91 @@ export function DepositCard() {
         <span className="muted small">{t('deposit.onlyUsdt')}</span>
       </div>
       <div className="net-grid" role="radiogroup" aria-label={t('deposit.chooseNetwork')}>
-        {NETS.map((n) => (
+        {nets.map(({ network: n }) => (
           <button key={n} type="button" role="radio" aria-checked={net === n} className={`net${net === n ? ' on' : ''}`} onClick={() => setNet(n)}>
             <b>{n}</b>
             <small>{t(`deposit.chain.${n}`)}</small>
+            {addressOf(n) && <span className="gen">{t('deposit.generatedTag')}</span>}
           </button>
         ))}
       </div>
       {!net ? (
         <p className="pick-first">{t('deposit.pickFirst')}</p>
       ) : isWalletNotReady(s.error) && !s.data ? (
-        // 服务器还没有配置区块链（例如测试环境没接测试网）：说明"暂未开通"，不显示成"加载失败 + 重试"
+        // 钱包服务还没开通：说明"暂未开通"，不显示成"加载失败 + 重试"
         <EmptyState compact title={t('deposit.notOpenTitle')} hint={t('deposit.notOpenHint')} />
-      ) : (
-        <AsyncView state={s} rows={4}>
-          {(list) => {
-            const a = list.find((x) => x.network === net)!;
-            return (
-              <>
-                <div className="qr-wrap">
-                  <QrCode value={a.address} label={t('deposit.qrLabel', { network: net })} />
-                  <div className="addr">
-                    <span className="num">{groupAddress(a.address)}</span>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      onClick={async () => {
-                        const ok = await copyText(a.address);
-                        toast.show({ tone: ok ? 'success' : 'error', title: ok ? t('deposit.copied') : t('deposit.copyFailed') });
-                      }}
-                    >
-                      <Icon name="copy" size={14} />
-                      {t('common.copy')}
-                    </button>
-                  </div>
-                  {net !== 'TRC20' && <p className="muted small">{t('deposit.sameAddress')}</p>}
-                </div>
-                <div className="warn-box" role="note">
-                  <h3>
-                    <Icon name="warn" size={16} strokeWidth={2.2} />
-                    {t('deposit.warnTitle')}
-                  </h3>
-                  <ul>
-                    <li>{t('deposit.warnOnly', { network: net })}</li>
-                    <li>{t('deposit.warnWrong')}</li>
-                    <li>{t('deposit.warnConfirm', { n: a.confirmations, m: a.etaMinutes })}</li>
-                    {a.minDeposit && <li>{t('deposit.warnMin', { min: a.minDeposit })}</li>}
-                  </ul>
-                </div>
-              </>
-            );
-          }}
-        </AsyncView>
-      )}
+      ) : s.error && !s.data ? (
+        <ErrorState error={s.error} onRetry={s.reload} compact />
+      ) : !s.data ? (
+        <Loading rows={3} />
+      ) : busy === net ? (
+        <div className="gen-box" role="status">
+          <span className="spin" aria-hidden="true" />
+          <b>{t('deposit.generating', { network: net })}</b>
+          <span className="small muted">{t('deposit.generatingHint')}</span>
+        </div>
+      ) : failed[net] ? (
+        <div className="notice error dep-fail" role="alert">
+          <b>{t('deposit.unavailableTitle')}</b>
+          <p className="small">
+            {nets.some((x) => addressOf(x.network)) && t('deposit.unavailableOthers', { list: nets.filter((x) => addressOf(x.network)).map((x) => x.network).join(' / ') })}
+            {t('deposit.unavailableHint')}
+          </p>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => void generate(net)}>
+            {t('common.retry')}
+          </button>
+        </div>
+      ) : address ? (
+        <>
+          <div className="qr-wrap">
+            <QrCode value={address} label={t('deposit.qrLabel', { network: net })} />
+            <div className="addr">
+              <span className="num">{groupAddress(address)}</span>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  const ok = await copyText(address);
+                  toast.show({ tone: ok ? 'success' : 'error', title: ok ? t('deposit.copied') : t('deposit.copyFailed') });
+                }}
+              >
+                <Icon name="copy" size={14} />
+                {t('common.copy')}
+              </button>
+            </div>
+            <p className="muted small">{t('deposit.warnMin', { min })}</p>
+          </div>
+          <div className="warn-box" role="note">
+            <h3>
+              <Icon name="warn" size={16} strokeWidth={2.2} />
+              {t('deposit.warnTitle')}
+            </h3>
+            <ul>
+              <li>{t('deposit.warnOnly', { network: net })}</li>
+              <li>{t('deposit.warnWrong')}</li>
+              <li>
+                <b>{t('deposit.warnBelow', { min })}</b>
+              </li>
+              <li>{t('deposit.warnNotify')}</li>
+            </ul>
+          </div>
+        </>
+      ) : null}
       <DepositRecords />
     </section>
   );
 }
 
-/** 只显示最近几条，完整的到账记录在资金流水里 */
+/** 网络列表加载好之前先按三条显示（加载好以后只留开着的） */
+const ALL: Network[] = ['ERC20', 'TRC20', 'BSC'];
+
+/** 只显示最近几条，完整的记录在资金记录页 */
 const RECENT = 5;
 
 function DepositRecords() {
   const { t } = useTranslation();
   const s = useAsync(listDeposits, 'deposits');
-  // 发现待确认的充值时后端就推 deposit 事件（E2E-2），不用刷新页面就能看到"待确认"和确认进度
+  // 到账时后端推 deposit 事件，不用刷新页面就能看到
   useServerEvent((e) => {
     if (e.type === 'deposit' || e.type === 'account' || (e.type === 'notification' && e.item.kind === 'deposit')) s.reload();
   });
@@ -121,8 +170,12 @@ function DepositRecords() {
     <>
       <div className="card-head dep-records">
         <h2>{t('deposit.records')}</h2>
+        <Link to="/assets/records" className="more small">
+          {t('records.viewAll')}
+          <Icon name="chevronRight" size={14} />
+        </Link>
       </div>
-      <AsyncView state={s} rows={2} isEmpty={(d) => d.length === 0} empty={<EmptyState compact title={t('deposit.recordsEmpty')} />}>
+      <AsyncView state={s} rows={2} isEmpty={(d) => d.length === 0} empty={<EmptyState compact title={t('deposit.recordsEmpty')} hint={t('deposit.recordsEmptyHint')} />}>
         {(list) => (
           <ul className="ledger">
             {list.slice(0, RECENT).map((d) => (
@@ -135,7 +188,7 @@ function DepositRecords() {
                     {label(d)}
                     <span className="num"> · {d.network}</span>
                   </b>
-                  <small className="num">{formatDateTime(d.time)}</small>
+                  <small className="num">{formatDateTime(d.time, { seconds: true })}</small>
                 </div>
                 <div className={`lg-amt num${d.status === 'credited' ? ' up' : ' muted'}`}>{formatAmount(d.amount)}</div>
               </li>
