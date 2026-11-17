@@ -1,36 +1,26 @@
 package app.trading.admin.security;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import app.trading.common.health.TestAdminFlag;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import app.trading.common.health.TestAdminFlag;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * 测试管理员（做法 07，只在测试环境）：给 GitHub 上的验收用例（{@code .github/workflows/staging-e2e.yml}）调后台接口，不用登录。
  * <ul>
- *   <li>凭据：请求头 {@code X-Trading-Test-Admin: <令牌>}。服务器只存令牌的 SHA-256（{@code TEST_ADMIN_TOKEN_SHA256}，由服务器上
- *       {@code sudo trading gen-test-admin} 生成；令牌原文只在终端显示一次），按 SHA-256 定长比较。</li>
- *   <li><b>测试环境判定不只看一个变量</b>，三条都满足才认：{@code FX_ENV_LABEL=test}；报价模式 {@code FX_QUOTE_MARKET_SOURCE} 是 {@code simulated}
- *       （trading-app 和报价服务用同一个 .env）；{@code FX_TOPUP_BASE_URL} 指向的 TopUP 健康检查返回 {@code "env":"staging"}（查不到这次不认，过一分钟再查）。</li>
+ *   <li>凭据：请求头 {@code X-Trading-Test-Admin: <令牌>}。令牌由 Amos 用密码管理器生成（40 位），在服务器上 {@code sudo trading gen-test-admin}
+ *       隐藏输入；服务器只存它的 SHA-256（{@code TEST_ADMIN_TOKEN_SHA256}），按 SHA-256 定长比较。屏幕、日志、仓库里都没有原文。</li>
+ *   <li><b>测试环境判定不只看一个变量</b>，两条都满足才认：{@code FX_ENV_LABEL=test}；报价模式 {@code FX_QUOTE_MARKET_SOURCE} 是 {@code simulated}
+ *       （trading-app 和报价服务用同一个 .env）。不看 TopUP：测试服务器上 Trading 和 TopUP 轮流跑，TopUP 常常停着（部署方案 07 页）。</li>
  *   <li><b>生产拒绝启动</b>：配了 {@code TEST_ADMIN_TOKEN_SHA256} 但不是测试环境（没有 {@code FX_ENV_LABEL=test}，或报价模式 live）时构造就抛错，应用起不来，
  *       部署脚本的健康检查失败、自动换回并发告警邮件。</li>
  *   <li>白名单（{@link #ALLOWED}）是"允许列表"：只列允许的后台接口（类名#方法名），没列的一律 403，以后新加的接口默认不给。
@@ -65,24 +55,12 @@ public class TestAdmin implements TestAdminFlag {
 
   private static final Logger log = LoggerFactory.getLogger(TestAdmin.class);
   private static final Pattern HEX64 = Pattern.compile("[0-9a-f]{64}");
-  private static final Duration RETRY = Duration.ofMinutes(1);
-
-  /** TopUP 是不是测试环境（可替换，测试里用假的） */
-  @FunctionalInterface
-  public interface TopUpEnvProbe {
-    /** true = TopUP 健康检查返回 env=staging；查不到或不是返回 false */
-    boolean staging();
-  }
 
   private final byte[] hash;
   private final boolean testEnv;
-  private final TopUpEnvProbe probe;
-  private final Clock clock;
-  private volatile boolean topupStaging;
-  private volatile Instant nextProbe = Instant.EPOCH;
 
   TestAdmin(@Value("${trading.test-admin.token-sha256:}") String tokenSha256, @Value("${trading.env-label:}") String envLabel,
-      @Value("${trading.test-admin.quote-market-source:}") String quoteSource, TopUpEnvProbe probe, Clock clock) {
+      @Value("${trading.test-admin.quote-market-source:}") String quoteSource) {
     String h = tokenSha256 == null ? "" : tokenSha256.strip().toLowerCase(Locale.ROOT);
     String label = envLabel == null ? "" : envLabel.strip();
     String qs = quoteSource == null ? "" : quoteSource.strip();
@@ -94,9 +72,7 @@ public class TestAdmin implements TestAdminFlag {
       h = "";
     }
     this.hash = h.isEmpty() ? null : HexFormat.of().parseHex(h);
-    this.probe = probe;
-    this.clock = clock;
-    if (this.hash != null) log.warn("测试管理员已配置（只在测试环境、TopUP 也是测试环境时生效）");
+    if (this.hash != null && testEnv) log.warn("测试管理员已开（测试环境）");
   }
 
   /** 不能启动的原因（只有变量名，没有值）；可以启动返回 null */
@@ -108,44 +84,21 @@ public class TestAdmin implements TestAdminFlag {
     return null;
   }
 
-  /** 这个环境有没有开测试管理员（只给健康检查报"是否"）：配了哈希并且三条测试环境条件都满足 */
+  /** 这个环境有没有开测试管理员：配了哈希并且两条测试环境条件都满足 */
   public boolean enabled() {
-    return hash != null && testEnv && topupIsStaging();
+    return hash != null && testEnv;
   }
 
-  /**
-   * 健康检查用（只报是否）：不在请求线程里等 TopUP，还没确认过时在后台查一次，下一次健康检查再看结果
-   */
+  /** 健康检查用（只报是否） */
   @Override
   public boolean testAdminOn() {
-    if (hash == null || !testEnv) return false;
-    if (topupStaging) return true;
-    if (!clock.instant().isBefore(nextProbe)) Thread.ofVirtual().start(this::topupIsStaging);
-    return false;
+    return enabled();
   }
 
   /** 令牌对不对（没开时一律 false） */
   boolean matches(String token) {
     if (token == null || token.isBlank() || !enabled()) return false;
     return MessageDigest.isEqual(sha256(token.strip()), hash);
-  }
-
-  private synchronized boolean topupIsStaging() {
-    if (topupStaging) return true;
-    Instant now = clock.instant();
-    if (now.isBefore(nextProbe)) return false;
-    boolean ok;
-    try {
-      ok = probe.staging();
-    } catch (RuntimeException e) {
-      ok = false;
-    }
-    if (ok) topupStaging = true;
-    else {
-      nextProbe = now.plus(RETRY);
-      log.warn("测试管理员这次不认：TopUP 健康检查不是测试环境或查不到（{} 后再查）", RETRY);
-    }
-    return ok;
   }
 
   private static byte[] sha256(String s) {
@@ -162,34 +115,4 @@ public class TestAdmin implements TestAdminFlag {
     return a != null && Boolean.TRUE.equals(a.getAttribute(ATTR, RequestAttributes.SCOPE_REQUEST));
   }
 
-  /** 默认的 TopUP 探测：GET {FX_TOPUP_BASE_URL}/api/health/，返回的 env 是 staging 才算 */
-  @Component
-  static class HttpTopUpEnvProbe implements TopUpEnvProbe {
-
-    private final String baseUrl;
-    private final ObjectMapper json;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build();
-
-    HttpTopUpEnvProbe(@Value("${trading.payment.topup.base-url:}") String baseUrl, ObjectMapper json) {
-      this.baseUrl = baseUrl == null ? "" : baseUrl.strip().replaceAll("/+$", "");
-      this.json = json;
-    }
-
-    @Override
-    public boolean staging() {
-      if (!baseUrl.startsWith("https://") && !baseUrl.startsWith("http://")) return false;
-      try {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/api/health/")).timeout(Duration.ofSeconds(5)).GET().build();
-        HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (r.statusCode() != 200) return false;
-        JsonNode n = json.readTree(r.body());
-        return "staging".equals(n.path("env").asString(""));
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        return false;
-      } catch (Exception e) {
-        return false;
-      }
-    }
-  }
 }

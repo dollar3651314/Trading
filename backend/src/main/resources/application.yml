@@ -5,8 +5,8 @@ trading:
   # 测试环境标识（S20）：测试环境设 FX_ENV_LABEL=test，生产不设。非空时健康检查返回 env 字段，页面顶部显示"测试环境"标识条，
   # 邮件和推送标题前加"[测试] / [TEST] "
   env-label: ${FX_ENV_LABEL:}
-  # 测试管理员（做法 07，admin/security/TestAdmin）：只在测试环境。服务器上 sudo trading gen-test-admin 生成，.env 只存令牌的 SHA-256。
-  # 三条都满足才认：FX_ENV_LABEL=test、报价模式 FX_QUOTE_MARKET_SOURCE=simulated（和报价服务同一个 .env）、FX_TOPUP_BASE_URL 的健康检查是 staging。
+  # 测试管理员（做法 07，admin/security/TestAdmin）：只在测试环境。令牌由 Amos 用密码管理器生成，服务器上 sudo trading gen-test-admin 隐藏输入，.env 只存 SHA-256。
+  # 两条都满足才认：FX_ENV_LABEL=test、报价模式 FX_QUOTE_MARKET_SOURCE=simulated（和报价服务同一个 .env）。不看 TopUP（测试服务器上两边轮流跑）。
   # 不是测试环境却配了 TEST_ADMIN_TOKEN_SHA256：拒绝启动
   test-admin:
     token-sha256: ${TEST_ADMIN_TOKEN_SHA256:}

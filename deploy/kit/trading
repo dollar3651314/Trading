@@ -19,9 +19,9 @@
 #   sudo trading test-mail           给告警邮箱发一封测试邮件
 #   sudo trading watch               每 5 分钟的检查，状态变化时发邮件（定时器运行；trading-deploy 定时器停着时不检查）
 # 给 TopUP 用的约定（TopUP topup.sh 的 stop_other）：装在 /opt/trading/，更新定时器叫 trading-deploy.timer，/opt/trading/backup.sh before-topup 能备份
-#   sudo trading gen-test-admin      生成测试管理员令牌（只在终端显示一次，.env 只存 SHA-256；再运行一次就换新令牌）
+#   sudo trading gen-test-admin      设测试管理员令牌：Amos 用密码管理器生成 40 位，这里隐藏输入；.env 只存 SHA-256，屏幕上不显示（再运行一次就换）
 #   sudo trading test-admin-off      关掉测试管理员（删哈希，旧令牌立刻作废）
-# 规矩（底线 1）：任何密钥、密码、Token 都不打印到屏幕（只有上面写明"显示一次"的两个，而且只在终端里）、不写日志、不放命令行参数。
+# 规矩（底线 1）：任何密钥、密码、Token 都不打印到屏幕、不写日志、不放命令行参数。
 # 阿里云"云助手 → 执行命令"没有终端：要输入或显示密钥的命令（setup、keys、set-key、gen-test-admin）在那里会拒绝，改用"远程连接"。
 set -euo pipefail
 umask 077
@@ -34,6 +34,8 @@ STATE="$TR_DIR/state"
 LOGF="$TR_DIR/logs/trading.log"
 # 启动前要求的可用内存：容器上限合计 960 + Docker 约 100（部署方案按 816 估的是 916，实测后改，见 docker-compose.yml 开头）
 MIN_MEM_MB=${TR_MIN_MEM_MB:-1060}
+# 恢复演练用的临时 MySQL 上限（MB）；和正式库同样设置（缓冲池 32 MB），实测空闲约 172 MB
+DRILL_MEM_MB=${TR_DRILL_MEM_MB:-224}
 TOPUP_BIN=${TR_TOPUP_BIN:-/usr/local/bin/topup}
 # 同机 TopUP 的应用配置（邮件设置从这里读，只读不改；Amos 11/17「邮箱用和TopUP一样的」）
 TOPUP_ENVF=${TR_TOPUP_ENV:-/opt/topup/.env}
@@ -373,14 +375,17 @@ setup_admin() {
 }
 
 # 验收令牌（做法 07）：粘一串令牌（同一串填进 GitHub 环境 staging-e2e），服务器只存它的 SHA-256
+# 验收令牌（TD4-15）：Amos 用密码管理器生成一串 40 位（字母和数字），这里隐藏输入；同一串由 Amos 填进 GitHub 环境 staging-e2e。
+# 服务器只存 SHA-256，屏幕上、日志里都不出现原文；再输入一串就换掉旧的
 setup_test_admin() {
   local t
-  read_secret "验收令牌（测试管理员；至少 32 位；同一串马上填进 GitHub 环境 staging-e2e 的 STAGING_TEST_ADMIN_TOKEN；直接回车 = 跳过）："; t=$REPLY_SECRET; REPLY_SECRET=
-  [ -n "$t" ] || { ok "验收令牌：这次跳过（也可以用 sudo trading gen-test-admin 让服务器生成）"; return 0; }
-  [ ${#t} -ge 32 ] || { bad "令牌太短（至少 32 位），没保存"; return 1; }
+  read_secret "验收令牌（密码管理器生成的 40 位字母和数字；屏幕上不显示；直接回车 = 跳过）："; t=$REPLY_SECRET; REPLY_SECRET=
+  [ -n "$t" ] || { ok "验收令牌：这次跳过（以后用 sudo trading gen-test-admin 再填）"; return 0; }
+  [[ "$t" =~ ^[A-Za-z0-9]{40,}$ ]] || { unset t; bad "令牌要是至少 40 位的字母和数字，没保存"; return 1; }
   envset TEST_ADMIN_TOKEN_SHA256 "$(printf '%s' "$t" | sha256sum | cut -d' ' -f1)"; unset t
   apply > /dev/null || true
-  ok "验收令牌已保存（服务器只存哈希）"
+  ok "验收令牌已保存（服务器只存哈希）；同一串填进 GitHub → Trading 仓库 → Settings → Environments → staging-e2e → STAGING_TEST_ADMIN_TOKEN"
+  log "测试管理员令牌已更换（不记录令牌）"
 }
 
 cmd_setup() {
@@ -597,11 +602,30 @@ cmd_restore_drill() {
   age -d -i "$STATE/backup.key" "$f" | tar -C "$tmp" -xf - mysql.sql
   ok "解密：$(basename "$f")"
   docker rm -f trading-restore-drill > /dev/null 2>&1 || true
-  cid=$(docker run -d --name trading-restore-drill --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes --memory 384m --memory-swap 384m mysql:8.4 --innodb-buffer-pool-size=64M --performance-schema=OFF)
+  # 内存（2 核 2G 上不能和正在跑的 Trading 叠在一起被 OOM 杀）：临时 MySQL 上限 DRILL_MEM_MB，再留 64 MB 余量。
+  # 不够就先停 Trading 的三个应用容器（数据库不停，演练完再启动）；停了还不够就不演练，说明原因
+  local need avail stopped=""
+  need=$((DRILL_MEM_MB + 64))
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  if [ "$avail" -lt "$need" ] && [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading --filter label=com.docker.compose.service=trading-app)" ]; then
+    say "  可用内存 ${avail} MB，不够演练（要 ≥ ${need} MB）：先停 Trading 的应用（trading-web、trading-app、quote-app），演练完再启动"
+    compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
+    stopped=1
+    avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  fi
+  if [ "$avail" -lt "$need" ]; then
+    rm -rf "$tmp"
+    [ -z "$stopped" ] || { compose up -d > /dev/null 2>&1 || true; }
+    bad "没做恢复演练：可用内存 ${avail} MB，演练要 ≥ ${need} MB（临时数据库 ${DRILL_MEM_MB} MB + 余量 64 MB）。等 TopUP 和 Trading 都停着时再运行 sudo trading restore-drill"
+    log "恢复演练跳过：内存不够（${avail} < ${need} MB）"; return 1
+  fi
+  cid=$(docker run -d --name trading-restore-drill --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes --memory "${DRILL_MEM_MB}m" --memory-swap "${DRILL_MEM_MB}m" mysql:8.4 --innodb-buffer-pool-size=32M --performance-schema=OFF --max-connections=5)
   # 官方镜像初始化时先起一个不监听端口的临时进程，等到正式进程（port: 3306）就绪再导入
   for _ in $(seq 1 90); do docker logs "$cid" 2>&1 | grep -q 'ready for connections.*port: 3306' && break; sleep 2; done
   if ! docker exec -i "$cid" mysql -uroot < "$tmp/mysql.sql"; then
-    docker rm -f trading-restore-drill > /dev/null 2>&1 || true; rm -rf "$tmp"; bad "导入临时库失败"; log "恢复演练失败：$(basename "$f")"; return 1
+    docker rm -f trading-restore-drill > /dev/null 2>&1 || true; rm -rf "$tmp"
+    if [ -n "$stopped" ]; then compose up -d > /dev/null 2>&1 || true; fi
+    bad "导入临时库失败"; log "恢复演练失败：$(basename "$f")"; return 1
   fi
   n_t=$(docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='trading'")
   n_q=$(docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='quote'")
@@ -609,6 +633,7 @@ cmd_restore_drill() {
   hist=$(docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM trading.flyway_schema_history WHERE success=1" 2>/dev/null || echo 0)
   docker rm -f trading-restore-drill > /dev/null 2>&1 || true
   rm -rf "$tmp"
+  if [ -n "$stopped" ]; then compose up -d > /dev/null 2>&1 || true; wait_healthy "$(current_tag)" && ok "Trading 的应用已重新启动" || bad "Trading 的应用重新启动后没通过健康检查（sudo trading status）"; fi
   if [ "$n_t" -gt 10 ] && [ "$n_q" -gt 3 ] && [ "$hist" -gt 0 ]; then
     ok "导入临时库：trading $n_t 张表（迁移 $hist 条）、quote $n_q 张表"
     log "恢复演练通过：$(basename "$f")"
@@ -659,18 +684,8 @@ cmd_watch() {
 
 cmd_gen_test_admin() {
   need_root; need_tty
-  [ "$(health_field env "$(health)")" = test ] || die "健康检查的 env 不是 test：测试管理员只能在测试环境用，生产一律不生成"
-  local token hash
-  token=$(openssl rand -base64 36 | tr -d '\n/+=' | cut -c1-40)
-  hash=$(printf '%s' "$token" | sha256sum | cut -d' ' -f1)
-  envset TEST_ADMIN_TOKEN_SHA256 "$hash"
-  apply > /dev/null || true
-  say "测试管理员令牌（只显示这一次，不要截图）："
-  say "  $token"
-  say "现在把它填进 GitHub → Trading 仓库 → Settings → Environments → staging-e2e → Environment secrets → STAGING_TEST_ADMIN_TOKEN，填完关掉这个窗口。"
-  say "服务器上只存它的 SHA-256；再运行一次就换新令牌（旧的立刻作废）。怀疑泄露：sudo trading test-admin-off"
-  unset token
-  log "测试管理员令牌已更换（不记录令牌）"
+  [ "$(health_field env "$(health)")" = test ] || die "健康检查的 env 不是 test：测试管理员只能在测试环境用，生产一律不设"
+  setup_test_admin
 }
 
 cmd_test_admin_off() {

@@ -39,7 +39,7 @@ const h = await health(app);
 if (h?.env !== 'test') fail(`客户端域名健康检查的 env 不是 test（${h?.env ?? '没有响应'}），停止：只对测试环境跑`);
 const ha = await health(admin);
 if (ha?.env !== 'test') fail('后台域名健康检查的 env 不是 test，停止');
-if (ha?.testAdmin !== true) fail('测试环境的测试管理员没开：服务器上运行 sudo trading gen-test-admin，把显示的令牌填进 GitHub 环境 staging-e2e；TopUP 测试环境也要开着（测试管理员要它的健康检查是 staging）');
+if (ha?.testAdmin !== true) fail('测试环境的测试管理员没开：服务器上运行 sudo trading gen-test-admin 隐藏输入令牌（和 GitHub 环境 staging-e2e 里的是同一串）');
 console.log(`✓ 测试环境（提交 ${String(h.version || '未知').slice(0, 12)}），测试管理员已开；跑 ${files.length} 个文件`);
 
 // GITHUB_RUN_ID、GITHUB_RUN_ATTEMPT 是运行号（不是密钥）：lib.mjs 拿它给造的数据打标记

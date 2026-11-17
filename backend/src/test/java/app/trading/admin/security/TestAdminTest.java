@@ -8,21 +8,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.Primary;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
@@ -34,26 +26,16 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 测试管理员（做法 07）：测试环境三条条件、生产拒绝启动、白名单（默认拒绝）、改东西只收 POST、审计、打码、健康检查的 testAdmin。
+ * 测试管理员（做法 07）：测试环境两条条件（不看 TopUP）、生产拒绝启动、白名单（默认拒绝）、改东西只收 POST、审计、打码、健康检查的 testAdmin。
  * 令牌是本测试里的一次性值，不是任何环境的密钥。
  */
 @TestPropertySource(properties = {"trading.env-label=test", "trading.test-admin.quote-market-source=simulated",
     "trading.test-admin.token-sha256=" + TestAdminTest.HASH})
-@Import(TestAdminTest.StagingTopUp.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class TestAdminTest extends AdminTestSupport {
 
   static final String TOKEN = "ci-only-test-admin-token-not-a-secret";
   static final String HASH = "00cc95978cded3bb472caa251bc27093b02fd64a5fb93fbc0a73ba93a69b3561";
-
-  @TestConfiguration
-  static class StagingTopUp {
-    @Bean
-    @Primary
-    TestAdmin.TopUpEnvProbe stagingTopUp() {
-      return () -> true;
-    }
-  }
 
   @Autowired @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping mappings;
   @Autowired ObjectMapper json;
@@ -78,31 +60,21 @@ class TestAdminTest extends AdminTestSupport {
     assertThat(TestAdmin.refuse(HASH, "prod", "simulated")).isNotNull();
     assertThat(TestAdmin.refuse(HASH, "test", "simulated")).isNull();
     assertThat(TestAdmin.refuse("", "", "live")).isNull();
-    Clock c = Clock.fixed(Instant.parse("2026-11-17T00:00:00Z"), ZoneOffset.UTC);
-    assertThatThrownBy(() -> new TestAdmin(HASH, "", "", () -> true, c)).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> new TestAdmin(HASH, "", "")).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(() -> new TestAdmin(HASH, "test", "live")).isInstanceOf(IllegalStateException.class);
   }
 
   @Test
-  void 三条测试环境条件少一条都不认() throws Exception {
-    Clock c = Clock.fixed(Instant.parse("2026-11-17T00:00:00Z"), ZoneOffset.UTC);
-    assertThat(new TestAdmin(HASH, "test", "simulated", () -> true, c).matches(TOKEN)).isTrue();
-    assertThat(new TestAdmin(HASH, "test", "simulated", () -> true, c).matches(TOKEN + "x")).isFalse();
-    // TopUP 不是测试环境或查不到：这次不认，一分钟内不再查
-    AtomicInteger probes = new AtomicInteger();
-    TestAdmin notStaging = new TestAdmin(HASH, "test", "simulated", () -> {
-      probes.incrementAndGet();
-      return false;
-    }, c);
-    assertThat(notStaging.matches(TOKEN)).isFalse();
-    assertThat(notStaging.matches(TOKEN)).isFalse();
-    assertThat(probes.get()).isEqualTo(1);
-    assertThat(new TestAdmin(HASH, "test", "simulated", () -> { throw new IllegalStateException("down"); }, c).matches(TOKEN)).isFalse();
+  void 两条测试环境条件少一条都不认_不看TopUP() {
+    assertThat(new TestAdmin(HASH, "test", "simulated").matches(TOKEN)).isTrue();
+    assertThat(new TestAdmin(HASH, "test", "simulated").matches(TOKEN + "x")).isFalse();
+    assertThat(new TestAdmin(HASH, "test", "simulated").matches("")).isFalse();
     // 报价模式不是 simulated（没传或别的值）
-    assertThat(new TestAdmin(HASH, "test", "", () -> true, c).matches(TOKEN)).isFalse();
-    assertThat(new TestAdmin(HASH, "test", "none", () -> true, c).enabled()).isFalse();
+    assertThat(new TestAdmin(HASH, "test", "").matches(TOKEN)).isFalse();
+    assertThat(new TestAdmin(HASH, "test", "none").enabled()).isFalse();
     // 没配哈希、哈希格式不对
-    assertThat(new TestAdmin("", "test", "simulated", () -> true, c).enabled()).isFalse();
-    assertThat(new TestAdmin("not-hex", "test", "simulated", () -> true, c).enabled()).isFalse();
+    assertThat(new TestAdmin("", "test", "simulated").enabled()).isFalse();
+    assertThat(new TestAdmin("not-hex", "test", "simulated").enabled()).isFalse();
   }
 
   @Test

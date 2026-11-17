@@ -387,7 +387,7 @@ jobs:
               --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
               -t "$reg/${pair#*:}:$SHA" .
           done
-      - name: 镜像里不带密钥（gitleaks 扫三个镜像里我们放进去的文件，jar 解开扫；镜像里不能有 .env）
+      - name: 镜像里不带密钥（gitleaks 扫三个镜像里我们放进去的文件，含前端脚本，jar 解开扫；镜像里不能有 .env）
         run: |
           reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           scan=$(mktemp -d)
@@ -401,10 +401,10 @@ jobs:
             docker rm "$cid" > /dev/null
           done
           if find "$scan" -name '.env' -o -name '*.pem' -o -name 'id_rsa*' | grep -q .; then echo "::error::镜像里有 .env、证书私钥或 SSH 私钥"; exit 1; fi
-          # 前端打包后的压缩脚本（assets/*.js）不扫：它们由仓库源码编译（basic job 已扫源码）加第三方库，压缩后的变量名会被误报（实测 antd 的 columnsKey）
-          find "$scan/trading-web/nginx" -path '*/assets/*.js' -delete
-          docker run --rm -v "$scan:/scan:ro" ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
-            dir /scan --no-banner --redact --exit-code 1
+          # 前端打包后的脚本也扫；逐字的误报例外写在 deploy/gitleaks-image.toml（默认规则全部照用）
+          docker run --rm -v "$scan:/scan:ro" -v "$PWD/deploy/gitleaks-image.toml:/gitleaks.toml:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
+            dir /scan --config /gitleaks.toml --no-banner --redact --exit-code 1
       - name: 推送（先推三个提交号标签，最后才移动 staging 标签；trading-app 的 staging 最后移，服务器看到它变时三个都已就绪）
         env:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}

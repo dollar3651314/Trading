@@ -7,6 +7,7 @@
 # 内存：部署方案 07 页第 3 节按 816 MB 估；研发 11/17 在开发机实测（实际执行）：元空间 trading-app 空闲就用到约 86 MB（88 不够）、
 # quote-app 约 73 MB（64 时反复 OutOfMemoryError: Metaspace 重启）、MySQL 8.4 空闲约 172 MB（176 贴边）。所以默认值按实测加余量：
 # trading-app 416、quote-app 256、mysql 224、redis 32、web 32，合计 960 MB + Docker 约 100 = 1,060 MB（比 2G 机器停掉所有项目后的约 1,050 MB 多约 10 MB，待方案定）。
+# 代码缓存（11/17 复审）按并发请求实测给够：trading-app 48 MB、quote-app 32 MB，已计入各自的 JVM 账；quote-app 实测占用约 265 MB，比 256 的上限多，上限待定。
 # 每个容器 mem_limit = memswap_limit（不用交换分区），
 # JVM 堆、元空间、代码缓存、直接内存显式写在 JAVA_TOOL_OPTIONS。数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等），默认值 = 部署方案的数。
 # 三张自己的网络：
@@ -41,7 +42,9 @@ services:
       WWW_DOMAIN: ${WWW_DOMAIN:?缺少 WWW_DOMAIN}
       QUOTE_DOMAIN: ${QUOTE_DOMAIN:?缺少 QUOTE_DOMAIN}
     volumes:
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来
+      - /etc/letsencrypt/live/trading:/etc/letsencrypt/live/trading:ro
+      - /etc/letsencrypt/archive/trading:/etc/letsencrypt/archive/trading:ro
       - /var/www/certbot:/var/www/certbot:ro
     networks:
       egress: {}
@@ -65,8 +68,9 @@ services:
       FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      # JVM 上限：堆 144 + 元空间 128 + 代码缓存 24 + 直接内存 16 + 线程和本机内存约 60 = 372，容器 416
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-128m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-24m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # JVM 上限：堆 144 + 元空间 128 + 代码缓存 48 + 直接内存 16 = 336，加线程和本机内存；容器 416。
+      # 开发机实测（3 分钟并发请求后）：代码缓存用到约 33 MB（原来给 24 不够）、元空间约 90 MB、容器占用约 343 MB
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-128m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-48m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
       # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
       FX_COOKIE_SECURE: "true"
@@ -130,8 +134,9 @@ services:
       FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 16 + 直接内存 16 + 线程和本机内存约 40 = 232，容器 256
-      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-16m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 32 + 直接内存 16 = 208，加线程和本机内存；容器 256。
+      # 开发机实测（同上）：代码缓存约 22 MB（原来给 16 不够）、元空间约 79 MB、容器占用约 265 MB——超过 256 的上限，内存上限待 Amos 定机器后再调
+      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-32m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-16m} -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
       FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
       FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
       FX_QUOTE_KEY_ENC_KEY: ${FX_QUOTE_KEY_ENC_KEY:?缺少 FX_QUOTE_KEY_ENC_KEY}
