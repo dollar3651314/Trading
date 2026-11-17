@@ -323,17 +323,20 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       // 默认填全部手数；改成 0.04，确认按钮跟着变成"平仓 0.04 手"，显示剩余 0.06
       await expect(dlg.getByLabel('平仓手数')).toHaveValue('0.10');
       await dlg.getByLabel('平仓手数').fill('0.04');
-      await expect(dlg.locator('.kv-list').getByText('0.06')).toBeVisible();
+      // 只看"平仓后剩余"这一行：同一个列表里还有预计盈亏（报价随机时可能正好是 -0.06 USDT）
+      await expect(dlg.locator('.kv-list > div').filter({ hasText: '平仓后剩余' }).locator('dd').getByText('0.06')).toBeVisible();
       await dlg.getByRole('button', { name: '平仓 0.04 手' }).click();
       await expect(page.getByText('已平仓 0.04 手')).toBeVisible();
       await expect(page.getByRole('dialog')).toHaveCount(0);
       // 剩下的持仓还在（同一个编号），手数 0.06
       await expect(card).toHaveCount(1);
-      await expect(card).toContainText('0.06');
+      // 只看手数那一格（卡片里还有盈亏、价格、保证金，可能碰巧含 0.06）
+      await expect(card.locator('.r1 .meta')).toContainText('0.06');
       await selectTab(page, '历史');
       const partial = page.locator('.hist-row').filter({ hasText: '部分平仓' });
       await expect(partial).toHaveCount(1);
-      await expect(partial).toContainText('0.04');
+      // 只看手数和价格那一行（不含盈亏）
+      await expect(partial.locator('.r2 > span').first()).toContainText('0.04');
     });
 
     await step('客户：再全部平仓剩下的 0.06 手', async () => {
