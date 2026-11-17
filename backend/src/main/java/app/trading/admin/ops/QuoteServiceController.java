@@ -3,6 +3,8 @@ package app.trading.admin.ops;
 import app.trading.admin.security.AdminContext;
 import app.trading.admin.security.Permission;
 import app.trading.admin.security.RequiresPermission;
+import app.trading.admin.security.TestAdmin;
+import app.trading.common.error.BizException;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -51,6 +53,8 @@ class QuoteServiceController {
   @RequiresPermission(Permission.QUOTE_KEY_OPERATE)
   @PostMapping("/api/admin/quote-service/keys")
   JsonNode createKey(@RequestBody KeyBody b) {
+    // 测试管理员（做法 07）只能建内部测试 Key
+    if (TestAdmin.current() && (b == null || !"INTERNAL_TEST".equals(b.kind()))) throw new BizException("TEST_ADMIN_FORBIDDEN", "测试管理员只能建内部测试 Key");
     return ops.createKey(b == null ? null : b.clientId(), b == null ? null : b.kind(), b == null ? null : b.symbols(), b == null ? null : b.reason());
   }
 
@@ -63,7 +67,16 @@ class QuoteServiceController {
   @RequiresPermission(Permission.QUOTE_KEY_OPERATE)
   @PostMapping("/api/admin/quote-service/keys/{keyId}/disable")
   void disable(@PathVariable String keyId, @RequestBody ReasonBody b) {
+    // 测试管理员只能停用内部测试 Key：按报价服务的 Key 列表核对种类，查不到也不给
+    if (TestAdmin.current() && !internalTestKey(keyId)) throw new BizException("TEST_ADMIN_FORBIDDEN", "测试管理员只能停用内部测试 Key");
     ops.disableKey(keyId, b == null ? null : b.reason());
+  }
+
+  private boolean internalTestKey(String keyId) {
+    for (JsonNode k : ops.overview().path("keys")) {
+      if (k.path("keyId").asString("").equals(keyId)) return "INTERNAL_TEST".equals(k.path("kind").asString(""));
+    }
+    return false;
   }
 
   @RequiresPermission(Permission.QUOTE_LIMIT_EDIT)

@@ -1,0 +1,30 @@
+# 参考配置（不会被自动安装）：和 TopUP 共机时，TopUP 的 Nginx 要多这一段，才能把 Trading 的四个子域名转给 trading-web。
+# 这是 TopUP 那边的改动：由 TopUP 研发评审后加进 TopUP 仓库的 Nginx 模板（或它支持的额外配置目录），Trading 的工具包不改 TopUP 的任何文件。
+# 前提：Trading 的证书（名字 trading，四个子域名）已经在同一台机器的 /etc/letsencrypt 里（trading setup 用 webroot 方式申请，
+# 验证文件经 TopUP 的 80 端口 /.well-known/acme-challenge/ 提供）；trading-web 已接到 TopUP 的网络（docker-compose.shared.yml）。
+# ${TRADING_DOMAINS} 换成四个子域名（空格分隔），例如 trading.<主域名> trading-ops.<主域名> trading-www.<主域名> trading-quote.<主域名>
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${TRADING_DOMAINS};
+    ssl_certificate /etc/letsencrypt/live/trading/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/trading/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    # KYC 一次提交 3 张、每张 2MB
+    client_max_body_size 8m;
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $trading_web https://trading-web:443;
+    location / {
+        proxy_pass $trading_web;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        # 真实 IP 用 $remote_addr 覆盖（不追加）；trading-web 只信任从这个网络来的 X-Real-IP
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $http_connection;
+        proxy_read_timeout 1h;
+    }
+}

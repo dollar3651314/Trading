@@ -1,0 +1,52 @@
+# 测试环境（staging）真实验收用例（做法 07）：用测试管理员（backend 的 admin/security/TestAdmin）对测试环境跑 e2e/staging-e2e/ 里的用例。
+#   - 只手动触发：Actions 页面选 staging-e2e → Run workflow（分支选 staging）。GitHub 只在流程文件已经在默认分支（main）上时才给手动触发，
+#     进 main 之前这条走不通（返回 404）——这是 GitHub 的限制，不另开推送触发的口子
+#   - 真正的关卡是 GitHub 环境 staging-e2e：Deployment branches 只许 staging、Required reviewers 只有 Amos、不许管理员绕过，**最后**才填密钥。
+#     下面 job 上的 if 只防手误，不是安全边界。每次运行由 Amos 看这次的提交（e2e/staging-e2e/ 和本文件改了什么）再批准；智能体一律不批准（C157）
+#   - 密钥（环境 staging-e2e 的环境密钥，Amos 填）：STAGING_URL（客户端域名）、STAGING_ADMIN_URL（后台域名）、STAGING_TEST_ADMIN_TOKEN
+#     （服务器上 sudo trading gen-test-admin 生成，只显示一次）；可选 STAGING_QUOTE_URL（报价对外子域名，没有时报价用例跳过）。
+#     日志里 GitHub 会遮盖原文，但合并进 staging 的用例代码能在运行时读到令牌（lib.mjs 读完就从环境里删，挡不住故意的代码）：靠审批和定期换令牌
+#   - 仓库公开，运行日志谁都能看：用例只输出通过 / 失败、HTTP 状态和错误码，不输出接口返回的内容；不上传报告
+#   - 需要 Amos 的步骤（TopUP 第二道审、转测试币）不在这里：用例停在"交给 TopUP"之前，剩下的 Amos 在浏览器里做
+name: staging-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: 只跑这些用例文件（空格分隔，例如 e2e/staging-e2e/basics.test.mjs；空着跑全部）
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: staging-e2e
+  cancel-in-progress: false
+jobs:
+  e2e:
+    # 防手误（不是安全边界）：安全边界是环境 staging-e2e 的分支限制和 Required reviewers
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging-e2e
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+      # 用例只用 Node 自带的 fetch 和 node:test，不装依赖；用例文件名在 run.mjs 里核对（只认 e2e/staging-e2e/*.test.mjs）
+      - name: 跑测试环境验收用例
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          STAGING_ADMIN_URL: ${{ secrets.STAGING_ADMIN_URL }}
+          STAGING_QUOTE_URL: ${{ secrets.STAGING_QUOTE_URL }}
+          STAGING_TEST_ADMIN_TOKEN: ${{ secrets.STAGING_TEST_ADMIN_TOKEN }}
+          FILES: ${{ inputs.files }}
+        run: |
+          if [ -z "$STAGING_URL" ] || [ -z "$STAGING_ADMIN_URL" ] || [ -z "$STAGING_TEST_ADMIN_TOKEN" ]; then
+            echo "::error::GitHub 环境 staging-e2e 的密钥 STAGING_URL、STAGING_ADMIN_URL、STAGING_TEST_ADMIN_TOKEN 还没有配置"; exit 1
+          fi
+          # FILES 只按空白拆开当文件名传给 run.mjs（run.mjs 只认 e2e/staging-e2e/*.test.mjs），不经过 shell 展开
+          read -r -a files <<< "$FILES"
+          node e2e/staging-e2e/run.mjs "${files[@]}"

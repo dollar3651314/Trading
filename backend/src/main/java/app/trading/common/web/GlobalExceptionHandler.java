@@ -29,6 +29,7 @@ public class GlobalExceptionHandler {
       Map.entry("UNAUTHORIZED", HttpStatus.UNAUTHORIZED),
       Map.entry("USER_FROZEN", HttpStatus.FORBIDDEN),
       Map.entry("FORBIDDEN", HttpStatus.FORBIDDEN),
+      Map.entry("TEST_ADMIN_FORBIDDEN", HttpStatus.FORBIDDEN),
       Map.entry("IP_NOT_ALLOWED", HttpStatus.FORBIDDEN),
       Map.entry("ACCOUNT_DISABLED", HttpStatus.FORBIDDEN),
       Map.entry("PASSWORD_CHANGE_REQUIRED", HttpStatus.FORBIDDEN),

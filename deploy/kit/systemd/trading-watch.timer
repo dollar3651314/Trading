@@ -1,0 +1,10 @@
+# 每 5 分钟运行一次 trading watch
+[Unit]
+Description=Trading 测试环境检查（每 5 分钟）
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

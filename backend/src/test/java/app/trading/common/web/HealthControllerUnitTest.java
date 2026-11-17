@@ -63,9 +63,11 @@ class HealthControllerUnitTest {
     var test = new HealthController(jdbc, redis, "a1b2c3d", " test ", java.util.List.of()).health();
     assertThat(test.getStatusCode().value()).isEqualTo(200);
     assertThat(test.getBody()).containsEntry("version", "a1b2c3d").containsEntry("env", "test");
-    assertThat(test.getBody().keySet()).containsExactly("status", "version", "env", "db", "redis", "alert", "alerts");
+    // 测试环境多一个 testAdmin（做法 07，只报是否；没有测试管理员实现时是 false）
+    assertThat(test.getBody().keySet()).containsExactly("status", "version", "env", "testAdmin", "db", "redis", "alert", "alerts");
+    assertThat(test.getBody()).containsEntry("testAdmin", false);
     var prod = new HealthController(jdbc, redis, "a1b2c3d", "", java.util.List.of()).health();
-    assertThat(prod.getBody()).as("生产不设，返回和以前一样").doesNotContainKey("env");
+    assertThat(prod.getBody()).as("生产不设，返回和以前一样").doesNotContainKey("env").doesNotContainKey("testAdmin");
     assertThat(prod.getBody().keySet()).as("生产不设 env；告警汇总和各项总是返回（E8）").containsExactly("status", "version", "db", "redis", "alert", "alerts");
     assertThat(new HealthController(jdbc, redis, "x", null, java.util.List.of()).health().getBody()).doesNotContainKey("env");
   }

@@ -1,0 +1,11 @@
+# 每分钟检查一次 staging 有没有新版本（TD4-4 A：服务器自己拉，GitHub 不登录服务器）
+[Unit]
+Description=Trading 测试环境自动更新（每分钟）
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+# 自动更新：运行一次 trading update（看 staging 有没有新版本）。由 trading-update.timer 每分钟触发
+[Unit]
+Description=Trading 测试环境自动更新
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/trading/trading update
+TimeoutStartSec=15min

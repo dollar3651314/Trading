@@ -1,0 +1,9 @@
+# 每 5 分钟检查：应用没响应、版本被跳过、磁盘、内存、备份、证书、容器反复重启；只在状态变化时发邮件
+[Unit]
+Description=Trading 测试环境检查
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/trading/trading watch
+TimeoutStartSec=5min

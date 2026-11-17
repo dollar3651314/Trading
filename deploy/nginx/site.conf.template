@@ -1,0 +1,203 @@
+# 测试环境站点（第 4 批，部署方案 v1 02 页第 2 节）。${APP_DOMAIN}、${ADMIN_DOMAIN}、${WWW_DOMAIN}、${QUOTE_DOMAIN} 和限流阈值在容器启动时由环境变量替换
+# （nginx 镜像的 envsubst 只替换已定义的环境变量，Nginx 自己的 $host 等不受影响）。
+# 证书：一张 Let's Encrypt 证书包含四个子域名，名字固定为 trading（trading setup 申请，certbot 自动续期，续完重新加载 Nginx）。
+#
+# 每个子域名转发什么（其余一律 404）：
+#   客户端  APP_DOMAIN   前端；/api/**、/api/ws/ → trading-app。/api/admin/**、/api/e2e/**、/actuator 一律 404
+#   后台    ADMIN_DOMAIN 后台前端（/admin/）；/api/admin/**、/api/health → trading-app（只有这里的健康检查带业务告警）。其他 /api/** 404
+#   官网    WWW_DOMAIN   官网；/api/public/quotes、/api/health → trading-app。其他 /api/** 404
+#   报价    QUOTE_DOMAIN /v1/**（含 WebSocket /v1/ws）、/docs/ → quote-app。/internal/** 和其他一切 404
+# 路径里有分号的一律 400（Spring 忽略分号后面的内容，前缀判断会被绕过；后端 CrossSiteGuard、报价服务 PathGuardFilter 也拒绝）。
+
+limit_req_zone $binary_remote_addr zone=tr_api:10m rate=${FX_NGINX_API_RATE};
+limit_req_zone $binary_remote_addr zone=tr_ws:10m rate=${FX_NGINX_WS_RATE};
+limit_req_zone $binary_remote_addr zone=tr_quote:10m rate=${FX_NGINX_QUOTE_RATE};
+limit_conn_zone $binary_remote_addr zone=tr_api_conn:10m;
+limit_conn_zone $binary_remote_addr zone=tr_ws_conn:10m;
+limit_conn_zone $binary_remote_addr zone=tr_quote_conn:10m;
+limit_req_status 429;
+limit_conn_status 429;
+limit_req_log_level warn;
+limit_conn_log_level warn;
+
+# 80：只用于证书续期（webroot）和跳转到 HTTPS
+server {
+  listen 80 default_server;
+  server_name _;
+  location /.well-known/acme-challenge/ {
+    root /var/www/certbot;
+  }
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# 不认识的域名（例如直接用 IP 访问 443）：直接断开握手
+server {
+  listen 443 ssl default_server;
+  ssl_reject_handshake on;
+}
+
+# 客户端
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${APP_DOMAIN};
+  ssl_certificate /etc/letsencrypt/live/trading/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/trading/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+
+  root /usr/share/nginx/client;
+
+  if ($request_uri ~ ";") { return 400; }
+  # 后台接口只在后台域名；端到端测试接口、应用管理端点一律不转发（正则：/api/admin 后面跟 / 或结尾都拦，大小写都算）
+  location ~* "^/api/(admin|e2e)(/|$)" { return 404; }
+  location ~* "^/(api/)?actuator" { return 404; }
+
+  location /api/ws/ {
+    limit_req zone=tr_ws burst=${FX_NGINX_WS_BURST} nodelay;
+    limit_conn tr_ws_conn ${FX_NGINX_WS_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 1h;
+  }
+  location /api/ {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 120s;
+  }
+
+  # 带文件名哈希的静态资源长期缓存；客户端的资产页路由也叫 /assets/...，所以只把 assets/ 下带扩展名的文件当静态资源，其余回到 index.html
+  location ~ ^/assets/[^/]+\.[A-Za-z0-9]+$ {
+    expires 30d;
+    try_files $uri =404;
+  }
+  location ~ ^/(index\.html|sw\.js|push-sw\.js|registerSW\.js|manifest\.webmanifest)$ {
+    expires -1;
+  }
+  location / {
+    expires -1;
+    try_files $uri /index.html;
+  }
+}
+
+# 后台（页面在 /admin/，和构建时的 base 一致）
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${ADMIN_DOMAIN};
+  ssl_certificate /etc/letsencrypt/live/trading/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/trading/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+
+  root /usr/share/nginx;
+
+  if ($request_uri ~ ";") { return 400; }
+  location = / {
+    return 302 /admin/;
+  }
+  location /api/admin/ {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 120s;
+  }
+  # 健康检查：只有后台域名带业务告警（proxy.inc 默认清空 X-Fx-Health-Alerts，这里在 include 之后改成 1）
+  location = /api/health {
+    include /etc/nginx/snippets/proxy.inc;
+    set $fx_health_alerts 1;
+  }
+  location /api/ { return 404; }
+  location /admin/assets/ {
+    expires 30d;
+  }
+  location /admin/ {
+    expires -1;
+    try_files $uri $uri/ /admin/index.html;
+  }
+  location / {
+    return 404;
+  }
+}
+
+# 官网：静态页面 + 公开行情、健康检查两个接口。页面里的客户端地址占位符换成客户端域名（web/site/src/config.ts）
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${WWW_DOMAIN};
+  ssl_certificate /etc/letsencrypt/live/trading/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/trading/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+
+  root /usr/share/nginx/site;
+
+  if ($request_uri ~ ";") { return 400; }
+  location = /api/public/quotes {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
+  }
+  location = /api/health {
+    include /etc/nginx/snippets/proxy.inc;
+  }
+  location /api/ { return 404; }
+  location ~* "^/actuator" { return 404; }
+
+  location ~ ^/assets/[^/]+\.[A-Za-z0-9]+$ {
+    expires 30d;
+    try_files $uri =404;
+  }
+  location / {
+    expires -1;
+    sub_filter_once on;
+    sub_filter '__TR_CLIENT_URL__' 'https://${APP_DOMAIN}';
+    try_files $uri /index.html;
+  }
+}
+
+# 报价对外（TD4-2）：只转 /v1/**、/docs/ 到报价服务；/internal/** 和其他一切 404（内部 WebSocket、内部接口只在 Docker 内部网络 quote 上，给 trading-app 用）。
+# 对外开放总开关默认关（库里没有设置 = 关），外部 Key 一律 403；内部测试 Key 不受限。签名、限额、防重放在报价服务里
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${QUOTE_DOMAIN};
+  ssl_certificate /etc/letsencrypt/live/trading/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/trading/privkey.pem;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+
+  if ($request_uri ~ ";") { return 400; }
+  # 报价服务的 PathGuardFilter 另外拒绝 % 编码、.. 等；这里先挡 /internal（大小写、编码都算）
+  location ~* "^/+(%2f)*internal" { return 404; }
+
+  location = /v1/ws {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    limit_conn tr_quote_conn ${FX_NGINX_QUOTE_CONN};
+    include /etc/nginx/snippets/proxy-quote.inc;
+    proxy_read_timeout 1h;
+  }
+  location /v1/ {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    limit_conn tr_quote_conn ${FX_NGINX_QUOTE_CONN};
+    include /etc/nginx/snippets/proxy-quote.inc;
+    proxy_read_timeout 30s;
+  }
+  location = /docs {
+    return 301 /docs/;
+  }
+  location = /docs/ {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    include /etc/nginx/snippets/proxy-quote.inc;
+  }
+  location / {
+    return 404;
+  }
+}

@@ -1,0 +1,14 @@
+# 镜像构建上下文（docker build ... .）只需要：后端打好的 jar、三个前端的 dist、deploy/。其余一律不进上下文，
+# 尤其是任何 .env、密钥、本机数据（底线 1：镜像是公开的）。
+**
+!backend/target/trading-app-*.jar
+!quote-app/target/quote-app-*-exec.jar
+!web/client/dist/**
+!web/admin/dist/**
+!web/site/dist/**
+!deploy/**
+deploy/**/.env
+deploy/**/.env.*
+!deploy/kit/.env.example
+**/*.pem
+**/*.key

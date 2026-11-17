@@ -5,6 +5,12 @@ trading:
   # 测试环境标识（S20）：测试环境设 FX_ENV_LABEL=test，生产不设。非空时健康检查返回 env 字段，页面顶部显示"测试环境"标识条，
   # 邮件和推送标题前加"[测试] / [TEST] "
   env-label: ${FX_ENV_LABEL:}
+  # 测试管理员（做法 07，admin/security/TestAdmin）：只在测试环境。服务器上 sudo trading gen-test-admin 生成，.env 只存令牌的 SHA-256。
+  # 三条都满足才认：FX_ENV_LABEL=test、报价模式 FX_QUOTE_MARKET_SOURCE=simulated（和报价服务同一个 .env）、FX_TOPUP_BASE_URL 的健康检查是 staging。
+  # 不是测试环境却配了 TEST_ADMIN_TOKEN_SHA256：拒绝启动
+  test-admin:
+    token-sha256: ${TEST_ADMIN_TOKEN_SHA256:}
+    quote-market-source: ${FX_QUOTE_MARKET_SOURCE:}
   # 对外编号（雪花 ID，v2 第 11.4 节，common/id/Snowflake）：节点号 0–1023，单实例默认 1；以后多实例时每个实例必须不同
   id:
     node: ${FX_ID_NODE:1}
@@ -120,6 +126,7 @@ trading:
       api-key: ${FX_TOPUP_API_KEY:}
       api-secret: ${FX_TOPUP_API_SECRET:}
       timeout: 10s
+  # 每条链的 USDT 合约地址（自带钱包时代的三个变量）第 1 批后没有代码用，第 4 批从这里删掉（测试配置里的不动）
   wallet:
     # 最小充值 1 USDT（负责人 确认，充值方案 D4）
     min-deposit: 1
@@ -140,14 +147,12 @@ trading:
         BSC: 0.5
     chains:
       ERC20:
-        usdt-contract: ${FX_WALLET_ERC20_USDT_CONTRACT:}
         usdt-decimals: 6
         confirmations: 12
         block-seconds: 12
         # 主网 USDT 每个区块有上百笔转账，每次少扫一些，避免节点服务的返回条数上限
         scan-batch: 20
       BSC:
-        usdt-contract: ${FX_WALLET_BSC_USDT_CONTRACT:}
         # BSC 上的 USDT 是 18 位小数，按需求要上链实测确认（S20）
         usdt-decimals: 18
         confirmations: 15
@@ -157,7 +162,6 @@ trading:
         block-seconds: 0.45
         scan-batch: 150
       TRC20:
-        usdt-contract: ${FX_WALLET_TRC20_USDT_CONTRACT:}
         usdt-decimals: 6
         confirmations: 19
         block-seconds: 3
@@ -219,6 +223,8 @@ spring:
       host: ${FX_REDIS_HOST:localhost}
       port: ${FX_REDIS_PORT:6379}
       password: ${FX_REDIS_PASSWORD:}
+      # db 编号（第 4 批）：测试环境和 TopUP 共用一台 Redis 时用单独的编号，键也都有自己的前缀
+      database: ${FX_REDIS_DATABASE:0}
       # Redis 只用于限次计数（登录失败、发验证码、通用限流）和健康检查；卡住时 2 秒就放弃，不让请求一直等（默认 60 秒）
       timeout: 2s
       connect-timeout: 2s
