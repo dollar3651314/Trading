@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 充值记录（钱包提供方回调入账）。只有 wallet 模块使用。 -->
+<mapper namespace="app.trading.wallet.deposit.DepositMapper">
+
+  <resultMap id="row" type="app.trading.wallet.deposit.DepositMapper$DepositRow">
+    <constructor>
+      <arg column="id" javaType="_long"/>
+      <arg column="public_no" javaType="_long"/>
+      <arg column="chain" javaType="string"/>
+      <arg column="provider" javaType="string"/>
+      <arg column="provider_ref" javaType="string"/>
+      <arg column="tx_hash" javaType="string"/>
+      <arg column="log_index" javaType="_int"/>
+      <arg column="user_id" javaType="_long"/>
+      <arg column="amount" javaType="java.math.BigDecimal"/>
+      <arg column="status" javaType="string"/>
+      <arg column="confirmations" javaType="_int"/>
+      <arg column="created_at" javaType="java.time.LocalDateTime"/>
+    </constructor>
+  </resultMap>
+
+  <sql id="cols">id, public_no, chain, provider, provider_ref, tx_hash, log_index, user_id, amount, status, confirmations, created_at</sql>
+
+  <insert id="insertCredited">
+    INSERT IGNORE INTO wallet_deposit (public_no, chain, provider, provider_ref, tx_hash, to_address, user_id, amount, provider_fee, status, credited_at)
+    VALUES (#{publicNo}, #{chain}, #{provider}, #{providerRef}, #{txHash}, #{to}, #{userId}, #{amount}, #{providerFee}, 'CREDITED', UTC_TIMESTAMP(3))
+  </insert>
+
+  <select id="byProviderRef" resultMap="row">
+    SELECT <include refid="cols"/> FROM wallet_deposit WHERE provider = #{provider} AND provider_ref = #{ref}
+  </select>
+
+  <update id="markReversed">
+    UPDATE wallet_deposit SET status = 'REVERSED' WHERE id = #{id} AND status = 'CREDITED'
+  </update>
+
+  <insert id="insertSuspense">
+    INSERT INTO wallet_suspense (user_id, deposit_id, amount, note) VALUES (#{userId}, #{depositId}, #{amount}, #{note})
+  </insert>
+
+  <select id="byUser" resultMap="row">
+    SELECT <include refid="cols"/> FROM wallet_deposit WHERE user_id = #{userId} ORDER BY id DESC LIMIT #{limit}
+  </select>
+</mapper>

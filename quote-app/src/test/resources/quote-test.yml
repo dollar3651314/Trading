@@ -1,0 +1,27 @@
+# quote-app 测试：真实 MySQL（C37），库和 trading-app 的测试库分开（不存在就建）。密码只从环境变量来（CI 里是测试容器的一次性密码）。
+spring:
+  datasource:
+    url: ${FX_QUOTE_DB_URL:jdbc:mysql://localhost:3306/trading_quote_test?createDatabaseIfNotExist=true}
+    username: ${FX_QUOTE_DB_USERNAME:${FX_DB_USERNAME:root}}
+    password: ${FX_QUOTE_DB_PASSWORD:${FX_DB_PASSWORD}}
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+management:
+  server:
+    port: 0
+quote:
+  market:
+    # 测试里不启动报价源，由测试直接喂报价；要报价源的测试自己改成 simulated
+    source: none
+    # K 线不定时清理，测试里直接调用（KlineRetentionTest）
+    kline-retention:
+      enabled: false
+  stream:
+    # 测试用的假 Key，明显不是密钥
+    internal-key: ci_only_fake_internal_key
+  open:
+    # 测试用的假加密密钥，明显不是密钥
+    key-enc-key: ci_only_fake_key_enc_key
+    # 用量不定时写库，测试里查询前会写
+    usage-flush: 1h

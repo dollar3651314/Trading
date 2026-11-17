@@ -1,0 +1,10 @@
+# 扫镜像用的 gitleaks 配置（CI 的 image job）：默认规则全部照用，只加一条逐字的误报例外。
+# 例外：后台用的 antd 表格组件压缩后是 n=e.columnsKey,r=e.onColumnResize（不是密钥，被 generic-api-key 误报成 r=e.onColumnResize，11/17 实测）。
+# 以后再有误报，照样逐字加在这里并写明出处；不放宽规则、不整目录跳过。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "antd 表格组件压缩后的变量名（误报）"
+regexTarget = "secret"
+regexes = ['''^r=e\.onColumnResize$''']

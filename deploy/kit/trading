@@ -1,0 +1,1085 @@
+#!/usr/bin/env bash
+# Trading 测试环境的服务器命令（第 4 批，部署方案 v1 03 页第 6 节）。装在 /opt/trading/trading，链接成 /usr/local/bin/trading，用 root 运行：
+#   sudo trading install <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]
+#                              一次性安装（bootstrap.sh 调用，可重复运行，不问问题、不涉及密钥）：停 TopUP → 装软件、生成内部密码和 Key、申请证书、启动、打开定时器、打印摘要
+#   sudo trading setup         中文向导（隐藏输入，要终端）：① 邮件（同机有 TopUP 就沿用它的 MAIL_FROM、MAIL_TO，问是否沿用它的 Resend Key；只读不改）并发测试邮件 ② 后台第一个超管的初始密码 ③ 验收令牌（测试管理员）
+#                              ④ TopUP Key / Secret（可跳过，联调时填）⑤ 备份（恢复演练不在这里做，在 trading off 时做）；最后打印摘要
+#   sudo trading on / off      和 TopUP 轮流用这台 2 核 2G（部署方案 07 页，TD4-20 = B）：
+#                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,000 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
+#                              off = 拿自动更新的锁 → 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 恢复演练（Trading 全停了、TopUP 还没启动，内存够）→ 调 TopUP 自己的 topup start
+#                                    一般 2–5 分钟，最坏约 25 分钟；在"远程连接"的终端里运行（用"云助手"时超时设 ≥ 30 分钟）；中途断了会自己收尾：没停完就恢复 Trading，停完了就启动 TopUP
+#   sudo trading keys [topup|mail]   中文向导：逐项问、Key / Secret / 邮件密码隐藏输入，写进 .env 后自动生效（要在"远程连接"的终端里运行）
+#   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
+#   sudo trading set-key <变量名>    隐藏输入改一个密钥（只认清单里的名字，要终端）
+#   sudo trading status              当前版本、容器、健康检查、定时器、磁盘、内存、备份、证书（不显示任何值）
+#   sudo trading update              看 staging 有没有新版本，有就备份 → 换 → 健康检查，不通过自动换回（定时器每分钟运行）
+#   sudo trading retry               清掉"跳过的版本"，下一分钟重试
+#   sudo trading rollback [提交号]   换回上一个（或指定）版本，并暂停自动更新到当前 staging 版本
+#   sudo trading backup [名字]       加密备份（两个库、Redis、证件照片、.env），本机留 7 天；mysqldump 失败或导出不完整就算失败（不留文件、返回非 0）
+#   sudo trading restore-drill       恢复演练：解密最新备份 → 导入不联网的临时 MySQL → 核对表和行数 → 删临时文件（trading off 自动做；Trading 在跑时手动运行会先停它的应用）
+#   sudo trading test-mail           给告警邮箱发一封测试邮件
+#   sudo trading memguard            内存守护（定时器每 30 秒）：可用内存低于 80 MB（TR_MEMGUARD_MB）就停 Trading 的全部容器、停自动更新、发邮件；不碰 TopUP
+#   sudo trading watch               每 5 分钟的检查，状态变化时发邮件（定时器运行；trading-deploy 定时器停着时不检查）
+# 给 TopUP 用的约定（TopUP topup.sh 的 stop_other）：装在 /opt/trading/，更新定时器叫 trading-deploy.timer，/opt/trading/backup.sh before-topup 能备份
+#   sudo trading gen-test-admin      设测试管理员令牌：Amos 用密码管理器生成 40 位，这里隐藏输入；.env 只存 SHA-256，屏幕上不显示（再运行一次就换）
+#   sudo trading test-admin-off      关掉测试管理员（删哈希，旧令牌立刻作废）
+# 规矩（底线 1）：任何密钥、密码、Token 都不打印到屏幕、不写日志、不放命令行参数。
+# 阿里云"云助手 → 执行命令"没有终端：要输入或显示密钥的命令（setup、keys、set-key、gen-test-admin）在那里会拒绝，改用"远程连接"。
+set -euo pipefail
+umask 077
+
+TR_DIR=${TR_DIR:-/opt/trading}
+REG=${TR_REGISTRY:-ghcr.io/dollar3651314}
+IMAGES=(trading-app trading-quote trading-web)
+ENVF="$TR_DIR/.env"
+STATE="$TR_DIR/state"
+LOGF="$TR_DIR/logs/trading.log"
+# 启动前要求的可用内存：容器上限合计 964 + 每个容器的运行开销约 36 = 1,000（量可用内存时 Docker 守护进程已在跑；Amos 批准的 C75 例外，见 docker-compose.yml 开头）
+MIN_MEM_MB=${TR_MIN_MEM_MB:-1000}
+# 内存守护：可用内存低于这个数（MB）就只停 Trading（不碰 TopUP）
+MEMGUARD_MB=${TR_MEMGUARD_MB:-80}
+# 恢复演练用的临时 MySQL 上限（MB）；和正式库同样设置（缓冲池 32 MB、内存 320、多 128 MB 交换分区），实测空闲约 172 MB，导入时更多
+DRILL_MEM_MB=${TR_DRILL_MEM_MB:-320}
+# 备份时 mysqldump 最多等几秒（测试库导出正常几秒钟；卡住就算失败，不无限等）。要明显小于 trading-deploy.service 的 15 分钟，免得 systemd 先杀
+DUMP_TIMEOUT=${TR_DUMP_TIMEOUT:-300}
+# 恢复演练：等临时库就绪、导入各最多几秒（trading off 不能被演练卡住，TopUP 要能起来）
+DRILL_READY_TIMEOUT=${TR_DRILL_READY_TIMEOUT:-180}
+DRILL_IMPORT_TIMEOUT=${TR_DRILL_IMPORT_TIMEOUT:-300}
+# trading off 等进行中的自动更新最多几秒（等不到就不切换、什么都不动）
+OFF_LOCK_WAIT=${TR_OFF_LOCK_WAIT:-300}
+TOPUP_BIN=${TR_TOPUP_BIN:-/usr/local/bin/topup}
+# 同机 TopUP 的应用配置（邮件设置从这里读，只读不改；Amos 11/17「邮箱用和TopUP一样的」）
+TOPUP_ENVF=${TR_TOPUP_ENV:-/opt/topup/.env}
+TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer trading-memguard.timer)
+
+# ---------- 公共 ----------
+# 退出时一定做的清理（正常结束、出错、Ctrl-C、关掉远程连接窗口、kill 都会做；kill -9 做不到，下次运行时 sweep_stale 清超过 60 分钟的）：
+#   杀掉还在等的后台命令（导出、导入、等锁）和容器里的 mysqldump；删登记的临时文件（明文 SQL）和临时容器；
+#   演练中途被打断时把停掉的 Trading 应用拉起来；trading off 停完 Trading 前被打断时按原样恢复 Trading、停完后被打断时照样启动 TopUP
+CLEAN_PATHS=(); CLEAN_CONTAINERS=(); OFF_START_TOPUP=""; OFF_RESTORE_TRADING=""; INSTALL_HINT=""; DRILL_RESTART_PENDING=""; DRILL_MEMGUARD_WAS_ON=""
+BG_PID=""; DUMP_RUNNING=""; OFF_TOPUP_FIRST_FAILED=""
+on_exit() {
+  local rc=$? c p
+  # 清理时不能因为任何一步出错就停下（set +e）；终端可能已经断了（远程连接窗口关掉），提示写不出去也照样往下做（say 不报错、忽略 SIGPIPE），
+  # 每一步都写进日志
+  set +e
+  # 收尾时再来的 Ctrl-C、窗口断开、kill 一律忽略，免得收尾做到一半被打断（收尾里起的命令也继承这个忽略）
+  trap '' HUP TERM INT PIPE
+  if [ -n "$BG_PID" ]; then kill -TERM "$BG_PID" 2> /dev/null; wait "$BG_PID" 2> /dev/null; BG_PID=""; fi
+  if [ -n "$DUMP_RUNNING" ]; then
+    DUMP_RUNNING=""
+    log "（被打断：正在清理 mysql 容器里的 mysqldump，最多 30 秒）"
+    log "（被打断：$(kill_container_dumps)）"
+  fi
+  for c in "${CLEAN_CONTAINERS[@]}"; do docker rm -f "$c" > /dev/null 2>&1; done
+  for p in "${CLEAN_PATHS[@]}"; do rm -rf "$p"; done
+  if [ -n "$DRILL_RESTART_PENDING" ]; then log "（恢复演练被打断：重新启动 Trading 的应用）"; drill_restart_apps 1; fi
+  if [ -n "$OFF_RESTORE_TRADING" ]; then OFF_RESTORE_TRADING=""; log "（trading off 没做完：Trading 按原样恢复、定时器打开，TopUP 不启动）"; off_restore_trading; fi
+  # TopUP：正在启动时被打断的，bash 会等那条 topup start 做完才到这里；做成了（有标记文件）就不再启动，没做成再启动一次
+  local topup_failed=""
+  if [ -n "$OFF_START_TOPUP" ]; then
+    if [ -f "$STATE/topup-started.$$" ]; then
+      log "（trading off 被打断：TopUP 已经启动好了）"
+    else
+      if [ -n "$OFF_TOPUP_FIRST_FAILED" ]; then log "（第一次 topup start 没成功，再试一次）"; else log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; fi
+      if ! restart_topup; then
+        topup_failed=1
+        log "✗ topup start 两次都没成功：Trading 已全停、TopUP 没起来，测试服务器现在没有服务。看 sudo topup status，截图给主会话"
+      fi
+    fi
+    OFF_START_TOPUP=""
+  fi
+  rm -f "$STATE/topup-started.$$"
+  if [ -n "$INSTALL_HINT" ] && [ "$rc" -ne 0 ]; then say "（安装没做完。如果 TopUP 停着、要先恢复它，运行 sudo trading off；改好后再运行同一条安装命令）"; fi
+  # TopUP 两次都没起来：本来要以 0 结束的也改成 1（在退出收尾里 exit 只决定退出码，不会再进收尾）
+  if [ -n "$topup_failed" ] && [ "$rc" -eq 0 ]; then exit 1; fi
+  return 0
+}
+trap on_exit EXIT
+# 管道断了（例如 trading off | tee 的 tee 被关掉）也走同一套清理；子进程不继承这个 trap，管道里的命令照常
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP; trap 'exit 141' PIPE
+# 后台跑一个要等很久的命令（导出、导入、等锁）再 wait：这样 Ctrl-C、关窗口、kill 来了 trap 立刻执行（前台命令要等它结束才执行；
+# GNU timeout 还会自成进程组，终端的 Ctrl-C 到不了它）。on_exit 会杀掉它。标准输入显式传下去（后台命令默认读 /dev/null）
+run_bg() {
+  "$@" <&0 &
+  BG_PID=$!
+  local rc=0
+  wait "$BG_PID" || rc=$?
+  BG_PID=""
+  return "$rc"
+}
+# 等待时长的说法：不到 1 分钟写秒，否则写分钟
+dur() { if [ "$1" -lt 60 ]; then printf '%s 秒' "$1"; else printf '%s 分钟' "$(($1 / 60))"; fi; }
+# 输出写不出去（终端断了、/dev/full）不算错，不影响后面的步骤
+say() { printf '%s\n' "$*" 2> /dev/null || true; }
+log() { mkdir -p "$TR_DIR/logs"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF"; say "$*"; }
+ok() { say "  ✓ $*"; }
+bad() { say "  ✗ $*"; }
+die() { say "✗ $*" >&2; exit 1; }
+need_root() { [ "$(id -u)" = 0 ] || die "请用 root 运行（sudo trading …）"; }
+need_tty() { [ -t 0 ] && [ -t 1 ] || die "这个命令要输入或显示密钥，必须在终端里运行：阿里云控制台 → 这台服务器 → 远程连接（不是\"云助手 → 执行命令\"，那里没有终端，输出还会被保存）"; }
+
+# .env 读写。值从环境变量 TR_V 传给 awk（不出现在命令行参数里，ps 看不到）
+envget() { [ -f "$ENVF" ] && awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); v=$0} END{printf "%s", v}' "$ENVF" || true; }
+envset() {
+  local k=$1 tmp
+  case "$2" in *$'\n'*) die "$k 的值里不能有换行" ;; esac
+  tmp=$(mktemp "$TR_DIR/.envnew-XXXXXX")
+  TR_V="$2" awk -F= -v k="$k" 'BEGIN{v=ENVIRON["TR_V"]; done=0} $1==k{if(!done){print k "=" v; done=1}; next} {print} END{if(!done) print k "=" v}' "$ENVF" > "$tmp"
+  chmod 600 "$tmp"; mv "$tmp" "$ENVF"
+}
+envdel() { local tmp; tmp=$(mktemp "$TR_DIR/.envnew-XXXXXX"); awk -F= -v k="$1" '$1!=k' "$ENVF" > "$tmp"; chmod 600 "$tmp"; mv "$tmp" "$ENVF"; }
+set_if_empty() { if [ -z "$(envget "$1")" ]; then envset "$1" "$2"; ok "$1：已生成"; else ok "$1：已有，不改"; fi; }
+rand_hex() { openssl rand -hex "$1" | tr -d '\n'; }
+
+COMPOSE=(docker compose --project-name trading --project-directory "$TR_DIR" -f "$TR_DIR/docker-compose.yml" --env-file "$ENVF" --env-file "$STATE/image.env")
+compose() { "${COMPOSE[@]}" "$@"; }
+# 开发机演练（TR_OFFLINE_TEST）没有 systemd
+sysctl_() { [ -n "${TR_OFFLINE_TEST:-}" ] && return 0; systemctl "$@"; }
+topup_running() { [ -n "$(docker ps -q --filter label=com.docker.compose.project=topup 2>/dev/null || true)" ]; }
+port_busy() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q . ; }
+current_tag() { sed -n 's/^IMAGE_TAG=//p' "$STATE/image.env" 2>/dev/null || true; }
+revision() { docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$1" 2>/dev/null || true; }
+pull() { [ -n "${TR_OFFLINE_TEST:-}" ] && return 0; docker pull -q "$1" > /dev/null; }
+health() { curl -s --max-time 3 http://127.0.0.1:8080/api/health || true; }
+health_field() { sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" <<< "$2" | head -1; }
+quote_healthy() { [ "$(docker inspect --format '{{.State.Health.Status}}' trading-quote-app-1 2>/dev/null)" = healthy ]; }
+
+# 拒绝误开端到端测试接口（E2eGuard 本身也会拒，这里多一道）
+guard_env() {
+  if grep -Eq '^(FX_E2E_ENABLED|SPRING_PROFILES_ACTIVE|TRADING_E2E_ENABLED)=' "$ENVF" 2>/dev/null; then
+    die ".env 里有 FX_E2E_ENABLED / SPRING_PROFILES_ACTIVE：端到端测试接口只给 CI，测试环境不能开。删掉这一行再运行"
+  fi
+  check_mysql_swap
+}
+
+# compose 认的内存写法（320m、320mb、"320M"、1g、1GB、纯数字 = 字节）换成字节；认不出来返回 1
+mem_bytes() {
+  local v
+  v=$(printf '%s' "$1" | tr -d "\"' " | tr 'A-Z' 'a-z')
+  [[ "$v" =~ ^([0-9]+)(b|k|kb|m|mb|g|gb)?$ ]] || return 1
+  case "${BASH_REMATCH[2]}" in
+    "" | b) echo "${BASH_REMATCH[1]}" ;;
+    k | kb) echo $((BASH_REMATCH[1] * 1024)) ;;
+    m | mb) echo $((BASH_REMATCH[1] * 1048576)) ;;
+    g | gb) echo $((BASH_REMATCH[1] * 1073741824)) ;;
+  esac
+}
+# 同一句提醒只写一次日志（每分钟的自动更新不会刷屏）
+log_once() {
+  [ "$(cat "$STATE/warned-$1" 2> /dev/null)" = "$2" ] && return 0
+  printf '%s' "$2" > "$STATE/warned-$1" 2> /dev/null || true
+  log "$2" > /dev/null
+}
+# .env 里改了 MySQL 内存时：TR_MEMSWAP_MYSQL（内存 + 交换分区）不能小于 TR_MEM_MYSQL，否则 MySQL 容器起不来，这里先用中文说清楚
+check_mysql_swap() {
+  local m s mb sb msg
+  m=$(envget TR_MEM_MYSQL); m=${m:-320m}; s=$(envget TR_MEMSWAP_MYSQL); s=${s:-448m}
+  if ! mb=$(mem_bytes "$m") || ! sb=$(mem_bytes "$s"); then
+    # 认不出来的写法不拦（交给 docker compose 自己判断），只提醒一次
+    log_once memswap ".env 里 TR_MEM_MYSQL=$m、TR_MEMSWAP_MYSQL=$s 的写法认不出来（应该像 320m、448m），没检查两者大小"
+    return 0
+  fi
+  if [ "$sb" -lt "$mb" ]; then
+    msg=".env 里 TR_MEMSWAP_MYSQL（$s，内存 + 交换分区）小于 TR_MEM_MYSQL（$m），MySQL 起不来：把 TR_MEMSWAP_MYSQL 改成 TR_MEM_MYSQL + 128m（不想用交换分区就写成和 TR_MEM_MYSQL 一样）"
+    log_once memswap "$msg"; die "$msg"
+  fi
+  rm -f "$STATE/warned-memswap"
+}
+
+# 等新版本：trading-app 健康检查 status=UP、version=提交号，quote-app 健康（最多 3 分钟）
+wait_healthy() {
+  local want=$1 body _
+  for _ in $(seq 1 90); do
+    body=$(health)
+    if [ "$(health_field version "$body")" = "$want" ] && [ "$(health_field status "$body")" = UP ] && quote_healthy; then return 0; fi
+    sleep 2
+  done
+  return 1
+}
+
+switch_to() {
+  printf 'IMAGE_TAG=%s\n' "$1" > "$STATE/image.env.new" && mv "$STATE/image.env.new" "$STATE/image.env"
+  guard_env
+  compose up -d --remove-orphans
+}
+
+# 从 web 镜像取出工具包（本目录的脚本、compose、systemd、mysql-init），写临时文件再改名替换；.env、data/、state/、backup/ 不动
+sync_kit() {
+  local tag=$1 tmp f rel
+  tmp=$(mktemp -d)
+  docker run --rm --entrypoint sh -v "$tmp:/out" "$REG/trading-web:$tag" -c 'cp -r /trading-kit/. /out/' || { rm -rf "$tmp"; return 1; }
+  [ -s "$tmp/trading" ] && [ -s "$tmp/docker-compose.yml" ] || { rm -rf "$tmp"; return 1; }
+  while IFS= read -r -d '' f; do
+    rel=${f#"$tmp"/}
+    mkdir -p "$(dirname "$TR_DIR/$rel")"
+    cp "$f" "$TR_DIR/$rel.new" && mv "$TR_DIR/$rel.new" "$TR_DIR/$rel"
+  done < <(find "$tmp" -type f -print0)
+  chmod 755 "$TR_DIR/trading" "$TR_DIR"/mysql-init/*.sh
+  rm -rf "$tmp"
+  # 定时器文件变了才重装（开发机演练 TR_OFFLINE_TEST 没有 systemd，跳过）
+  if [ -z "${TR_OFFLINE_TEST:-}" ]; then
+    for f in "$TR_DIR"/systemd/trading-*; do
+      cmp -s "$f" "/etc/systemd/system/$(basename "$f")" || { install_units || log "定时器文件没装上（不影响这次更新）"; break; }
+    done
+  fi
+}
+
+install_units() {
+  cp "$TR_DIR"/systemd/trading-*.service "$TR_DIR"/systemd/trading-*.timer /etc/systemd/system/
+  systemctl daemon-reload
+}
+
+# 本机只留最近 5 个版本的镜像；正在用的和上一个不删
+prune_images() {
+  local cur prev keep repo tag
+  cur=$(current_tag); prev=$(cat "$STATE/previous" 2>/dev/null || true)
+  for repo in "${IMAGES[@]}"; do
+    keep=0
+    while read -r tag; do
+      [ "$tag" = staging ] && continue
+      keep=$((keep + 1))
+      if [ "$keep" -gt 5 ] && [ "$tag" != "$cur" ] && [ "$tag" != "$prev" ]; then docker image rm "$REG/$repo:$tag" > /dev/null 2>&1 || true; fi
+    done < <(docker image ls "$REG/$repo" --format '{{.Tag}}')
+  done
+  docker image prune -f > /dev/null 2>&1 || true
+}
+
+# 发邮件（告警、测试邮件）：用 .env 里的 SMTP，密码写进临时 netrc 文件（600），不放命令行。没配邮件时只记日志
+send_mail() {
+  local subject="[测试] Trading $1" body=$2 host port sec user from to url netrc msg
+  host=$(envget FX_MAIL_HOST); port=$(envget FX_MAIL_PORT); sec=$(envget FX_MAIL_SECURITY); user=$(envget FX_MAIL_USERNAME)
+  from=$(envget FX_MAIL_FROM); to=$(envget FX_ALERT_EMAILS)
+  if [ -z "$host" ] || [ -z "$from" ] || [ -z "$to" ]; then log "邮件没配置，只记日志：$subject"; return 1; fi
+  port=${port:-587}
+  if [ "$sec" = SSL ]; then url="smtps://$host:$port"; else url="smtp://$host:$port"; fi
+  netrc=$(mktemp); msg=$(mktemp)
+  printf 'machine %s login %s password %s\n' "$host" "$user" "$(envget FX_MAIL_PASSWORD)" > "$netrc"
+  {
+    printf 'From: %s\r\nTo: %s\r\nSubject: =?UTF-8?B?%s?=\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n' "$from" "$to" "$(printf '%s' "$subject" | base64 -w0)"
+    printf '%s\r\n' "$body"
+  } > "$msg"
+  local rcpt=() r
+  IFS=',' read -ra r <<< "$to"
+  for x in "${r[@]}"; do x=$(tr -d ' ' <<< "$x"); [ -n "$x" ] && rcpt+=(--mail-rcpt "$x"); done
+  if curl -s --max-time 30 --ssl-reqd --url "$url" --netrc-file "$netrc" --mail-from "$from" "${rcpt[@]}" -T "$msg"; then
+    rm -f "$netrc" "$msg"; log "已发邮件：$subject"; return 0
+  fi
+  rm -f "$netrc" "$msg"; log "邮件发送失败：$subject"; return 1
+}
+
+# 用 .env 里的 Key / Secret 签名查一次 TopUP 余额（和 trading-app 同一套签名：HMAC-SHA256(Secret, 时间戳\n方法\n路径\nsha256(请求体))）。
+# Key、Secret 经环境变量交给 python3，不进命令行参数；只报通不通和 HTTP 状态，不显示余额和任何值
+topup_check() {
+  local base key secret code
+  base=$(envget FX_TOPUP_BASE_URL); key=$(envget FX_TOPUP_API_KEY); secret=$(envget FX_TOPUP_API_SECRET)
+  if [ -z "$base" ] || [ -z "$key" ] || [ -z "$secret" ]; then bad "TopUP 还没接入（地址、Key、Secret 缺一个）"; return 1; fi
+  code=$(TR_BASE="$base" TR_KEY="$key" TR_SECRET="$secret" python3 - <<'PY' 2>/dev/null || echo 000
+import hashlib, hmac, os, time, urllib.request, urllib.error
+base = os.environ["TR_BASE"].rstrip("/"); path = "/api/v1/balance/"; ts = str(int(time.time()))
+msg = "\n".join([ts, "GET", path, hashlib.sha256(b"").hexdigest()])
+sig = hmac.new(os.environ["TR_SECRET"].encode(), msg.encode(), hashlib.sha256).hexdigest()
+req = urllib.request.Request(base + path, headers={"X-TopUP-Key": os.environ["TR_KEY"], "X-TopUP-Timestamp": ts, "X-TopUP-Signature": sig})
+try:
+    print(urllib.request.urlopen(req, timeout=15).status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception:
+    print("000")
+PY
+)
+  unset key secret
+  case "$code" in
+    200) ok "TopUP 已接入（签名查余额成功）" ;;
+    401|403) bad "TopUP 拒绝了（HTTP $code）：Key 或 Secret 不对，或者 Secret 在 TopUP 重新生成过；用 sudo trading keys topup 重填"; return 1 ;;
+    000) bad "连不上 TopUP（地址不对，或 TopUP 测试服务器没开）"; return 1 ;;
+    *) bad "TopUP 返回 HTTP $code（截图给主会话）"; return 1 ;;
+  esac
+}
+
+# 隐藏输入读一个值到变量 REPLY_SECRET（不回显、不进历史）
+read_secret() {
+  local prompt=$1 v
+  IFS= read -r -s -p "$prompt" v || true; printf '\n'
+  REPLY_SECRET=$v
+}
+
+# ---------- 命令 ----------
+cmd_install() {
+  need_root
+  [ $# -ge 5 ] || die "用法：sudo trading install <客户端域名> <后台域名> <官网域名> <报价域名> <告警邮箱> [TopUP 测试环境地址]（填密钥用 sudo trading setup）"
+  local app=$1 admin=$2 www=$3 quote=$4 email=$5 topup=${6:-} d
+  for d in "$app" "$admin" "$www" "$quote"; do [[ "$d" =~ ^[a-z0-9.-]+\.[a-z]{2,}$ ]] || die "域名格式不对：$d"; done
+  [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || die "邮箱格式不对"
+  [ -z "$topup" ] || [[ "$topup" =~ ^https://[a-z0-9.-]+$ ]] || die "TopUP 地址要是 https://域名（不带路径）"
+  mkdir -p "$TR_DIR/logs"
+  # 中途失败时提醒：TopUP 已被停下，要先恢复它就运行 trading off
+  INSTALL_HINT=1
+  say "== Trading 测试环境第一次部署（可以重复运行；每步 ✓ / ✗，最后打印摘要，不显示任何密钥）"
+
+  say "== 1/9 停 TopUP、检查系统和内存（这台 2 核 2G 和 TopUP 轮流用）"
+  . /etc/os-release
+  [ "${VERSION_ID:-}" = 24.04 ] && ok "Ubuntu 24.04" || bad "本脚本按 Ubuntu 24.04 写，这台是 ${PRETTY_NAME:-未知}（继续，出错截图）"
+  stop_topup_and_check_mem || exit 1
+
+  say "== 2/9 安装 Docker、certbot、age（备份加密）、jq；Docker 日志按大小轮转；系统自动安全更新"
+  export DEBIAN_FRONTEND=noninteractive
+  if ! command -v docker > /dev/null || ! docker compose version > /dev/null 2>&1 || ! command -v certbot > /dev/null || ! command -v age > /dev/null; then
+    apt-get update -q > /dev/null
+    apt-get install -y -q docker.io docker-compose-v2 certbot age jq curl unattended-upgrades > /dev/null
+  fi
+  mkdir -p /etc/docker
+  # 已有 daemon.json（TopUP 装过）就不动它、不重启 Docker
+  if [ ! -f /etc/docker/daemon.json ]; then
+    printf '{ "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "3" } }\n' > /etc/docker/daemon.json
+    systemctl restart docker
+  fi
+  systemctl enable --now docker > /dev/null 2>&1 || true
+  ok "$(docker --version)"; ok "$(docker compose version)"; ok "$(certbot --version 2>&1)"; ok "age $(age --version)"
+
+  say "== 3/9 目录和 .env（只有 root 能读）"
+  mkdir -p "$TR_DIR"/{data/mysql,data/redis,data/storage,backup,state,logs} /var/www/certbot
+  chown -R 10001 "$TR_DIR/data/storage"
+  chmod 700 "$TR_DIR/backup" "$TR_DIR/state"
+  [ -f "$ENVF" ] || cp "$TR_DIR/.env.example" "$ENVF"
+  chmod 600 "$ENVF"
+  guard_env
+  ln -sf "$TR_DIR/trading" /usr/local/bin/trading
+  ok "$TR_DIR"
+
+  say "== 4/9 域名、邮箱（不是密钥）"
+  envset APP_DOMAIN "$app"; envset ADMIN_DOMAIN "$admin"; envset WWW_DOMAIN "$www"; envset QUOTE_DOMAIN "$quote"; envset CERT_EMAIL "$email"
+  [ -n "$(envget FX_ALERT_EMAILS)" ] || envset FX_ALERT_EMAILS "$email"
+  [ -n "$(envget FX_RISK_ALERT_EMAILS)" ] || envset FX_RISK_ALERT_EMAILS "$email"
+  [ -z "$topup" ] || envset FX_TOPUP_BASE_URL "$topup"
+  ok "客户端 $app、后台 $admin、官网 $www、报价 $quote"
+
+  say "== 5/9 生成内部密码和 Key（写进 .env，不显示）"
+  set_if_empty MYSQL_ROOT_PASSWORD "$(rand_hex 24)"
+  set_if_empty FX_DB_PASSWORD "$(rand_hex 24)"
+  set_if_empty FX_QUOTE_DB_PASSWORD "$(rand_hex 24)"
+  set_if_empty FX_REDIS_PASSWORD "$(rand_hex 24)"
+  set_if_empty FX_QUOTE_INTERNAL_KEY "$(rand_hex 32)"
+  set_if_empty FX_QUOTE_KEY_ENC_KEY "$(rand_hex 32)"
+  if [ -z "$(envget FX_PUSH_VAPID_PRIVATE_KEY)" ]; then
+    local key pub priv
+    key=$(mktemp)
+    openssl ecparam -name prime256v1 -genkey -noout -out "$key" 2> /dev/null
+    priv=$(openssl ec -in "$key" -outform DER 2> /dev/null | tail -c +8 | head -c 32 | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    pub=$(openssl ec -in "$key" -pubout -outform DER 2> /dev/null | tail -c 65 | base64 -w0 | tr '+/' '-_' | tr -d '=')
+    rm -f "$key"
+    envset FX_PUSH_VAPID_PUBLIC_KEY "$pub"; envset FX_PUSH_VAPID_PRIVATE_KEY "$priv"
+    unset priv pub
+    ok "FX_PUSH_VAPID_PUBLIC_KEY、FX_PUSH_VAPID_PRIVATE_KEY：已生成（测试专用一对）"
+  else
+    ok "FX_PUSH_VAPID_*：已有，不改"
+  fi
+  envset FX_PUSH_VAPID_SUBJECT "mailto:$email"
+  if [ ! -f "$STATE/backup.key" ]; then
+    age-keygen -o "$STATE/backup.key" 2> /dev/null; chmod 600 "$STATE/backup.key"
+    ok "备份加密密钥：已生成（本机，谁都不用看）"
+  else
+    ok "备份加密密钥：已有"
+  fi
+  age-keygen -y "$STATE/backup.key" > "$STATE/backup.pub"
+
+  say "== 6/9 HTTPS 证书（Let's Encrypt，一张证书四个子域名）"
+  if [ ! -f /etc/letsencrypt/live/trading/fullchain.pem ]; then
+    # 第一次：TopUP 已停、80 空着，用 certbot 自己的临时服务验证；之后改成 webroot（/var/www/certbot），哪边的 Nginx 在跑就由哪边应答（07 页第 5 节）
+    compose stop trading-web > /dev/null 2>&1 || true
+    if certbot certonly --standalone -n --agree-tos -m "$email" --cert-name trading -d "$app" -d "$admin" -d "$www" -d "$quote" > /dev/null 2>&1; then
+      ok "证书已申请"
+    else
+      die "证书申请失败：检查四条 DNS 是不是都指向这台服务器、Cloudflare 是\"仅 DNS\"（灰云）、防火墙开了 80。日志：/var/log/letsencrypt/letsencrypt.log"
+    fi
+  else
+    ok "已有证书"
+  fi
+
+  say "== 7/9 启动 staging 最新版本（第一次要下载镜像，约 3–5 分钟）"
+  if ! pull "$REG/trading-app:staging"; then
+    die "拉不到镜像 $REG/trading-app:staging：GitHub 上三个包（trading-app、trading-quote、trading-web）要先设为 Public（操作步骤第 6 步），或者 CI 还没推出第一个镜像"
+  fi
+  TR_FIRST=1 cmd_update || die "启动失败，看 $LOGF；改好后再运行同一条命令"
+
+  say "== 8/9 证书改为经 Nginx 自动续期（续完自动重新加载 Nginx）；打开定时器"
+  certbot reconfigure -n --cert-name trading --webroot -w /var/www/certbot --deploy-hook "docker exec trading-trading-web-1 nginx -s reload || true" > /dev/null 2>&1 \
+    && ok "证书自动续期" || bad "证书续期设置失败（不影响现在使用，截图给主会话）"
+  install_units
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器：每分钟更新（trading-deploy）、每天北京时间 03:30 备份、每 5 分钟检查"
+  if [ -z "$(ls -A "$TR_DIR/backup" 2>/dev/null)" ]; then
+    if cmd_backup first > /dev/null; then ok "第一份备份"; else bad "第一份备份没做成（原因见上面一行；不影响使用，之后每天北京时间 03:30 自动备份，也可以 sudo trading backup）"; fi
+  fi
+
+  say "== 9/9 摘要（没有任何密钥）"
+  cmd_status
+  say "现在 Trading 在跑、TopUP 停着。下一步：sudo trading setup（中文向导，填邮件、后台初始密码、验收令牌）；验收完运行 sudo trading off 切回 TopUP。"
+}
+
+# 读同机 TopUP 配置里的一个值（只读；没有这个文件或这一项时为空）
+topup_val() { [ -r "$TOPUP_ENVF" ] && awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); v=$0} END{printf "%s", v}' "$TOPUP_ENVF" || true; }
+
+# 邮件：同机有 TopUP 时沿用它的发件地址、收件人（MAIL_FROM、MAIL_TO），问要不要沿用它的 Resend Key（本地复制，不显示）；
+# 读不到（临时第二台）时逐项问。告警收件人 = MAIL_TO，FX_PUSH_VAPID_SUBJECT = mailto:MAIL_TO 的第一个
+setup_mail() {
+  local from to yn key shost
+  from=$(topup_val MAIL_FROM); to=$(topup_val MAIL_TO)
+  if [ -n "$from" ] && [ -n "$to" ]; then
+    envset FX_MAIL_FROM "$from"; envset FX_ALERT_EMAILS "$to"; envset FX_RISK_ALERT_EMAILS "$to"
+    ok "发件地址、收件人：沿用 TopUP 的（$from → $to）"
+    key=$(topup_val RESEND_API_KEY); shost=$(topup_val SMTP_HOST)
+    if [ -n "$key" ] || [ -n "$shost" ]; then
+      read -r -p "是否沿用 TopUP 的 Resend Key（是 = 直接回车或输入 是，否 = 输入 否）：" yn || true
+    else
+      yn=否; ok "TopUP 的配置里没有 Resend Key，下面隐藏输入"
+    fi
+    if [ "$yn" != 否 ] && [ "$yn" != n ] && [ "$yn" != N ] && [ -n "$key" ]; then
+      # Resend 的 SMTP：用户名 resend、密码就是 API Key（TopUP 用的是 Resend 的接口，同一个 Key）
+      envset FX_MAIL_HOST smtp.resend.com; envset FX_MAIL_PORT 587; envset FX_MAIL_SECURITY STARTTLS; envset FX_MAIL_USERNAME resend
+      envset FX_MAIL_PASSWORD "$key"; unset key
+      ok "Resend Key：已从 TopUP 的配置本地复制（不显示值）"
+    elif [ "$yn" != 否 ] && [ "$yn" != n ] && [ "$yn" != N ] && [ -n "$shost" ]; then
+      envset FX_MAIL_HOST "$shost"; envset FX_MAIL_PORT "$(topup_val SMTP_PORT)"; envset FX_MAIL_USERNAME "$(topup_val SMTP_USER)"
+      if [ "$(topup_val SMTP_SECURE)" = true ]; then envset FX_MAIL_SECURITY SSL; else envset FX_MAIL_SECURITY STARTTLS; fi
+      envset FX_MAIL_PASSWORD "$(topup_val SMTP_PASS)"
+      ok "SMTP 设置：已从 TopUP 的配置本地复制（不显示值）"
+    else
+      envset FX_MAIL_HOST smtp.resend.com; envset FX_MAIL_PORT 587; envset FX_MAIL_SECURITY STARTTLS; envset FX_MAIL_USERNAME resend
+      ask_secret FX_MAIL_PASSWORD "Resend API Key（权限 Sending access、只选发信域名）"
+    fi
+    unset key
+    envset FX_PUSH_VAPID_SUBJECT "mailto:${to%%,*}"
+    apply > /dev/null || true
+    cmd_test_mail || true
+  else
+    ok "这台机器上读不到 TopUP 的邮件设置（临时第二台？），逐项输入"
+    cmd_keys mail
+    to=$(envget FX_ALERT_EMAILS)
+    [ -z "$to" ] || { envset FX_PUSH_VAPID_SUBJECT "mailto:${to%%,*}"; apply > /dev/null || true; }
+  fi
+}
+
+# 第一个超管：库里还没有管理员时，用这次输入的初始密码建（首次登录必须改），建好立刻从 .env 删掉
+setup_admin() {
+  if [ -f "$STATE/admin-created" ]; then ok "后台超管：已建过（忘了密码请在后台用另一个超管重置）"; return 0; fi
+  local p1 p2
+  read_secret "后台第一个超管的初始密码（至少 10 位、有字母和数字；从密码管理器粘；直接回车 = 跳过）："; p1=$REPLY_SECRET
+  [ -n "$p1" ] || { ok "后台超管：这次跳过"; return 0; }
+  read_secret "再粘一次确认："; p2=$REPLY_SECRET; REPLY_SECRET=
+  [ "$p1" = "$p2" ] || { bad "两次不一样，没保存（再运行 sudo trading setup）"; return 1; }
+  [ ${#p1} -ge 10 ] && [[ "$p1" =~ [A-Za-z] ]] && [[ "$p1" =~ [0-9] ]] || { bad "密码不够强（至少 10 位、有字母和数字）"; return 1; }
+  envset FX_ADMIN_INIT_USERNAME admin; envset FX_ADMIN_INIT_PASSWORD "$p1"; unset p1 p2
+  apply > /dev/null || true
+  if compose logs --no-color trading-app 2>/dev/null | grep -q '已建第一个超级管理员'; then
+    touch "$STATE/admin-created"; ok "后台超管已建：用户名 admin，首次登录必须改密码"
+  else
+    bad "后台超管没建成（库里已经有管理员，或密码不合规则；看 sudo trading status）"
+  fi
+  envdel FX_ADMIN_INIT_PASSWORD; envdel FX_ADMIN_INIT_USERNAME
+  apply > /dev/null || true
+}
+
+# 验收令牌（做法 07）：粘一串令牌（同一串填进 GitHub 环境 staging-e2e），服务器只存它的 SHA-256
+# 验收令牌（TD4-15）：Amos 用密码管理器生成一串 40 位（字母和数字），这里隐藏输入；同一串由 Amos 填进 GitHub 环境 staging-e2e。
+# 服务器只存 SHA-256，屏幕上、日志里都不出现原文；再输入一串就换掉旧的
+setup_test_admin() {
+  local t
+  read_secret "验收令牌（密码管理器生成的 40 位字母和数字；屏幕上不显示；直接回车 = 跳过）："; t=$REPLY_SECRET; REPLY_SECRET=
+  [ -n "$t" ] || { ok "验收令牌：这次跳过（以后用 sudo trading gen-test-admin 再填）"; return 0; }
+  [[ "$t" =~ ^[A-Za-z0-9]{40,}$ ]] || { unset t; bad "令牌要是至少 40 位的字母和数字，没保存"; return 1; }
+  envset TEST_ADMIN_TOKEN_SHA256 "$(printf '%s' "$t" | sha256sum | cut -d' ' -f1)"; unset t
+  apply > /dev/null || true
+  ok "验收令牌已保存（服务器只存哈希）；同一串填进 GitHub → Trading 仓库 → Settings → Environments → staging-e2e → STAGING_TEST_ADMIN_TOKEN"
+  log "测试管理员令牌已更换（不记录令牌）"
+}
+
+cmd_setup() {
+  need_root; need_tty
+  [ -f "$ENVF" ] && [ -n "$(current_tag)" ] || die "还没安装：先运行主会话给的一次性安装命令（sudo trading install …）"
+  say "Trading 测试环境中文向导。要粘的 Key、密码、令牌在屏幕上不显示，也不写进日志；每项直接回车 = 跳过 / 不改。"
+  say "-- ① 邮件"
+  setup_mail
+  say "-- ② 后台第一个超管"
+  setup_admin || true
+  say "-- ③ 验收令牌"
+  if [ "$(health_field env "$(health)")" = test ]; then setup_test_admin || true; else bad "健康检查的 env 不是 test，不设测试管理员"; fi
+  say "-- ④ TopUP（平时这台跳过；联调时在临时机填）"
+  local yn
+  read -r -p "现在填 TopUP 的 Key / Secret 吗？（y = 填，直接回车 = 跳过）：" yn || true
+  if [ "$yn" = y ] || [ "$yn" = Y ]; then cmd_keys topup; else ok "TopUP：这次跳过"; fi
+  say "-- ⑤ 备份"
+  if cmd_backup setup > /dev/null; then ok "备份：本机已加密"; else bad "备份失败（原因见上面一行；看 $LOGF，截图给主会话）"; fi
+  # 2 核 2G 上 Trading 在跑时再起一个临时 MySQL 会抢内存（11/17 测试服务器上卡住过），恢复演练改在 trading off 时做
+  ok "恢复演练：不在这里做。sudo trading off 时自动做（那时 Trading 已全停、TopUP 还没启动，内存够）"
+  say "-- 摘要（没有任何密钥）"
+  cmd_status
+}
+
+# 把改过的 .env 生效：重建变量变了的容器，等健康
+apply() {
+  guard_env
+  [ -n "$(current_tag)" ] || { say "还没部署过，先运行 sudo trading install …"; return 0; }
+  compose up -d > /dev/null 2>&1
+  if wait_healthy "$(current_tag)"; then ok "已生效，健康检查通过"; else bad "改完后健康检查没通过（看 sudo trading status，截图给主会话）"; return 1; fi
+}
+
+SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED"
+KEY_ALLOWED="FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN"
+
+cmd_set() {
+  need_root
+  [ $# -eq 2 ] || die "用法：sudo trading set <变量名> <值>；能改的：$SET_ALLOWED（密钥用 set-key）"
+  [[ " $SET_ALLOWED " == *" $1 "* ]] || die "$1 不在可改清单里：$SET_ALLOWED（密钥用 sudo trading set-key）"
+  envset "$1" "$2"; ok "$1 已更新"
+  apply
+}
+
+cmd_set_key() {
+  need_root; need_tty
+  [ $# -eq 1 ] || die "用法：sudo trading set-key <变量名>；能改的：$KEY_ALLOWED"
+  [[ " $KEY_ALLOWED " == *" $1 "* ]] || die "$1 不在清单里：$KEY_ALLOWED"
+  read_secret "粘贴 $1（屏幕上不显示，粘完按回车；直接回车 = 不改）："
+  if [ -n "$REPLY_SECRET" ]; then envset "$1" "$REPLY_SECRET"; ok "$1 已更新（不显示值）"; apply; else say "没改"; fi
+  REPLY_SECRET=
+}
+
+# 问一个不是密钥的值，输出到标准输出（提示写到终端）
+ask_val() {
+  local v
+  read -r -p "$1 [${2:-空}]：" v < /dev/tty > /dev/tty || true
+  printf '%s' "${v:-$2}"
+}
+
+# 中文向导：逐项问，直接回车 = 保留现在的值
+ask() {
+  local name=$1 label=$2 def cur v
+  cur=$(envget "$name"); def=${cur:-${3:-}}
+  read -r -p "$label [${def:-空}]：" v || true
+  v=${v:-$def}
+  [ -n "$v" ] && envset "$name" "$v"
+  return 0
+}
+ask_secret() {
+  local name=$1 label=$2 state
+  if [ -n "$(envget "$name")" ]; then state="已填过"; else state="还没填"; fi
+  read_secret "$label（$state；屏幕上不显示，粘完按回车；直接回车 = 不改）："
+  if [ -n "$REPLY_SECRET" ]; then envset "$name" "$REPLY_SECRET"; ok "$name 已保存（不显示值）"; else ok "$name 没改（$state）"; fi
+  REPLY_SECRET=
+}
+
+cmd_keys() {
+  need_root; need_tty
+  [ -f "$ENVF" ] || die "先运行 sudo trading install …"
+  local what=${1:-all}
+  say "Trading 测试环境：填 Key 和邮件设置。每项直接回车 = 保留现在的值。Key、Secret、密码在屏幕上不显示，也不写进日志。"
+  if [ "$what" = all ] || [ "$what" = topup ]; then
+    say "-- TopUP 测试环境商户（商户后台 → API 设置）"
+    ask FX_TOPUP_BASE_URL "TopUP 测试环境地址（https://域名，不带 /api/v1）"
+    ask_secret FX_TOPUP_API_KEY "API Key"
+    ask_secret FX_TOPUP_API_SECRET "API Secret（\"重新生成 Secret\"后只显示一次的那串）"
+  fi
+  if [ "$what" = all ] || [ "$what" = mail ]; then
+    say "-- 邮件（Resend 的 SMTP；Key 权限选 Sending access、只选发信域名）"
+    ask FX_MAIL_HOST "SMTP 服务器" smtp.resend.com
+    ask FX_MAIL_PORT "端口（587 或 465）" 587
+    ask FX_MAIL_SECURITY "加密方式（587 填 STARTTLS，465 填 SSL）" STARTTLS
+    ask FX_MAIL_USERNAME "SMTP 用户名" resend
+    ask FX_MAIL_FROM "发件地址（必须是 Resend 里已验证的域名下的地址）"
+    ask_secret FX_MAIL_PASSWORD "SMTP 密码（Resend 的 API Key）"
+    ask FX_ALERT_EMAILS "告警收件人（逗号分隔）"
+    envset FX_RISK_ALERT_EMAILS "$(envget FX_ALERT_EMAILS)"
+  fi
+  say "-- 生效（重启变了的容器，约 1–2 分钟）"
+  apply || true
+  if [ "$what" != mail ]; then topup_check || true; fi
+  if [ "$what" != topup ] && [ -n "$(envget FX_MAIL_HOST)" ]; then cmd_test_mail || true; fi
+}
+
+cmd_status() {
+  local tag body
+  tag=$(current_tag)
+  say "版本：${tag:-还没部署}（上一个：$(cat "$STATE/previous" 2>/dev/null || echo 无)）"
+  [ -s "$STATE/skip" ] && say "  ⚠ 跳过的版本：$(cat "$STATE/skip")（修好后 sudo trading retry）"
+  [ -f "$STATE/paused" ] && say "  ⚠ 自动更新已暂停到：$(cat "$STATE/paused")（手动回滚后；下一次合并时恢复）"
+  [ -f "$STATE/memguard-stopped" ] && say "  ⚠ 内存守护在 $(cat "$STATE/memguard-stopped") 停了 Trading（可用内存不够）；查清原因后 sudo trading on"
+  body=$(health)
+  say "trading-app：status=$(health_field status "$body") version=$(health_field version "$body") env=$(health_field env "$body")"
+  quote_healthy && ok "quote-app 健康" || bad "quote-app 不健康"
+  local alerts
+  alerts=$(sed -n 's/.*"alerts":{\([^}]*\)}.*/\1/p' <<< "$body" | tr ',' '\n' | sed -n 's/^"\([^"]*\)":"DOWN"$/\1/p' | tr '\n' ' ')
+  [ -z "$alerts" ] && ok "业务告警：无" || bad "业务告警：$alerts"
+  compose ps --format 'table {{.Service}}\t{{.State}}\t{{.Status}}' 2>/dev/null || true
+  systemctl list-timers 'trading-*' --no-pager 2>/dev/null | head -5 || true
+  say "磁盘：$(df -h / | awk 'NR==2{print $5 " 已用，剩 " $4}')；可用内存：$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo) MB"
+  say "最近备份：$(ls -1t "$TR_DIR/backup" 2>/dev/null | head -1 || echo 无)"
+  say "最近恢复演练：$(cat "$STATE/last-drill" 2>/dev/null || echo "还没做过（sudo trading off 时自动做）")"
+  local exp
+  exp=$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/trading/fullchain.pem 2>/dev/null | cut -d= -f2 || true)
+  say "证书到期：${exp:-没有证书}"
+  local filled=() k
+  for k in FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN TEST_ADMIN_TOKEN_SHA256; do
+    if [ -n "$(envget "$k")" ]; then filled+=("$k=已填"); else filled+=("$k=空"); fi
+  done
+  say "Amos 填的（只说是否）：${filled[*]}"
+}
+
+cmd_update() {
+  need_root
+  exec 9> "$STATE/update.lock"
+  flock -n 9 || return 0
+  guard_env
+  pull "$REG/trading-app:staging" || { log "拉不到 staging 镜像（网络或包没设公开）"; return 1; }
+  local new cur
+  new=$(revision "$REG/trading-app:staging"); cur=$(current_tag)
+  [ -n "$new" ] || { log "staging 镜像没有版本号，跳过"; return 1; }
+  [ "$new" = "$cur" ] && return 0
+  [ "$new" = "$(cat "$STATE/skip" 2>/dev/null || true)" ] && return 0
+  [ "$new" = "$(cat "$STATE/paused" 2>/dev/null || true)" ] && return 0
+  # 更新前的备份失败过：30 分钟内不再试（不每分钟重跑一次导出）；sudo trading retry 立刻重试
+  local backoff
+  backoff=$(cat "$STATE/backup-backoff" 2>/dev/null || echo 0)
+  [ $(( $(date +%s) - backoff )) -lt 1800 ] && return 0
+  rm -f "$STATE/paused"
+  log "发现新版本 $new（当前 ${cur:-无}）"
+  local img
+  for img in "${IMAGES[@]}"; do pull "$REG/$img:$new" || { log "拉不到 $img:$new，下一分钟再试"; return 1; }; done
+  # 先备份（用现在的工具包），成功了才换新工具包：备份失败时服务器上的 compose 等不会变成新版本的
+  if [ -n "$cur" ]; then
+    if ! cmd_backup "before-${new:0:12}" > /dev/null; then
+      date +%s > "$STATE/backup-backoff"
+      log "更新前的备份失败，这次不更新 $new；30 分钟后再试（sudo trading retry 立刻重试）"
+      send_mail "更新前的备份失败" "新版本 $new 没有更新：更新前的备份失败（原因看 $LOGF）。30 分钟后自动再试，或 sudo trading retry。" || true
+      return 1
+    fi
+    rm -f "$STATE/backup-backoff"
+  fi
+  sync_kit "$new" || { log "取不出 $new 的工具包，下一分钟再试"; return 1; }
+  switch_to "$new" > /dev/null 2>&1 || true
+  if wait_healthy "$new"; then
+    if [ -n "$cur" ]; then echo "$cur" > "$STATE/previous"; fi
+    log "更新成功：$new"
+    prune_images
+    return 0
+  fi
+  log "更新失败：$new 在 3 分钟内没有通过健康检查。两个应用最后 50 行日志写进 $LOGF"
+  compose logs --no-color --tail 50 trading-app quote-app >> "$LOGF" 2>&1 || true
+  echo "$new" > "$STATE/skip"
+  if [ -n "$cur" ]; then
+    switch_to "$cur" > /dev/null 2>&1 || true
+    if wait_healthy "$cur"; then log "已自动换回 $cur"; else log "换回 $cur 后仍然没有通过健康检查，需要人工处理"; fi
+  fi
+  [ -z "${TR_FIRST:-}" ] && send_mail "更新失败：${new:0:12}" "新版本 $new 没有通过健康检查，已换回 ${cur:-（无）}。修好后合并新提交，或 sudo trading retry。" || true
+  return 1
+}
+
+cmd_retry() { need_root; rm -f "$STATE/skip" "$STATE/paused" "$STATE/backup-backoff"; ok "已清掉跳过记录，下一分钟重试"; }
+
+cmd_rollback() {
+  need_root
+  exec 9> "$STATE/update.lock"; flock 9
+  local target=${1:-$(cat "$STATE/previous" 2>/dev/null || true)} cur img
+  [[ "$target" =~ ^[0-9a-f]{40}$ ]] || die "用法：sudo trading rollback [完整提交号]（没有记录上一个版本）"
+  cur=$(current_tag)
+  for img in "${IMAGES[@]}"; do pull "$REG/$img:$target"; done
+  log "手动回滚：$cur → $target（数据库不回退；要回退数据由运维分步指导用备份恢复）"
+  pull "$REG/trading-app:staging" && revision "$REG/trading-app:staging" > "$STATE/paused"
+  switch_to "$target" > /dev/null 2>&1 || true
+  if wait_healthy "$target"; then echo "$cur" > "$STATE/previous"; log "回滚成功：$target"; else log "回滚后 $target 没有通过健康检查，需要人工处理"; exit 1; fi
+}
+
+# mysqldump 的导出是否完整：两个库都在（--databases 会写 USE `库名`;）、最后一行是 "-- Dump completed"（mysqldump 出错中断时没有这一行）
+dump_complete() {
+  [ -s "$1" ] && grep -q '^USE `trading`;' "$1" && grep -q '^USE `quote`;' "$1" && tail -n 1 "$1" | grep -q '^-- Dump completed'
+}
+
+# 临时明文（导出的 SQL）只放在 /opt/trading/tmp（700，只有 root 能读），不放 /tmp；登记进 CLEAN_PATHS，脚本无论怎么退出都会删
+work_dir() {
+  mkdir -p "$TR_DIR/tmp" && chmod 700 "$TR_DIR/tmp" && mktemp -d "$TR_DIR/tmp/$1-XXXXXX"
+}
+# 清掉上次被 kill -9 等打断留下的临时文件（超过 60 分钟的；正在用的不会这么老：导出最多 DUMP_TIMEOUT 秒、演练最多约 10 分钟）
+sweep_stale() {
+  if [ -d "$TR_DIR/tmp" ]; then find "$TR_DIR/tmp" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2> /dev/null || true; fi
+  find "$TR_DIR/backup" -maxdepth 1 -name 'trading-*.tar.age.tmp' -mmin +60 -delete 2> /dev/null || true
+  return 0
+}
+
+# 备份失败：原因写日志并打到标准错误（调用方常把标准输出丢掉），返回 1；临时文件由调用方删
+backup_fail() {
+  log "备份失败：$1" > /dev/null
+  say "  ✗ 备份失败：$1" >&2
+  return 1
+}
+
+# mysql 容器里残留的 mysqldump（外层超时只杀得掉本机的 docker 客户端，容器里的进程还会跑）：按进程名找出来杀掉，输出一句结果（写日志用）。
+# 容器里没有 pkill，直接看 /proc；已经结束、只等回收的僵尸进程（容器的 1 号进程 mysqld 不回收）不占内存，不算
+kill_container_dumps() {
+  local n
+  if [ -z "$(compose ps -q --status running mysql 2> /dev/null)" ]; then echo "mysql 容器没在运行，里面没有 mysqldump"; return 0; fi
+  n=$(timeout -k 5 30 "${COMPOSE[@]}" exec -T mysql sh -c '
+    live() { [ "$(cat "$1/comm" 2>/dev/null)" = mysqldump ] && ! grep -q "^State:.*Z" "$1/status" 2>/dev/null; }
+    for p in /proc/[0-9]*; do live "$p" && kill -9 "${p#/proc/}" 2>/dev/null; done
+    sleep 1; n=0
+    for p in /proc/[0-9]*; do live "$p" && n=$((n + 1)); done
+    echo "$n"' 2> /dev/null) || n=""
+  case "$n" in
+    0) echo "mysql 容器里没有还在跑的 mysqldump" ;;
+    "") echo "进不了 mysql 容器查 mysqldump（30 秒没反应），需要人工看：sudo docker top trading-mysql-1" ;;
+    *) echo "mysql 容器里还剩 $n 个 mysqldump 没杀掉，需要人工看：sudo docker top trading-mysql-1" ;;
+  esac
+}
+
+# 加密备份：两个库、Redis 快照、证件照片、.env 打成一个包，直接经 age 加密写盘（磁盘上只在 /opt/trading/tmp 短暂有明文 SQL）。
+# 每一步都显式检查（不靠 set -e：调用方常写成 if cmd_backup …，那样 set -e 在函数里不生效）；任何一步失败都不留备份文件、返回 1。
+# 同一时间只做一份（backup.lock，默认最多等 6 分钟，trading off 里只等 2 分钟），每天的备份和更新前、off 时的备份不会同时导出
+cmd_backup() {
+  need_root
+  [ -f "$STATE/backup.pub" ] || die "没有备份加密密钥（先运行 install）"
+  mkdir -p "$TR_DIR/backup"
+  local wait_s=${BACKUP_LOCK_WAIT:-360}
+  exec 8> "$STATE/backup.lock"
+  if ! flock -n 8; then
+    say "  另一份备份正在做，最多等 $(dur "$wait_s")（不用操作）" >&2
+    if ! run_bg flock -w "$wait_s" 8; then exec 8>&-; backup_fail "另一份备份 $(dur "$wait_s") 还没做完"; return 1; fi
+  fi
+  sweep_stale
+  local rc=0
+  backup_once "${1:-daily}" || rc=$?
+  exec 8>&-
+  return "$rc"
+}
+
+backup_once() {
+  local name=$1 f tmp
+  f="$TR_DIR/backup/trading-$(date -u +%Y%m%dT%H%M%SZ)-$name.tar.age"
+  CLEAN_PATHS+=("$f.tmp")
+  tmp=$(work_dir backup) || { backup_fail "建不了临时目录 $TR_DIR/tmp（磁盘满了？）"; return 1; }
+  CLEAN_PATHS+=("$tmp")
+  # 密码用容器里已有的环境变量，不出现在命令行；--quick（默认就开）逐行导出，不把整张表读进内存。
+  # 超时放在容器里（timeout 杀得到容器里的 mysqldump）；外层再多 30 秒兜底（docker exec 本身卡住时）
+  DUMP_RUNNING=1
+  if ! run_bg timeout -k 10 $((DUMP_TIMEOUT + 30)) "${COMPOSE[@]}" exec -T mysql \
+      sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec timeout -k 10 "$1" mysqldump -uroot --single-transaction --quick --routines --triggers --set-gtid-purged=OFF --databases trading quote' \
+      sh "$DUMP_TIMEOUT" > "$tmp/mysql.sql" < /dev/null; then
+    DUMP_RUNNING=""
+    log "备份：$(kill_container_dumps)" > /dev/null
+    rm -rf "$tmp"
+    backup_fail "mysqldump 没成功（退出码非 0 或超过 ${DUMP_TIMEOUT} 秒；常见原因：MySQL 内存顶到上限、没在运行）"; return 1
+  fi
+  DUMP_RUNNING=""
+  if ! dump_complete "$tmp/mysql.sql"; then
+    rm -rf "$tmp"; backup_fail "mysqldump 的导出不完整（缺 trading 或 quote 库，或没有结尾的 Dump completed）"; return 1
+  fi
+  # Redis 只放限流计数和登录票据，丢了不影响数据：快照没做成只提醒，包里放上一次的快照（Redis 每 5 分钟自己存一次）
+  if ! timeout -k 5 60 "${COMPOSE[@]}" exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE | grep -q OK'; then
+    log "备份提醒：Redis 快照没做成，包里是 Redis 上一次自己存的快照" > /dev/null
+    say "  ⚠ Redis 快照没做成，包里是上一次的快照（只有限流计数和登录票据，不影响数据）" >&2
+  fi
+  local parts=(.env data/storage)
+  if [ -f "$TR_DIR/data/redis/dump.rdb" ]; then parts+=(data/redis/dump.rdb); fi
+  if ! tar -C "$TR_DIR" -cf - --transform 's|^data/redis/dump.rdb$|redis.rdb|' "${parts[@]}" -C "$tmp" mysql.sql | age -R "$STATE/backup.pub" > "$f.tmp"; then
+    rm -rf "$tmp"; rm -f "$f.tmp"; backup_fail "打包或加密失败（磁盘满了？）"; return 1
+  fi
+  rm -rf "$tmp"
+  if ! { [ -s "$f.tmp" ] && mv "$f.tmp" "$f" && chmod 600 "$f"; }; then rm -f "$f.tmp"; backup_fail "写不了备份文件"; return 1; fi
+  # 保留 7 天；合计超过 2 GB 从最旧的删；至少留 3 份
+  find "$TR_DIR/backup" -name 'trading-*.tar.age' -mtime +7 -print0 | while IFS= read -r -d '' old; do
+    if [ "$(ls -1 "$TR_DIR/backup"/trading-*.tar.age | wc -l)" -gt 3 ]; then rm -f "$old"; fi
+  done
+  while [ "$(du -sm "$TR_DIR/backup" | cut -f1)" -gt 2048 ] && [ "$(ls -1 "$TR_DIR/backup"/trading-*.tar.age | wc -l)" -gt 3 ]; do
+    rm -f "$(ls -1tr "$TR_DIR/backup"/trading-*.tar.age | head -1)"
+  done
+  date -u +%s > "$STATE/last-backup"
+  log "备份完成：$(basename "$f")（$(du -h "$f" | cut -f1)，本机已加密）"
+}
+
+# 恢复演练（不碰正在运行的数据）：解密到临时目录 → 不联网的临时 MySQL → 导入 → 核对表数和行数 → 删临时文件和容器。
+# 平时由 trading off 在 Trading 全停之后自动做（2 核 2G 上不和正在跑的 Trading 抢内存）；结果记在 state/last-drill，status 显示。
+# 每一步都有时间上限（等临时库就绪 DRILL_READY_TIMEOUT、导入 DRILL_IMPORT_TIMEOUT）；临时容器和明文 SQL 登记进退出清理，Ctrl-C、kill 也会删
+cmd_restore_drill() {
+  need_root
+  local f tmp cid n_t n_q logs
+  f=$(ls -1t "$TR_DIR"/backup/trading-*.tar.age 2>/dev/null | head -1)
+  [ -n "$f" ] || { bad "还没有备份（先 sudo trading backup）"; return 1; }
+  sweep_stale
+  tmp=$(work_dir drill) || { say "  ✗ 建不了临时目录 $TR_DIR/tmp（磁盘满了？）" >&2; drill_result "失败：建不了临时目录"; return 1; }
+  CLEAN_PATHS+=("$tmp")
+  if ! age -d -i "$STATE/backup.key" "$f" | tar -C "$tmp" -xf - mysql.sql; then
+    rm -rf "$tmp"; drill_result "失败：解不开 $(basename "$f")"; bad "解密或解包失败：$(basename "$f")"; return 1
+  fi
+  # 只演练完整的导出（修复前的版本在 mysqldump 失败时也会留下备份文件）
+  if ! dump_complete "$tmp/mysql.sql"; then
+    rm -rf "$tmp"; drill_result "失败：$(basename "$f") 里的数据库导出不完整"
+    bad "最新备份 $(basename "$f") 里的数据库导出不完整（当时 mysqldump 失败了），不能用来恢复：Trading 在跑时先 sudo trading backup 做一份新的"; return 1
+  fi
+  ok "解密：$(basename "$f")"
+  docker rm -f trading-restore-drill > /dev/null 2>&1 || true
+  # 内存：临时 MySQL 上限 DRILL_MEM_MB，再留 64 MB 余量。Trading 的应用在跑（手动运行时）就先停它们（数据库不停，演练完再启动）；
+  # 停之前拿自动更新的锁（不让 trading update 在演练中途把应用拉起来），并暂停内存守护（它看到可用内存低会把 Trading 全停）
+  local need avail stopped=""
+  need=$((DRILL_MEM_MB + 64))
+  if [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading --filter label=com.docker.compose.service=trading-app)" ]; then
+    exec 7> "$STATE/update.lock"
+    flock -n 7 || say "  自动更新正在进行，最多等 5 分钟（不用操作）"
+    if ! flock -n 7 && ! run_bg flock -w 300 7; then
+      exec 7>&-; rm -rf "$tmp"
+      bad "自动更新正在进行（5 分钟没做完），这次不演练；等一会儿再运行，或 sudo trading off 时自动做"; drill_result "跳过：自动更新正在进行"; return 1
+    fi
+    DRILL_MEMGUARD_WAS_ON=""
+    if [ -z "${TR_OFFLINE_TEST:-}" ] && systemctl is-active --quiet trading-memguard.timer; then DRILL_MEMGUARD_WAS_ON=1; systemctl stop trading-memguard.timer > /dev/null 2>&1 || true; fi
+    say "  Trading 在跑：先停它的应用（trading-web、trading-app、quote-app），演练完再启动（以后让 sudo trading off 自动做更省事）"
+    compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
+    stopped=1
+    DRILL_RESTART_PENDING=1
+  fi
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  if [ "$avail" -lt "$need" ]; then
+    rm -rf "$tmp"; drill_restart_apps "$stopped"
+    bad "没做恢复演练：可用内存 ${avail} MB，演练要 ≥ ${need} MB（临时数据库 ${DRILL_MEM_MB} MB + 余量 64 MB）。下次 sudo trading off 时会自动做"
+    drill_result "跳过：内存不够（${avail} < ${need} MB）"; return 1
+  fi
+  say "  起临时数据库并导入（约 1–3 分钟；最多等 $((DRILL_READY_TIMEOUT + DRILL_IMPORT_TIMEOUT)) 秒）"
+  CLEAN_CONTAINERS+=(trading-restore-drill)
+  if ! cid=$(docker run -d --name trading-restore-drill --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes --memory "${DRILL_MEM_MB}m" --memory-swap "$((DRILL_MEM_MB + 128))m" mysql:8.4 --innodb-buffer-pool-size=32M --performance-schema=OFF --max-connections=5); then
+    drill_cleanup "$tmp" "$stopped"; bad "临时数据库没起来（docker run 失败）"; drill_result "失败：临时数据库没起来"; return 1
+  fi
+  # 官方镜像初始化时先起一个不监听端口的临时进程，等到正式进程（port: 3306）就绪再导入（日志先存进变量再找，避免管道提前关闭）
+  local waited=0 ready=""
+  while [ "$waited" -lt "$DRILL_READY_TIMEOUT" ]; do
+    logs=$(timeout 10 docker logs "$cid" 2>&1 || true)
+    if grep -q 'ready for connections.*port: 3306' <<< "$logs"; then ready=1; break; fi
+    sleep 2; waited=$((waited + 2))
+  done
+  if [ -z "$ready" ]; then
+    drill_cleanup "$tmp" "$stopped"; bad "临时数据库 ${DRILL_READY_TIMEOUT} 秒还没就绪"; drill_result "失败：临时数据库 ${DRILL_READY_TIMEOUT} 秒没就绪"; return 1
+  fi
+  # 导入有时间上限：超时只杀得掉本机的 docker 客户端，所以紧接着删整个临时容器
+  if ! run_bg timeout -k 10 "$DRILL_IMPORT_TIMEOUT" docker exec -i "$cid" mysql -uroot < "$tmp/mysql.sql"; then
+    drill_cleanup "$tmp" "$stopped"
+    bad "导入临时库失败或超过 ${DRILL_IMPORT_TIMEOUT} 秒"; drill_result "失败：导入 $(basename "$f") 出错或超时"; return 1
+  fi
+  n_t=$(timeout 30 docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='trading'" 2>/dev/null || echo 0)
+  n_q=$(timeout 30 docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='quote'" 2>/dev/null || echo 0)
+  local hist rc=0
+  hist=$(timeout 30 docker exec "$cid" mysql -uroot -N -e "SELECT COUNT(*) FROM trading.flyway_schema_history WHERE success=1" 2>/dev/null || echo 0)
+  drill_cleanup "$tmp" "$stopped"
+  if [ "${n_t:-0}" -gt 10 ] && [ "${n_q:-0}" -gt 3 ] && [ "${hist:-0}" -gt 0 ]; then
+    ok "导入临时库：trading $n_t 张表（迁移 $hist 条）、quote $n_q 张表"
+    drill_result "通过：$(basename "$f")（trading $n_t 张表、quote $n_q 张表）"
+  else
+    bad "导入后表数不对：trading $n_t、quote $n_q、迁移记录 $hist"; drill_result "失败：$(basename "$f") 导入后表数不对"; rc=1
+  fi
+  return $rc
+}
+
+# 演练结束（不管成败）：删临时容器和明文 SQL，停过 Trading 的应用就重新启动
+drill_cleanup() {
+  docker rm -f trading-restore-drill > /dev/null 2>&1 || true
+  rm -rf "$1"
+  drill_restart_apps "$2"
+}
+
+# 演练前停过 Trading 的应用（手动运行时）就重新启动，恢复内存守护，放开自动更新的锁
+drill_restart_apps() {
+  [ -n "$1" ] || return 0
+  # compose up 忽略 HUP、INT（窗口断了也做完）；成功才清掉标记，没成功退出收尾会再拉一次
+  if ( trap '' HUP INT; exec "${COMPOSE[@]}" up -d ) > /dev/null 2>&1; then DRILL_RESTART_PENDING=""; fi
+  if wait_healthy "$(current_tag)"; then ok "Trading 的应用已重新启动"; else bad "Trading 的应用重新启动后没通过健康检查（sudo trading status）"; fi
+  if [ -n "${DRILL_MEMGUARD_WAS_ON:-}" ]; then systemctl start trading-memguard.timer > /dev/null 2>&1 || true; DRILL_MEMGUARD_WAS_ON=""; fi
+  exec 7>&-
+}
+
+# 记下最近一次恢复演练的结果（status 显示），也写日志
+drill_result() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" > "$STATE/last-drill"; log "恢复演练$1" > /dev/null; }
+
+cmd_test_mail() { need_root; send_mail "测试邮件" "这是 Trading 测试环境的测试邮件（$(date -u +%Y-%m-%dT%H:%M:%SZ)）。收到说明邮件设置正确。" && ok "已发出，请查收\"[测试] Trading 测试邮件\"" || { bad "没发出去（邮件没配好，看 $LOGF）"; return 1; }; }
+
+# 每 5 分钟检查，只在状态变化时发邮件（恢复时再发一封）
+cmd_watch() {
+  need_root
+  # Trading 停着（trading off，或者 TopUP 启动时按约定停了 trading-deploy 定时器）：不检查、不告警，顺手把自己也停了
+  if [ -z "${TR_OFFLINE_TEST:-}" ] && ! systemctl is-active --quiet trading-deploy.timer; then
+    systemctl disable --now trading-watch.timer > /dev/null 2>&1 || true
+    log "trading-deploy 定时器停着（Trading 轮到 TopUP 用机器），检查暂停"; return 0
+  fi
+  local problems=() body avail disk last exp_s now
+  body=$(health)
+  [ "$(health_field status "$body")" = UP ] || problems+=("trading-app 没响应或不健康")
+  quote_healthy || problems+=("quote-app 不健康")
+  [ -s "$STATE/skip" ] && problems+=("有版本被跳过：$(cut -c1-12 "$STATE/skip")")
+  disk=$(df --output=pcent / | tail -1 | tr -dc 0-9); [ "$disk" -ge 85 ] && problems+=("磁盘已用 ${disk}%")
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo); [ "$avail" -lt 200 ] && problems+=("可用内存只剩 ${avail} MB")
+  now=$(date +%s); last=$(cat "$STATE/last-backup" 2>/dev/null || echo 0)
+  [ $((now - last)) -gt $((26 * 3600)) ] && problems+=("超过 26 小时没有备份")
+  exp_s=$(date -d "$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/trading/fullchain.pem 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)
+  [ $((exp_s - now)) -lt $((14 * 86400)) ] && problems+=("证书 14 天内到期或读不到")
+  local c restarts
+  for c in trading-app quote-app trading-web mysql redis; do
+    restarts=$(docker inspect --format '{{.RestartCount}}' "trading-$c-1" 2>/dev/null || echo 0)
+    [ "${restarts:-0}" -ge 3 ] && problems+=("$c 反复重启（$restarts 次）")
+  done
+  if [ -n "$(envget TEST_ADMIN_TOKEN_SHA256)" ] && [ "$(health_field env "$body")" != test ]; then problems+=("不是测试环境却有测试管理员（TEST_ADMIN_TOKEN_SHA256）"); fi
+  local now_state prev_state
+  now_state=$(printf '%s\n' "${problems[@]:-}" | sort)
+  prev_state=$(cat "$STATE/watch" 2>/dev/null || true)
+  [ "$now_state" = "$prev_state" ] && return 0
+  printf '%s' "$now_state" > "$STATE/watch"
+  if [ -n "$now_state" ]; then
+    send_mail "告警：${problems[0]}" "$(printf '测试环境检查发现：\n%s\n\n看 sudo trading status。' "$now_state")" || true
+  else
+    send_mail "已恢复" "测试环境检查全部正常。" || true
+  fi
+}
+
+cmd_gen_test_admin() {
+  need_root; need_tty
+  [ "$(health_field env "$(health)")" = test ] || die "健康检查的 env 不是 test：测试管理员只能在测试环境用，生产一律不设"
+  setup_test_admin
+}
+
+cmd_test_admin_off() {
+  need_root
+  envdel TEST_ADMIN_TOKEN_SHA256
+  apply > /dev/null || true
+  ok "测试管理员已关，旧令牌立刻作废"; log "测试管理员已关"
+}
+
+# 内存守护：Trading 在跑、可用内存低于阈值时，只停 Trading（先停自动更新，再停全部容器，数据保留），记日志、发邮件；
+# 不碰 TopUP 的任何容器。恢复：查清原因后 sudo trading on（它会重新检查可用内存）
+cmd_memguard() {
+  need_root
+  [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] || return 0
+  local avail
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  [ "$avail" -lt "$MEMGUARD_MB" ] || return 0
+  log "内存守护：可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），停 Trading（不碰 TopUP）"
+  sysctl_ disable --now trading-deploy.timer trading-backup.timer trading-watch.timer > /dev/null 2>&1 || true
+  compose stop > /dev/null 2>&1 || true
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/memguard-stopped"
+  send_mail "内存守护已停 Trading" "可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），已停 Trading 的全部容器和自动更新，数据保留；TopUP 没动。查清原因后运行 sudo trading on。" || true
+}
+
+# 停 TopUP（调它自己的 topup stop，按它的顺序：停定时器 → 停应用 → 备份 → 停数据库），确认 80/443 空出来、可用内存够
+stop_topup_and_check_mem() {
+  if topup_running; then
+    [ -x "$TOPUP_BIN" ] || { bad "TopUP 的容器在跑，但找不到 $TOPUP_BIN"; return 1; }
+    say "  停 TopUP（topup stop，数据保留；约 1～2 分钟）"
+    "$TOPUP_BIN" stop > /dev/null 2>&1 7>&- 8>&- 9>&- || { bad "topup stop 没成功（看 sudo topup status），Trading 不启动"; return 1; }
+  fi
+  topup_running && { bad "TopUP 的容器还在跑，Trading 不启动"; return 1; }
+  local p
+  for p in 80 443; do
+    if port_busy "$p" && ! docker ps --format '{{.Names}}' | grep -q '^trading-trading-web-1$'; then bad "$p 端口还被别的程序占着，Trading 不启动"; restart_topup; return 1; fi
+  done
+  local avail
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  if [ -z "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] && [ "$avail" -lt "$MIN_MEM_MB" ]; then
+    bad "可用内存 ${avail} MB，少于 ${MIN_MEM_MB} MB（差 $((MIN_MEM_MB - avail)) MB），Trading 不启动；已恢复 TopUP"
+    restart_topup; return 1
+  fi
+  ok "TopUP 已停、80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"
+}
+
+# 启动 TopUP。topup start 忽略 HUP、INT（窗口断了、Ctrl-C 都不会把它打断在半路；被忽略的信号它改不回来）；
+# 成功后写标记文件 state/topup-started.<进程号>，退出收尾看这个文件决定要不要再启动一次。
+# 不把锁的文件描述符带给 TopUP（它起的进程要是一直在，锁就一直放不掉）
+restart_topup() {
+  [ -x "$TOPUP_BIN" ] || return 0
+  local mark="$STATE/topup-started.$$"
+  rm -f "$mark"
+  say "  启动 TopUP（topup start，它自己再查内存和健康检查）"
+  if ( trap '' HUP INT; "$TOPUP_BIN" start > /dev/null 2>&1 7>&- 8>&- 9>&- && : > "$mark" ); then
+    ok "TopUP 已启动"; log "TopUP 已启动（topup start）" > /dev/null
+  else
+    bad "topup start 没成功（看 sudo topup status，截图给主会话）"; log "topup start 没成功" > /dev/null; return 1
+  fi
+}
+
+cmd_on() {
+  need_root
+  [ -f "$ENVF" ] && [ -n "$(current_tag)" ] || die "还没部署过，先运行 sudo trading install …"
+  say "== 切到 Trading（TopUP 停下）"
+  # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删，免得占着内存
+  docker rm -f trading-restore-drill > /dev/null 2>&1 || true
+  stop_topup_and_check_mem || exit 1
+  guard_env
+  compose up -d > /dev/null 2>&1
+  if wait_healthy "$(current_tag)"; then ok "Trading 已启动，健康检查通过"; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开（含内存守护）"
+  rm -f "$STATE/memguard-stopped"
+  log "trading on"
+}
+
+# trading off 被打断（或备份失败）而 Trading 还没全停时：按原样恢复 Trading、打开定时器（TopUP 不启动）
+off_restore_trading() {
+  compose up -d > /dev/null 2>&1 || true
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
+}
+
+# 最坏情况（自动更新正在跑 5 分钟 + 等另一份备份 2 分钟 + 导出 5.5 分钟 + 停容器约 2 分钟 + 恢复演练 8 分钟 + topup start）约 25 分钟，
+# 正常 2–5 分钟。要在"远程连接"的终端里运行；用"云助手 → 执行命令"时超时要设 ≥ 30 分钟。中途窗口断了也会按上面的规则收尾（on_exit）
+cmd_off() {
+  need_root
+  say "== 切回 TopUP（Trading 停下，数据保留；一般 2–5 分钟）"
+  # 以前的进程留下的启动标记（进程号可能被重用）先删
+  rm -f "$STATE"/topup-started.*
+  # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删
+  docker rm -f trading-restore-drill > /dev/null 2>&1 || true
+  # 先拿和 trading update 同一把锁、再停定时器：等锁时被打断，Trading 和定时器都还是原样；拿到锁以后自动更新也不会再把 Trading 拉起来
+  exec 9> "$STATE/update.lock"
+  if ! flock -n 9; then
+    say "  自动更新正在进行，最多等 $(dur "$OFF_LOCK_WAIT")（不用操作）"
+    if ! run_bg flock -w "$OFF_LOCK_WAIT" 9; then
+      bad "自动更新 $(dur "$OFF_LOCK_WAIT") 还没做完，这次没切换：Trading 照常跑、定时器没动、TopUP 不启动。过几分钟再运行 sudo trading off"
+      exit 1
+    fi
+  fi
+  local running=""
+  [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading)" ] && running=1
+  # 从这里到数据库停下之前被打断（或备份失败）：按原样恢复 Trading、打开定时器（on_exit）
+  [ -z "$running" ] || OFF_RESTORE_TRADING=1
+  sysctl_ disable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
+  ok "定时器已停"
+  if [ -n "$running" ]; then
+    compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
+    ok "应用已停"
+    if BACKUP_LOCK_WAIT=120 cmd_backup before-off > /dev/null; then ok "备份完成"; else bad "备份失败：Trading 按原样恢复，TopUP 不启动"; exit 1; fi
+    compose stop > /dev/null 2>&1 || true
+    # 从这里起 Trading 全停了：不管后面演练成败、被 Ctrl-C、窗口断了还是 kill，退出时都启动 TopUP（on_exit）
+    OFF_RESTORE_TRADING=""; OFF_START_TOPUP=1
+    ok "MySQL、Redis 已停"
+    # 恢复演练放在这里：Trading 全停了、TopUP 还没启动，2 核 2G 的内存够起临时数据库；只用刚才成功的那份备份（备份失败上面已经退出）
+    say "  恢复演练（用刚做的备份，约 1–3 分钟；不通过也照样切回 TopUP）"
+    if cmd_restore_drill; then ok "恢复演练通过"; else bad "恢复演练没通过（备份文件还在；看 sudo trading status 和 $LOGF，截图给主会话）"; fi
+  else
+    ok "Trading 本来就停着"
+  fi
+  log "trading off"
+  # 启动成功才清掉"要启动 TopUP"的标记：没成功（或启动中被打断）时退出收尾会再启动一次
+  if restart_topup; then OFF_START_TOPUP=""; else OFF_TOPUP_FIRST_FAILED=1; say "  退出前再试一次 topup start"; fi
+}
+
+main() {
+  local c=${1:-help}; shift || true
+  case "$c" in
+    install) cmd_install "$@" ;;
+    setup) cmd_setup ;;
+    on) cmd_on ;;
+    off) cmd_off ;;
+    keys) cmd_keys "$@" ;;
+    set) cmd_set "$@" ;;
+    set-key) cmd_set_key "$@" ;;
+    status) need_root; cmd_status ;;
+    update) cmd_update ;;
+    retry) cmd_retry ;;
+    rollback) cmd_rollback "$@" ;;
+    backup) cmd_backup "$@" ;;
+    restore-drill) cmd_restore_drill ;;
+    test-mail) cmd_test_mail ;;
+    watch) cmd_watch ;;
+    memguard) cmd_memguard ;;
+    gen-test-admin) cmd_gen_test_admin ;;
+    test-admin-off) cmd_test_admin_off ;;
+    *) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
+  esac
+}
+main "$@"

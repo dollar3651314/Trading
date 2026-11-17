@@ -1,0 +1,436 @@
+# 每个 PR 的自动检查：不通过的 PR 不能合并到 staging（测试环境）和 main（生产）。
+# 分支规则只把汇总 job "ci-ok" 设为"必须通过"。系统固定 ubuntu-24.04（不用 latest，免得系统升级悄悄改变结果）。
+# 原则：不需要任何密钥（外部服务用替身）；用到数据库的，在 GitHub 提供的 MySQL、Redis 服务容器上真实地跑。
+# 第 0 批（从前身项目搬代码）：照搬前身项目的检查——
+#   basic：项目索引检查、品牌和内部信息检查、密钥扫描（gitleaks）
+#   web-client / web-admin / web-site：lint、单元测试、构建、真实构建不含模拟层、构建产物没有旧品牌名、依赖安全检查
+#   backend：Maven 父工程 mvn verify（quote-protocol、quote-app 报价进程、backend = trading-app），真实 MySQL 8.4、Redis 7
+#   e2e：Playwright 端到端（报价服务 + 交易后端两个进程，e2e profile，外部服务全用替身）
+#   main-ancestor：staging 上"main 是不是祖先"
+# 没搬的：合约和本地链归集（自带钱包不要了）；部署形态端到端（Playwright 经过镜像和 Nginx 跑主流程，以后再加）。
+# 第 4 批前置（部署方案 v1）：
+#   deploy-check：部署工具包的静态检查（shellcheck、compose 约束、同版本 nginx -t、验收用例的写法），改 deploy/、e2e/staging-e2e/ 时跑
+#   image：合并到 staging 且 ci-ok 通过后，构建 trading-app、trading-quote、trading-web 三个镜像，扫一遍不带密钥（gitleaks），
+#          推到 GitHub 镜像仓库（标签 = 完整提交号，再移动 staging 标签）；测试服务器每分钟自己来拉（deploy/kit/trading update），GitHub 不登录服务器
+#   staging-smoke：等测试服务器换成这个提交后跑冒烟检查（e2e/staging-smoke.sh）；地址在仓库密钥 STAGING_URL，没配就跳过
+# PR 上按改动路径决定跑哪些 job（changes），没跑的显示"跳过"，ci-ok 把"跳过"当作通过；push 和手动运行时全部都跑。
+name: ci
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: read   # 密钥扫描（gitleaks-action）、路径判断（paths-filter）要读 PR 的提交和文件列表，只读
+concurrency:
+  # PR：同一分支新推送时取消旧运行。push / 手动：不取消正在跑的（包括正在推镜像的），排队中的只保留最新一个——
+  # 修"连续合并互相取消"：以前 staging 上后一次合并会取消前一次，加了推镜像后前一次发布会被打断
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.head_ref) || format('{0}-{1}', github.event_name, github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  # 决定 PR 上跑哪些 job。不是 PR（push、手动）或者改到了 .github/ 时全部为 'true'。
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      client: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.client == 'true' || steps.f.outputs.webshared == 'true' }}
+      admin: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.admin == 'true' || steps.f.outputs.webshared == 'true' }}
+      site: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.site == 'true' || steps.f.outputs.webshared == 'true' }}
+      backend: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.backend == 'true' || steps.f.outputs.admin == 'true' }}
+      e2e: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.backend == 'true' || steps.f.outputs.e2e == 'true' }}
+      deploy: ${{ steps.all.outputs.full == 'true' || steps.f.outputs.deploy == 'true' }}
+    steps:
+      - name: 改动路径（只在 PR 上判断；用 GitHub 接口取文件列表，不用 checkout）
+        id: f
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d   # v4.0.1
+        with:
+          filters: |
+            ci:
+              - '.github/**'
+            webshared:
+              - 'scripts/check-no-mocks.mjs'
+              - 'scripts/check-brand.mjs'
+            client:
+              - 'web/client/**'
+              # 客户端品种表测试核对报价服务模拟源的起始价（web/client/src/mocks/data/symbols.test.ts）
+              - 'quote-app/**/simulated-prices.csv'
+            admin:
+              - 'web/admin/**'
+            site:
+              - 'web/site/**'
+            backend:
+              - 'pom.xml'
+              - 'backend/**'
+              - 'quote-app/**'
+              - 'quote-protocol/**'
+            e2e:
+              - 'e2e/*'
+              - 'e2e/tests/**'
+            deploy:
+              - 'deploy/**'
+              - '.dockerignore'
+              - 'e2e/staging-smoke.sh'
+              - 'e2e/staging-e2e/**'
+      - name: 是否全部都跑
+        id: all
+        env:
+          EVENT: ${{ github.event_name }}
+          CI_CHANGED: ${{ steps.f.outputs.ci }}
+        run: |
+          if [ "$EVENT" != pull_request ] || [ "$CI_CHANGED" = true ]; then full=true; else full=false; fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "全部都跑：$full（事件 $EVENT）"
+
+  # 基本检查：任何改动都跑
+  basic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+      - name: 项目索引检查
+        run: node scripts/check-project-index.mjs
+      - name: 品牌和内部信息检查（仓库公开，不能有前身项目的品牌名、品牌域名、镜像地址）
+        run: node scripts/check-brand.mjs --repo
+      - name: 密钥扫描（仓库里不能出现密钥的值）
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2（v2.3.9）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  web-client:
+    name: web (client)
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/web-check
+        with:
+          app: client
+          mock-build: 'true'
+  web-admin:
+    name: web (admin)
+    needs: changes
+    if: needs.changes.outputs.admin == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/web-check
+        with:
+          app: admin
+  web-site:
+    name: web (site)
+    needs: changes
+    if: needs.changes.outputs.site == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/web-check
+        with:
+          app: site
+          mock-build: 'true'
+
+  # 后端：父工程 pom.xml 下的全部模块。后端测试会读后台前端的权限和菜单配置（web/admin/src/config），改后台前端时也跑
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # 一次性测试容器的密码，只在 CI 里用，不是任何环境的密钥
+          MYSQL_ROOT_PASSWORD: ci_only_not_a_secret
+          MYSQL_DATABASE: trading_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -pci_only_not_a_secret --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      FX_DB_URL: jdbc:mysql://127.0.0.1:3306/trading_test
+      FX_DB_USERNAME: root
+      FX_DB_PASSWORD: ci_only_not_a_secret
+      # 报价进程（quote-app）测试用的库：同一个 MySQL 容器上另建一个
+      FX_QUOTE_DB_URL: jdbc:mysql://127.0.0.1:3306/trading_quote_test?createDatabaseIfNotExist=true
+      FX_REDIS_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5（v5.7.0）
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+      - name: 单元测试、集成测试和模块边界检查
+        run: mvn -B -ntp verify
+
+  # 端到端（Playwright）：真实接口模式构建的三个前端 + 后端（profile e2e，外部依赖用替身）+ MySQL、Redis 容器。
+  # 主流程：注册 → 充值（链替身）→ 下单 → 止盈止损 → 平仓 → 提现，后台审核；官网用例。失败时上传 trace、截图、录像和两个进程的日志。
+  e2e:
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          # 一次性测试容器的密码，只在 CI 里用，不是任何环境的密钥
+          MYSQL_ROOT_PASSWORD: ci_only_not_a_secret
+          MYSQL_DATABASE: trading_e2e
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -pci_only_not_a_secret --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      FX_DB_URL: jdbc:mysql://127.0.0.1:3306/trading_e2e
+      FX_DB_USERNAME: root
+      FX_DB_PASSWORD: ci_only_not_a_secret
+      FX_REDIS_HOST: 127.0.0.1
+      # 第一个超管：一次性测试值，只在 CI 的临时数据库里用，不是任何环境的密钥；测试里首次登录会改成另一个一次性值
+      FX_ADMIN_INIT_USERNAME: e2e_admin
+      FX_ADMIN_INIT_PASSWORD: ci_only_admin_init_1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5（v5.7.0）
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/client/package-lock.json
+            web/admin/package-lock.json
+            web/site/package-lock.json
+            e2e/package-lock.json
+      - name: 缓存 Playwright 浏览器
+        id: pw-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+      - name: 构建后端
+        run: mvn -B -ntp package -DskipTests
+      - name: 构建客户端（真实接口模式）
+        working-directory: web/client
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: 构建后台（真实接口模式）
+        working-directory: web/admin
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: 构建官网（真实接口模式；server.mjs 在 4174 端口提供）
+        working-directory: web/site
+        run: npm ci --no-audit --no-fund && npm run build
+      - name: 安装 Playwright 和 Chromium（浏览器有缓存时只装系统依赖）
+        working-directory: e2e
+        env:
+          PW_CACHED: ${{ steps.pw-cache.outputs.cache-hit }}
+        run: |
+          npm ci --no-audit --no-fund
+          if [ "$PW_CACHED" = true ]; then npx playwright install-deps chromium; else npx playwright install --with-deps chromium; fi
+      - name: 启动报价服务和后端（profile e2e）
+        run: bash e2e/start-backend.sh
+      - name: 端到端测试
+        working-directory: e2e
+        run: npx playwright test
+      - name: 上传失败记录（trace、截图、录像、后端日志）
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4（v4.6.2）
+        with:
+          name: e2e-failure
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/logs/backend.log
+            e2e/logs/quote.log
+          retention-days: 14
+      - name: 停止后端和报价服务
+        if: always()
+        run: |
+          kill "$(cat e2e/logs/backend.pid)" 2> /dev/null || true
+          kill "$(cat e2e/logs/quote.pid)" 2> /dev/null || true
+
+  # 改动只能经 staging 进 main：PR 目标或推送分支是 staging 时，main 必须是它的祖先，不是就报红并列出差的提交
+  main-ancestor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: main 是不是 staging 的祖先
+        env:
+          TARGET: ${{ github.base_ref || github.ref_name }}
+        run: |
+          if [ "$TARGET" != "staging" ]; then echo "目标不是 staging，跳过"; exit 0; fi
+          if ! git rev-parse -q --verify origin/main >/dev/null; then echo "还没有 main，跳过"; exit 0; fi
+          if git merge-base --is-ancestor origin/main HEAD; then echo "main 是祖先"; exit 0; fi
+          echo "main 不是祖先，差这些提交（先把 main 合回 staging）："
+          git log --oneline HEAD..origin/main
+          exit 1
+
+  # 部署工具包的静态检查（不需要任何密钥；假值只在临时目录）
+  deploy-check:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - name: shellcheck、docker compose config 约束、nginx -t
+        run: bash deploy/check.sh
+      - name: 测试环境验收用例的写法（语法；不用会把接口返回打进公开日志的断言和 console.log）
+        run: |
+          for f in e2e/staging-e2e/*.mjs; do node --check "$f"; done
+          if grep -nE 'assert\.(equal|deepEqual|strictEqual|notEqual|match)\(|console\.log' e2e/staging-e2e/*.test.mjs; then
+            echo "::error::验收用例只许用 assert.ok 和 lib.mjs 的 ok()、expectError()（公开日志不能有接口返回）"; exit 1
+          fi
+
+  # 汇总：任何一个检查失败或被取消就失败（按路径跳过的 job 算通过）
+  ci-ok:
+    needs: [changes, basic, web-client, web-admin, web-site, backend, e2e, main-ancestor, deploy-check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: 汇总结果
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BAD: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "$NEEDS"
+          if [ "$BAD" = "true" ]; then echo "有检查失败或被取消"; exit 1; fi
+
+  # 合并到 staging 且 ci-ok 通过后：构建三个镜像 → 扫一遍不带密钥 → 推到 GitHub 镜像仓库（标签 = 完整提交号，再移动 staging 标签）。
+  # 测试服务器每分钟自己来拉（TD4-4 A），GitHub 里没有任何能登录服务器的东西。只有这个 job 有 packages: write（本次运行自带的临时令牌）。
+  # concurrency 不取消进行中的：连续合并时前一次推完再推后一次，staging 标签不会倒退。PR 上不运行。
+  image:
+    needs: [ci-ok]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: image-staging
+      cancel-in-progress: false
+    env:
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5（v5.7.0）
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: maven
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/client/package-lock.json
+            web/admin/package-lock.json
+            web/site/package-lock.json
+      - name: 打包 trading-app、quote-app（测试已在 backend、e2e job 跑过）
+        run: mvn -B -ntp package -DskipTests
+      - name: 构建三个前端（真实接口模式，不设 VITE_API_MODE）
+        run: |
+          for app in client admin site; do
+            npm ci --prefix "web/$app" --no-audit --no-fund
+            npm run build --prefix "web/$app"
+          done
+      - name: 构建三个镜像（标签 = 完整提交号）
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          for pair in app:trading-app quote:trading-quote web:trading-web; do
+            docker build -f "deploy/${pair%%:*}.Dockerfile" --build-arg FX_VERSION="$SHA" \
+              --label org.opencontainers.image.revision="$SHA" \
+              --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              -t "$reg/${pair#*:}:$SHA" .
+          done
+      - name: 镜像里不带密钥（gitleaks 扫三个镜像里我们放进去的文件，含前端脚本，jar 解开扫；镜像里不能有 .env）
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          scan=$(mktemp -d)
+          for img in trading-app trading-quote trading-web; do
+            cid=$(docker create "$reg/$img:$SHA")
+            mkdir -p "$scan/$img"
+            case "$img" in
+              trading-web) for p in /trading-kit /usr/share/nginx /etc/nginx; do docker cp "$cid:$p" "$scan/$img/" ; done ;;
+              *) docker cp "$cid:/app" "$scan/$img/"; for j in "$scan/$img"/app/*.jar; do mkdir -p "$j.d"; (cd "$j.d" && unzip -q "$j"); rm -f "$j"; done ;;
+            esac
+            docker rm "$cid" > /dev/null
+          done
+          if find "$scan" -name '.env' -o -name '*.pem' -o -name 'id_rsa*' | grep -q .; then echo "::error::镜像里有 .env、证书私钥或 SSH 私钥"; exit 1; fi
+          # 前端打包后的脚本也扫；逐字的误报例外写在 deploy/gitleaks-image.toml（默认规则全部照用）
+          docker run --rm -v "$scan:/scan:ro" -v "$PWD/deploy/gitleaks-image.toml:/gitleaks.toml:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
+            dir /scan --config /gitleaks.toml --no-banner --redact --exit-code 1
+      - name: 推送（先推三个提交号标签，最后才移动 staging 标签；trading-app 的 staging 最后移，服务器看到它变时三个都已就绪）
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for img in trading-quote trading-web trading-app; do docker push -q "$reg/$img:$SHA"; done
+          for img in trading-quote trading-web trading-app; do
+            docker tag "$reg/$img:$SHA" "$reg/$img:staging"
+            docker push -q "$reg/$img:staging"
+          done
+          docker logout ghcr.io
+          echo "已推送 trading-app、trading-quote、trading-web:$SHA（staging 标签已移动）" >> "$GITHUB_STEP_SUMMARY"
+
+  # 镜像推送后：等测试服务器换成这个提交（健康检查的 version），再跑冒烟检查。地址在仓库密钥 STAGING_URL（日志里自动遮盖）；没配就跳过
+  staging-smoke:
+    needs: [image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      STAGING_URL: ${{ secrets.STAGING_URL }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - name: 测试环境冒烟检查
+        run: |
+          if [ -z "$STAGING_URL" ]; then echo "::warning::仓库密钥 STAGING_URL 还没有配置，跳过"; exit 0; fi
+          bash e2e/staging-smoke.sh "$STAGING_URL" "$GITHUB_SHA"

@@ -1,0 +1,10 @@
+# 每天加密备份（TD4-7 A：本机加密、留 7 天、不异地）
+[Unit]
+Description=Trading 测试环境备份
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/trading/trading backup daily
+TimeoutStartSec=30min

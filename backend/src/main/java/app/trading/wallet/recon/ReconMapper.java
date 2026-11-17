@@ -1,0 +1,61 @@
+package app.trading.wallet.recon;
+
+import app.trading.wallet.api.WalletReconApi;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+
+/** 对账的 SQL，见 resources/mapper/wallet/ReconMapper.xml。 */
+@Mapper
+interface ReconMapper {
+
+  /** provider、providerRef：钱包提供方回调入账的（第 1 批起）；自带钱包时代的旧数据 providerRef 为空 */
+  record DepositRow(long id, String chain, String txHash, int logIndex, long userId, BigDecimal amount, String status, long blockNumber, String blockHash,
+      LocalDateTime createdAt, String provider, String providerRef, String toAddress) {
+
+    /** 和账本流水的业务号一致：提供方:到账编号；旧数据 链:交易:序号 */
+    String key() {
+      return providerRef != null ? provider + ":" + providerRef : chain + ":" + txHash + ":" + logIndex;
+    }
+  }
+
+  /** 按单号逐笔核对用的提现 */
+  record RecentWithdrawal(long id, long publicNo, long userId, BigDecimal amount, BigDecimal fee, String status) {}
+
+  List<RecentWithdrawal> recentWithdrawals(@Param("since") LocalDateTime since);
+
+  record SuspenseRow(long id, long userId, long depositId, BigDecimal amount, String status) {}
+
+  record WithdrawalRow(long id, long userId, BigDecimal amount, String status) {}
+
+
+  /** 不管状态（归集的问题处理过以后不再重复列出） */
+  int issueCount(@Param("kind") String kind, @Param("refId") String refId);
+
+  /** 已入账和已冲正的充值（入过账的） */
+  List<DepositRow> creditedDeposits();
+
+  List<SuspenseRow> suspenses();
+
+  List<WithdrawalRow> withdrawals();
+
+  int openIssueCount(@Param("kind") String kind, @Param("refId") String refId);
+
+  int insertIssue(@Param("kind") String kind, @Param("refId") String refId, @Param("userId") Long userId, @Param("expected") BigDecimal expected,
+      @Param("actual") BigDecimal actual, @Param("detail") String detail);
+
+  List<WalletReconApi.Issue> issues(@Param("status") String status, @Param("limit") int limit);
+
+  List<WalletReconApi.Issue> issuePage(@Param("status") String status, @Param("offset") int offset, @Param("limit") int limit);
+
+  long countIssues(@Param("status") String status);
+
+  WalletReconApi.Issue lockIssue(@Param("id") long id);
+
+  /** 只改"待处理"的（修复 F5：现有系统把这个条件写反了） */
+  int resolveIssue(@Param("id") long id, @Param("adminId") long adminId, @Param("note") String note, @Param("at") LocalDateTime at);
+
+  int resolveSuspense(@Param("id") long id, @Param("at") LocalDateTime at, @Param("note") String note);
+}

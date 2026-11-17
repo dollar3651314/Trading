@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trading 后端父工程：一个 Maven 工程、两个进程。
+     quote-protocol/ = 报价协议（内部 WebSocket 的消息格式、序号检查、客户端），trading-app 和 quote-app 共用；不依赖 Spring
+     quote-app/      = 报价进程（报价源接入、主备切换、质量守卫、交易时段、内部 WebSocket、报价源授权登记），单独启动
+     backend/        = trading-app（交易主进程。目录名沿用 backend，路径和前身一致）；只通过 quote-protocol 收报价，不能依赖 quote-app 的类 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>app.trading</groupId>
+  <artifactId>trading-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>trading-parent</name>
+
+  <modules>
+    <module>quote-protocol</module>
+    <module>quote-app</module>
+    <module>backend</module>
+  </modules>
+
+  <properties>
+    <java.version>25</java.version>
+    <archunit.version>1.5.1</archunit.version>
+    <mybatis.version>4.1.0</mybatis.version>
+  </properties>
+</project>

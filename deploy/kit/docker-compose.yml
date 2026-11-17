@@ -1,0 +1,230 @@
+# Trading 测试环境的容器（第 4 批，部署方案 v1 02 页）。放在服务器 /opt/trading/，由 trading 命令用两个变量文件启动：
+#   .env             ← 服务器上生成的内部密码和 Amos 用 trading keys 填的 Key（变量名见 .env.example），权限 600，不进仓库
+#   state/image.env  ← 当前版本 IMAGE_TAG=<完整提交号>（trading update、rollback 写）
+# 部署方案 v1 07 页（TD4-20 = B）：测试环境用现有的阿里云 2 核 2G，和 TopUP **轮流跑、不同时跑**（sudo trading on / off）；
+# Trading 自己占 80、443，自己的 MySQL、Redis，不动 TopUP 的任何容器、配置和数据。
+# trading-app 只绑本机 127.0.0.1:8080 给部署脚本看健康检查；quote-app、MySQL、Redis 不映射任何端口。
+# 内存（Amos 11/17 选 B：在现有 2G 上单独模式硬跑，是 Amos 批准的 C75 例外；11/17 测试服务器实测后调整，合计待 Amos 确认）：
+#   trading-app 348、quote-app 264、mysql 320、redis 16、web 16，合计 964 MB（原 900：trading-app 380、mysql 224）。
+#   为什么改：测试服务器 setup 第 ⑤ 步备份时 mysql 用到 208/224（mysqldump 跑在 mysql 容器里，也算进它的上限），顶到上限又不能用交换分区，
+#   内核反复回收页面（系统态 CPU 92.7%、负载 48），卡了 20 多分钟后 mysqldump 断连。同一时刻 trading-app 286/380、quote-app 121/264、web 11、redis 8。
+#   trading-app 余量最大（服务器和开发机实测都约 287），降 32 给 mysql；quote-app 开发机并发实测约 243，不降。
+#   门槛：install 时实测可用 1,029 MB（那时 Docker 守护进程已在内存里，原来"Docker 约 80"大部分已含在这个数里，推断），
+#   合计 964 + 每个容器的运行开销约 36（推断，未实测）= 1,000，启动门槛 TR_MIN_MEM_MB 仍是 1,000。
+#   除 mysql 外每个容器 mem_limit = memswap_limit（不用交换分区：JVM 被换出去会卡死 GC，宁可超限被杀重启）；
+#   mysql 例外：内存 320 + 最多 128 MB 交换分区（memswap_limit 448，主机有 2 GB 交换分区），顶到上限时把不常用的页换出去，不再卡死在回收上。
+#   JVM 各区（堆、元空间、代码缓存、直接内存、线程栈）显式写在 JAVA_TOOL_OPTIONS，按开发机实测（11/17，并发请求 3 分钟后的用量，实际执行）分配，
+#   数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等）。两个 JVM 都按 2 核算（-XX:ActiveProcessorCount=2，和服务器一样，GC、编译线程数固定）。
+#   trading on / install 要可用内存 ≥ 1,000 MB 才启动；内存守护（trading memguard，每 30 秒）可用内存低于阈值时只停 Trading，不碰 TopUP。
+# 三张自己的网络：
+#   internal（不能出公网）：mysql、redis、trading-app、quote-app。trading-web 不接，碰不到数据库
+#   quote（不能出公网）：quote-app（别名 quote-internal，只在这张网上监听）、trading-app、trading-web。mysql、redis 碰不到报价服务
+#   egress（能出公网）：trading-web、trading-app（调 TopUP、发邮件）、quote-app（连币安等报价源）
+name: trading
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: "3"
+
+networks:
+  internal:
+    internal: true
+  quote:
+    internal: true
+  egress: {}
+
+services:
+  trading-web:
+    image: ghcr.io/dollar3651314/trading-web:${IMAGE_TAG:?缺少 IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?缺少 APP_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:?缺少 ADMIN_DOMAIN}
+      WWW_DOMAIN: ${WWW_DOMAIN:?缺少 WWW_DOMAIN}
+      QUOTE_DOMAIN: ${QUOTE_DOMAIN:?缺少 QUOTE_DOMAIN}
+    volumes:
+      # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来
+      - /etc/letsencrypt/live/trading:/etc/letsencrypt/live/trading:ro
+      - /etc/letsencrypt/archive/trading:/etc/letsencrypt/archive/trading:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    networks:
+      egress: {}
+      quote: {}
+    depends_on:
+      - trading-app
+    mem_limit: ${TR_MEM_WEB:-16m}
+    memswap_limit: ${TR_MEM_WEB:-16m}
+    logging: *logging
+
+  trading-app:
+    image: ghcr.io/dollar3651314/trading-app:${IMAGE_TAG:?缺少 IMAGE_TAG}
+    restart: unless-stopped
+    # 只给本机的部署脚本做健康检查，不对公网开放（云防火墙也只开 80、443）
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      FX_DB_URL: jdbc:mysql://mysql:3306/trading?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+      FX_DB_USERNAME: trading
+      FX_DB_PASSWORD: ${FX_DB_PASSWORD:?缺少 FX_DB_PASSWORD}
+      FX_REDIS_HOST: redis
+      FX_REDIS_PORT: "6379"
+      FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
+      # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 348（开发机实测并发后约 287，测试服务器跑 30 分钟约 286）
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
+      FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
+      FX_COOKIE_SECURE: "true"
+      FX_ENV_LABEL: test
+      FX_ID_NODE: "1"
+      FX_STORAGE_DIR: /data/storage
+      # 报价：连报价服务（默认 none = 不连，必须改）；内部 Key 两边同一个值（同一个 .env）
+      FX_MARKET_SOURCE: remote
+      FX_QUOTE_APP_URL: http://quote-internal:8090
+      FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
+      # 测试管理员判定"报价模式是 simulated"要用（和 quote-app 同一个值）
+      FX_QUOTE_MARKET_SOURCE: simulated
+      FX_PUBLIC_QUOTES_SOURCE: simulated
+      # TopUP（Amos 用 trading keys 填）：三个缺一个就算"未接入"
+      FX_TOPUP_BASE_URL: ${FX_TOPUP_BASE_URL:-}
+      FX_TOPUP_API_KEY: ${FX_TOPUP_API_KEY:-}
+      FX_TOPUP_API_SECRET: ${FX_TOPUP_API_SECRET:-}
+      FX_ADMIN_INIT_USERNAME: ${FX_ADMIN_INIT_USERNAME:-}
+      FX_ADMIN_INIT_PASSWORD: ${FX_ADMIN_INIT_PASSWORD:-}
+      FX_MAIL_HOST: ${FX_MAIL_HOST:-}
+      FX_MAIL_PORT: ${FX_MAIL_PORT:-587}
+      FX_MAIL_SECURITY: ${FX_MAIL_SECURITY:-STARTTLS}
+      FX_MAIL_USERNAME: ${FX_MAIL_USERNAME:-}
+      FX_MAIL_PASSWORD: ${FX_MAIL_PASSWORD:-}
+      FX_MAIL_FROM: ${FX_MAIL_FROM:-}
+      FX_PUSH_VAPID_PUBLIC_KEY: ${FX_PUSH_VAPID_PUBLIC_KEY:-}
+      FX_PUSH_VAPID_PRIVATE_KEY: ${FX_PUSH_VAPID_PRIVATE_KEY:-}
+      FX_PUSH_VAPID_SUBJECT: ${FX_PUSH_VAPID_SUBJECT:-}
+      FX_ALERT_EMAILS: ${FX_ALERT_EMAILS:-}
+      FX_RISK_ALERT_EMAILS: ${FX_RISK_ALERT_EMAILS:-}
+      # 测试管理员（做法 07）：只存令牌的 SHA-256，trading gen-test-admin 生成、test-admin-off 删除
+      TEST_ADMIN_TOKEN_SHA256: ${TEST_ADMIN_TOKEN_SHA256:-}
+    volumes:
+      - ./data/storage:/data/storage
+    networks:
+      internal: {}
+      quote: {}
+      egress: {}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      quote-app:
+        condition: service_started
+    # 单实例：停机时先停止接收新订单、处理完队列再退出
+    stop_grace_period: 60s
+    mem_limit: ${TR_MEM_APP:-348m}
+    memswap_limit: ${TR_MEM_APP:-348m}
+    logging: *logging
+
+  quote-app:
+    image: ghcr.io/dollar3651314/trading-quote:${IMAGE_TAG:?缺少 IMAGE_TAG}
+    restart: unless-stopped
+    # 不映射任何端口。只在 quote 网络上的别名 quote-internal 监听（FX_QUOTE_BIND_ADDRESS），trading-app、web 能连，公网和 mysql、redis 碰不到
+    environment:
+      FX_QUOTE_BIND_ADDRESS: quote-internal
+      FX_QUOTE_DB_URL: jdbc:mysql://mysql:3306/quote?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true
+      FX_QUOTE_DB_USERNAME: quote
+      FX_QUOTE_DB_PASSWORD: ${FX_QUOTE_DB_PASSWORD:?缺少 FX_QUOTE_DB_PASSWORD}
+      FX_REDIS_HOST: redis
+      FX_REDIS_PORT: "6379"
+      FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
+      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，线程栈 256K × 约 70 + 本机内存，容器 264（开发机实测并发后约 243，元空间用到约 78；测试服务器跑 30 分钟约 121）
+      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
+      FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
+      FX_QUOTE_KEY_ENC_KEY: ${FX_QUOTE_KEY_ENC_KEY:?缺少 FX_QUOTE_KEY_ENC_KEY}
+      # 测试环境：模拟价，配了 token 的真实源接管它覆盖的品种；live 只给生产
+      FX_QUOTE_MARKET_SOURCE: simulated
+      FX_QUOTE_BINANCE_ENABLED: ${FX_QUOTE_BINANCE_ENABLED:-true}
+      FX_QUOTE_BINANCE_FUTURES_ENABLED: "false"
+      FX_QUOTE_LICENSE_ENFORCE: auto
+      FX_QUOTE_OPEN_DOCS: auto
+      FX_QUOTE_ALLTICK_TOKEN: ${FX_QUOTE_ALLTICK_TOKEN:-}
+      FX_QUOTE_ITICK_TOKEN: ${FX_QUOTE_ITICK_TOKEN:-}
+    networks:
+      internal: {}
+      egress: {}
+      quote:
+        aliases: [quote-internal]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 管理端口只在容器里的 127.0.0.1:8091；镜像里没有 curl，用 bash 自带的 /dev/tcp 查
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8091 && printf 'GET /actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    stop_grace_period: 30s
+    mem_limit: ${TR_MEM_QUOTE:-264m}
+    memswap_limit: ${TR_MEM_QUOTE:-264m}
+    logging: *logging
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?缺少 MYSQL_ROOT_PASSWORD}
+      # 两个库两个账号，互相看不到对方的库（mysql-init/01-databases.sh 第一次初始化时建）
+      FX_DB_PASSWORD: ${FX_DB_PASSWORD:?缺少 FX_DB_PASSWORD}
+      FX_QUOTE_DB_PASSWORD: ${FX_QUOTE_DB_PASSWORD:?缺少 FX_QUOTE_DB_PASSWORD}
+      TZ: UTC
+    command:
+      - --innodb-buffer-pool-size=${TR_MYSQL_BUFFER_POOL:-32M}
+      - --performance-schema=OFF
+      - --max-connections=25
+      - --innodb-log-buffer-size=8M
+      - --key-buffer-size=8M
+      - --tmp-table-size=16M
+      - --max-heap-table-size=16M
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      internal: {}
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    # 内存 320（服务器上 224 时备份卡死，见开头）；只有 mysql 允许用交换分区，最多 128 MB（memswap_limit = 内存 + 交换）
+    mem_limit: ${TR_MEM_MYSQL:-320m}
+    memswap_limit: ${TR_MEMSWAP_MYSQL:-448m}
+    logging: *logging
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）；只放计数和票据，maxmemory 8 MB，容器 16 MB
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 8mb --maxmemory-policy noeviction --save 300 10"]
+    environment:
+      REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
+    volumes:
+      - ./data/redis:/data
+    networks:
+      internal: {}
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: ${TR_MEM_REDIS:-16m}
+    memswap_limit: ${TR_MEM_REDIS:-16m}
+    logging: *logging

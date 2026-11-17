@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 订单和持仓。只有 trading 模块使用。 -->
+<mapper namespace="app.trading.trading.order.OrderMapper">
+
+  <sql id="orderCols">id, public_no, user_id, client_order_id, symbol, order_type, side, lots, leverage, limit_price, take_profit, stop_loss,
+    frozen_amount, notional_usd, status, fill_price, position_id, revision, created_at</sql>
+
+  <sql id="positionCols">id, public_no, user_id, order_id, parent_id, symbol, side, lots, leverage, open_price, contract_size, quote_ccy, open_usd_rate, notional_usd,
+    margin, fee, swap_total, split_swap_seq, maintenance_margin_rate, liquidation_price, take_profit, stop_loss, status, opened_at, closed_at,
+    close_price, realized_pnl, close_reason</sql>
+
+  <select id="findByClientId" resultType="app.trading.trading.order.OrderRow">
+    SELECT <include refid="orderCols"/> FROM trading_order WHERE user_id = #{userId} AND client_order_id = #{clientOrderId}
+  </select>
+
+  <select id="lockPending" resultType="app.trading.trading.order.OrderRow">
+    SELECT <include refid="orderCols"/> FROM trading_order WHERE id = #{id} AND user_id = #{userId} AND status = 'PENDING' FOR UPDATE
+  </select>
+
+  <select id="pendingOrders" resultType="app.trading.trading.order.OrderRow">
+    SELECT <include refid="orderCols"/> FROM trading_order WHERE user_id = #{userId} AND status = 'PENDING' ORDER BY id DESC
+  </select>
+
+  <select id="openPositions" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position WHERE user_id = #{userId} AND status = 'OPEN' ORDER BY id DESC
+  </select>
+
+  <insert id="insertOrder" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO trading_order (public_no, user_id, client_order_id, symbol, order_type, side, lots, leverage, limit_price, take_profit, stop_loss,
+      frozen_amount, notional_usd, status)
+    VALUES (#{publicNo}, #{userId}, #{clientOrderId}, #{symbol}, #{orderType}, #{side}, #{lots}, #{leverage}, #{limitPrice}, #{takeProfit}, #{stopLoss},
+      #{frozenAmount}, #{notionalUsd}, #{status})
+  </insert>
+
+  <update id="markFilled">
+    UPDATE trading_order SET status = 'FILLED', fill_price = #{fillPrice}, position_id = #{positionId} WHERE id = #{id}
+  </update>
+
+  <update id="markCancelled">
+    UPDATE trading_order SET status = 'CANCELLED', cancelled_at = UTC_TIMESTAMP(3) WHERE id = #{id} AND status = 'PENDING'
+  </update>
+
+  <insert id="insertPosition" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO trading_position (public_no, user_id, order_id, symbol, side, lots, leverage, open_price, contract_size, quote_ccy, open_usd_rate, notional_usd,
+      margin, fee, maintenance_margin_rate, liquidation_price, take_profit, stop_loss, status, opened_at)
+    VALUES (#{publicNo}, #{userId}, #{orderId}, #{symbol}, #{side}, #{lots}, #{leverage}, #{openPrice}, #{contractSize}, #{quoteCcy}, #{openUsdRate}, #{notionalUsd},
+      #{margin}, #{fee}, #{maintenanceMarginRate}, #{liquidationPrice}, #{takeProfit}, #{stopLoss}, 'OPEN', UTC_TIMESTAMP(3))
+  </insert>
+
+  <update id="updatePending">
+    UPDATE trading_order SET limit_price = #{limitPrice}, lots = #{lots}, take_profit = #{takeProfit}, stop_loss = #{stopLoss},
+      frozen_amount = #{frozenAmount}, notional_usd = #{notionalUsd}, revision = #{revision}
+    WHERE id = #{id} AND status = 'PENDING'
+  </update>
+
+  <select id="lockOpenPosition" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position WHERE id = #{id} AND user_id = #{userId} AND status = 'OPEN' FOR UPDATE
+  </select>
+
+  <update id="closePosition">
+    UPDATE trading_position SET status = 'CLOSED', close_price = #{closePrice}, realized_pnl = #{pnl}, close_reason = #{reason}, closed_at = UTC_TIMESTAMP(3)
+    WHERE id = #{id} AND status = 'OPEN'
+  </update>
+
+  <!-- 部分平仓（V32）：拆出来的那一行。开仓时间、订单号、开仓参数和原持仓相同；先插成 OPEN，同一事务里马上由 closePosition 平掉（提交前别的事务看不到） -->
+  <insert id="insertSplit" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO trading_position (public_no, user_id, order_id, parent_id, symbol, side, lots, leverage, open_price, contract_size, quote_ccy, open_usd_rate,
+      notional_usd, margin, fee, swap_total, split_swap_seq, maintenance_margin_rate, liquidation_price, take_profit, stop_loss, status, opened_at)
+    VALUES (#{publicNo}, #{userId}, #{orderId}, #{parentId}, #{symbol}, #{side}, #{lots}, #{leverage}, #{openPrice}, #{contractSize}, #{quoteCcy}, #{openUsdRate},
+      #{notionalUsd}, #{margin}, #{fee}, #{swapTotal}, #{splitSwapSeq}, #{maintenanceMarginRate}, #{liquidationPrice}, #{takeProfit}, #{stopLoss}, 'OPEN', #{openedAt})
+  </insert>
+
+  <!-- 部分平仓（V32）：原持仓减去平掉的部分（手数、保证金、手续费、累计隔夜费、名义价值），强平价按剩余重算 -->
+  <update id="shrinkPosition">
+    UPDATE trading_position SET lots = #{lots}, margin = #{margin}, fee = #{fee}, swap_total = #{swapTotal}, notional_usd = #{notionalUsd},
+      liquidation_price = #{liquidationPrice}
+    WHERE id = #{id} AND status = 'OPEN'
+  </update>
+
+  <select id="maxSwapId" resultType="long">
+    SELECT COALESCE(MAX(id), 0) FROM trading_swap WHERE position_id = #{positionId}
+  </select>
+
+  <!-- 拆出来的行：原持仓在拆分之前（记录号 ≤ seq）是否已经结算过这个结算日 -->
+  <select id="settledBeforeSplit" resultType="boolean">
+    SELECT EXISTS (SELECT 1 FROM trading_swap WHERE position_id = #{parentId} AND rollover_date = #{date} AND id &lt;= #{seq})
+  </select>
+
+  <update id="updateTpSl">
+    UPDATE trading_position SET take_profit = #{takeProfit}, stop_loss = #{stopLoss} WHERE id = #{id} AND status = 'OPEN'
+  </update>
+
+  <update id="updateMargin">
+    UPDATE trading_position SET margin = #{margin}, liquidation_price = #{liquidationPrice} WHERE id = #{id} AND status = 'OPEN'
+  </update>
+
+  <sql id="historyUnion">
+    SELECT CONCAT('P', p.public_no) AS id, p.symbol, p.side, p.lots, p.open_price, p.close_price, p.realized_pnl AS pnl, p.fee, LOWER(p.close_reason) AS kind,
+      p.closed_at AS at, p.id AS seq, pp.public_no AS parent_no
+    FROM trading_position p LEFT JOIN trading_position pp ON pp.id = p.parent_id
+    WHERE p.user_id = #{userId} AND p.status = 'CLOSED'
+    UNION ALL
+    SELECT CONCAT('O', public_no), symbol, side, lots, limit_price, NULL, NULL, 0, 'cancelled', cancelled_at, id, NULL
+    FROM trading_order WHERE user_id = #{userId} AND status = 'CANCELLED'
+  </sql>
+
+  <select id="history" resultType="app.trading.trading.order.HistoryRow">
+    SELECT id, symbol, side, lots, open_price, close_price, pnl, fee, kind, at, parent_no FROM (<include refid="historyUnion"/>) h
+    ORDER BY at DESC, seq DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countHistory" resultType="long">
+    SELECT COUNT(*) FROM (<include refid="historyUnion"/>) h
+  </select>
+
+  <select id="triggeredOrders" resultType="app.trading.trading.order.OrderRow">
+    SELECT <include refid="orderCols"/> FROM trading_order
+    WHERE symbol = #{symbol} AND status = 'PENDING'
+      AND ((side = 'BUY' AND limit_price &gt;= #{ask}) OR (side = 'SELL' AND limit_price &lt;= #{bid}))
+    ORDER BY id
+  </select>
+
+  <select id="triggeredPositions" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position
+    WHERE symbol = #{symbol} AND status = 'OPEN'
+      AND ((side = 'BUY' AND (liquidation_price &gt;= #{bid} OR take_profit &lt;= #{bid} OR stop_loss &gt;= #{bid}))
+        OR (side = 'SELL' AND (liquidation_price &lt;= #{ask} OR take_profit &gt;= #{ask} OR stop_loss &lt;= #{ask})))
+    ORDER BY id
+  </select>
+
+  <select id="swapDue" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position p
+    WHERE p.opened_at &lt; #{at} AND (p.status = 'OPEN' OR p.closed_at &gt; #{at})
+      AND p.symbol IN <foreach collection="symbols" item="s" open="(" separator="," close=")">#{s}</foreach>
+      AND NOT EXISTS (SELECT 1 FROM trading_swap s WHERE s.position_id = p.id AND s.rollover_date = #{date})
+      <!-- 部分平仓拆出来的行（V32）：原持仓在拆分之前已经按拆分前的手数结算过这一天的，不再收 -->
+      AND (p.parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM trading_swap s2 WHERE s2.position_id = p.parent_id AND s2.rollover_date = #{date}
+        AND s2.id &lt;= p.split_swap_seq))
+    ORDER BY p.id
+  </select>
+
+  <select id="lockPosition" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position WHERE id = #{id} FOR UPDATE
+  </select>
+
+  <insert id="insertSwap">
+    INSERT IGNORE INTO trading_swap (position_id, user_id, symbol, rollover_date, rollover_at, rate, price, usd_rate, amount)
+    VALUES (#{positionId}, #{userId}, #{symbol}, #{date}, #{at}, #{rate}, #{price}, #{usdRate}, #{amount})
+  </insert>
+
+  <update id="applySwap">
+    UPDATE trading_position SET margin = #{margin}, liquidation_price = #{liquidationPrice}, swap_total = swap_total + #{amount} WHERE id = #{id}
+  </update>
+
+  <resultMap id="symbolLots" type="app.trading.trading.api.ExposureApi$SymbolLots">
+    <constructor>
+      <arg column="symbol" javaType="string"/>
+      <arg column="long_lots" javaType="java.math.BigDecimal"/>
+      <arg column="short_lots" javaType="java.math.BigDecimal"/>
+      <arg column="long_notional" javaType="java.math.BigDecimal"/>
+      <arg column="short_notional" javaType="java.math.BigDecimal"/>
+    </constructor>
+  </resultMap>
+
+  <select id="openLots" resultMap="symbolLots">
+    SELECT symbol,
+      COALESCE(SUM(CASE WHEN side = 'BUY' THEN lots END), 0) AS long_lots,
+      COALESCE(SUM(CASE WHEN side = 'SELL' THEN lots END), 0) AS short_lots,
+      COALESCE(SUM(CASE WHEN side = 'BUY' THEN notional_usd END), 0) AS long_notional,
+      COALESCE(SUM(CASE WHEN side = 'SELL' THEN notional_usd END), 0) AS short_notional
+    FROM trading_position WHERE status = 'OPEN' GROUP BY symbol
+  </select>
+  <select id="usersWithOpenPositions" resultType="long">
+    SELECT DISTINCT user_id FROM trading_position WHERE status = 'OPEN'
+  </select>
+
+  <select id="marginCallState" resultType="app.trading.trading.order.MarginCallMonitor$State">
+    SELECT below, notified, last_notified_at FROM trading_margin_call WHERE user_id = #{userId}
+  </select>
+
+  <insert id="saveMarginCallState">
+    INSERT INTO trading_margin_call (user_id, below, notified, last_notified_at, updated_at)
+    VALUES (#{userId}, #{below}, #{notified}, #{lastNotifiedAt}, #{now})
+    ON DUPLICATE KEY UPDATE below = VALUES(below), notified = VALUES(notified), last_notified_at = VALUES(last_notified_at), updated_at = VALUES(updated_at)
+  </insert>
+
+  <update id="clearMarginCallWithoutPositions">
+    UPDATE trading_margin_call m SET below = 0, notified = 0, updated_at = #{now}
+    WHERE m.below = 1 AND NOT EXISTS (SELECT 1 FROM trading_position p WHERE p.user_id = m.user_id AND p.status = 'OPEN')
+  </update>
+
+  <!-- 后台（S16b） -->
+  <select id="balanceLedger" resultType="app.trading.trading.order.OrderMapper$LedgerRow">
+    SELECT l.id, l.entry_type, l.amount, l.value_after, l.biz_type, l.biz_id, l.created_at
+    FROM trading_ledger l JOIN trading_account a ON a.id = l.account_id
+    WHERE a.user_id = #{userId} AND l.bucket = 'BALANCE' ORDER BY l.id DESC LIMIT #{limit}
+  </select>
+
+  <select id="balances" resultType="app.trading.trading.order.OrderMapper$UserAmount">
+    SELECT user_id, balance AS amount FROM trading_account WHERE user_id IN <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach>
+  </select>
+
+  <select id="openPositionCounts" resultType="app.trading.trading.order.OrderMapper$UserAmount">
+    SELECT user_id, COUNT(*) AS amount FROM trading_position WHERE status = 'OPEN'
+    AND user_id IN <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach> GROUP BY user_id
+  </select>
+
+  <!-- 后台（S16c） -->
+  <sql id="adminOrderWhere">
+    <where>
+      <if test="symbol != null">AND o.symbol = #{symbol}</if>
+      <if test="side != null">AND o.side = #{side}</if>
+      <if test="status != null">AND o.status = #{status}</if>
+      <!-- 客户和对外编号是"或"（后台搜索框输入数字时两者都可能） -->
+      <if test="userIds != null or no != null">AND (<trim prefixOverrides="OR">
+        <if test="userIds != null">OR o.user_id IN <foreach collection="userIds" item="u" open="(" separator="," close=")">#{u}</foreach></if>
+        <if test="no != null">OR o.public_no = #{no}</if>
+      </trim>)</if>
+    </where>
+  </sql>
+
+  <select id="adminOrders" resultType="app.trading.trading.order.OrderMapper$AdminOrderRow">
+    SELECT o.id, o.public_no, o.user_id, o.symbol, o.order_type, o.side, o.lots, o.leverage, o.limit_price, o.fill_price, o.take_profit, o.stop_loss, o.frozen_amount,
+      <!-- 手续费按订单合计：部分平仓（V32）把手续费按手数拆到了原持仓和拆出来的行上，一张订单可能对应多行持仓 -->
+      (SELECT SUM(p.fee) FROM trading_position p WHERE p.order_id = o.id) AS fee, o.status, o.created_at
+    FROM trading_order o
+    <include refid="adminOrderWhere"/> ORDER BY o.id DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countAdminOrders" resultType="long">SELECT COUNT(*) FROM trading_order o <include refid="adminOrderWhere"/></select>
+
+  <sql id="adminPositionWhere">
+    WHERE status = 'OPEN'
+    <if test="symbol != null">AND symbol = #{symbol}</if>
+    <if test="side != null">AND side = #{side}</if>
+    <if test="userIds != null or no != null">AND (<trim prefixOverrides="OR">
+      <if test="userIds != null">OR user_id IN <foreach collection="userIds" item="u" open="(" separator="," close=")">#{u}</foreach></if>
+      <if test="no != null">OR public_no = #{no}</if>
+    </trim>)</if>
+  </sql>
+
+  <select id="adminPositions" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position <include refid="adminPositionWhere"/> ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countAdminPositions" resultType="long">SELECT COUNT(*) FROM trading_position <include refid="adminPositionWhere"/></select>
+
+  <!-- 后台已平仓记录（V32 部分平仓）：按编号搜索时也匹配原持仓的编号（输入原持仓编号能看到它拆出来的全部记录） -->
+  <sql id="adminClosedWhere">
+    WHERE p.status = 'CLOSED'
+    <if test="symbol != null">AND p.symbol = #{symbol}</if>
+    <if test="side != null">AND p.side = #{side}</if>
+    <if test="userIds != null or no != null">AND (<trim prefixOverrides="OR">
+      <if test="userIds != null">OR p.user_id IN <foreach collection="userIds" item="u" open="(" separator="," close=")">#{u}</foreach></if>
+      <if test="no != null">OR p.public_no = #{no} OR pp.public_no = #{no}</if>
+    </trim>)</if>
+  </sql>
+
+  <select id="adminClosedPositions" resultType="app.trading.trading.order.PositionRow">
+    SELECT p.id, p.public_no, p.user_id, p.order_id, p.parent_id, p.symbol, p.side, p.lots, p.leverage, p.open_price, p.contract_size, p.quote_ccy, p.open_usd_rate,
+      p.notional_usd, p.margin, p.fee, p.swap_total, p.split_swap_seq, p.maintenance_margin_rate, p.liquidation_price, p.take_profit, p.stop_loss, p.status,
+      p.opened_at, p.closed_at, p.close_price, p.realized_pnl, p.close_reason, pp.public_no AS parent_no
+    FROM trading_position p LEFT JOIN trading_position pp ON pp.id = p.parent_id
+    <include refid="adminClosedWhere"/> ORDER BY p.closed_at DESC, p.id DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countAdminClosedPositions" resultType="long">
+    SELECT COUNT(*) FROM trading_position p LEFT JOIN trading_position pp ON pp.id = p.parent_id <include refid="adminClosedWhere"/>
+  </select>
+
+  <!-- 对外编号 → 内部 id；userId 不为空时只查这个客户的（客户接口），为空时不限（后台） -->
+  <select id="positionIdByNo" resultType="java.lang.Long">
+    SELECT id FROM trading_position WHERE public_no = #{no} <if test="userId != null">AND user_id = #{userId}</if>
+  </select>
+
+  <select id="orderIdByNo" resultType="java.lang.Long">
+    SELECT id FROM trading_order WHERE public_no = #{no} <if test="userId != null">AND user_id = #{userId}</if>
+  </select>
+
+  <select id="positionById" resultType="app.trading.trading.order.PositionRow">
+    SELECT <include refid="positionCols"/> FROM trading_position WHERE id = #{id}
+  </select>
+
+  <select id="orderById" resultType="app.trading.trading.order.OrderRow">
+    SELECT <include refid="orderCols"/> FROM trading_order WHERE id = #{id}
+  </select>
+
+  <select id="openUsage" resultType="long">
+    SELECT (SELECT COUNT(*) FROM trading_position WHERE symbol = #{symbol} AND status = 'OPEN')
+      + (SELECT COUNT(*) FROM trading_order WHERE symbol = #{symbol} AND status = 'PENDING')
+  </select>
+
+  <select id="openPositionTotal" resultType="long">SELECT COUNT(*) FROM trading_position WHERE status = 'OPEN'</select>
+
+  <select id="ledgerTotalSince" resultType="java.math.BigDecimal">
+    SELECT COALESCE(SUM(amount), 0) FROM trading_ledger WHERE bucket = 'BALANCE' AND entry_type = #{type} AND created_at &gt;= #{since}
+  </select>
+
+  <!-- 客户端资金流水（S17 补充） -->
+  <sql id="userLedgerWhere">
+    FROM trading_ledger l JOIN trading_account a ON a.id = l.account_id
+    WHERE a.user_id = #{userId} AND l.bucket = 'BALANCE'
+      AND l.entry_type IN <foreach collection="types" item="t" open="(" separator="," close=")">#{t}</foreach>
+      <if test="since != null">AND l.created_at &gt;= #{since}</if>
+  </sql>
+
+  <select id="userLedger" resultType="app.trading.trading.order.OrderMapper$LedgerRow">
+    SELECT l.id, l.entry_type, l.amount, l.value_after, l.biz_type, l.biz_id, l.created_at <include refid="userLedgerWhere"/>
+    ORDER BY l.id DESC LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countUserLedger" resultType="long">SELECT COUNT(*) <include refid="userLedgerWhere"/></select>
+
+  <select id="ledgerRemarks" resultType="app.trading.trading.order.OrderMapper$LedgerRemark">
+    SELECT id, remark FROM trading_ledger WHERE id IN <foreach collection="ids" item="i" open="(" separator="," close=")">#{i}</foreach>
+  </select>
+
+</mapper>
