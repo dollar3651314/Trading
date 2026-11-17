@@ -130,6 +130,26 @@ class ApiKeysReloadRaceTest {
   }
 
   @Test
+  void 提交后重新加载失败_轮换照样返回新Secret_定时重新加载补上() {
+    String old = newKey();
+    keys.beforeSwap(() -> {
+      throw new org.springframework.dao.TransientDataAccessResourceException("模拟数据库瞬断");
+    });
+    ApiKeys.Created c = keys.rotate(old);
+    assertThat(c.secret()).as("新 Secret 只显示这一次，不能丢").startsWith("qs_");
+    assertThat(jdbc.queryForObject("SELECT status FROM quote_api_key WHERE key_id = ?", String.class, old)).isEqualTo("DISABLED");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM quote_api_key WHERE key_id = ?", Integer.class, c.key().keyId())).isEqualTo(1);
+    assertThat(keys.find(c.key().keyId())).as("快照还没换").isEmpty();
+    // 改限额（不在事务里）也一样不往外抛
+    assertThat(keys.setLimits(c.key().keyId(), new Limits(5, 555, 1, 5)).limits().restPerDay()).isEqualTo(555);
+    keys.beforeSwap(null);
+    keys.reload(); // 相当于下一次定时重新加载
+    assertThat(keys.secret(c.key().keyId())).isPresent();
+    assertThat(keys.find(c.key().keyId()).orElseThrow().limits().restPerDay()).isEqualTo(555);
+    assertThat(keys.secret(old)).isEmpty();
+  }
+
+  @Test
   void 同一个Key同时轮换两次_只有一次成功() throws Exception {
     String id = newKey();
     CyclicBarrier start = new CyclicBarrier(2);

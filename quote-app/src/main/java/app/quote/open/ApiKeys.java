@@ -66,6 +66,8 @@ public class ApiKeys {
   private static final Pattern SYMBOL = Pattern.compile("[A-Z0-9]{1,16}");
   private static final Pattern EMAIL = Pattern.compile("[^@\\s]+@[^@\\s]+\\.[^@\\s]+");
 
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(ApiKeys.class);
+
   private final JdbcTemplate jdbc;
   private final SecretBox box;
   private final OpenSettings settings;
@@ -210,11 +212,23 @@ public class ApiKeys {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
         @Override
         public void afterCommit() {
-          reload();
+          reloadQuietly();
         }
       });
     } else {
+      reloadQuietly();
+    }
+  }
+
+  /**
+   * 改动已经写进库（提交了）之后的重新加载：失败（例如数据库瞬断）只记日志，不往外抛，靠每 10 秒的定时重新加载补上。
+   * 否则后台拿到 500，轮换、建 Key 刚生成的 Secret（只显示这一次）就丢了（审查 🟡）。
+   */
+  private void reloadQuietly() {
+    try {
       reload();
+    } catch (RuntimeException e) {
+      LOG.warn("Key 改动已保存，但重新加载内存快照失败，等定时重新加载（最晚 10 秒）补上", e);
     }
   }
 
