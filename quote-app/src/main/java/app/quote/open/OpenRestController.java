@@ -160,13 +160,20 @@ class OpenRestController {
     return m;
   }
 
+  /** 换票据；Redis 连不上返回 503（和对外 REST 其他错误同一格式，第 3 批审查） */
   @PostMapping("/v1/ws-ticket")
-  Map<String, Object> ticket(HttpServletRequest req) {
-    Tickets.Ticket t = tickets.issue(key(req).keyId());
+  ResponseEntity<Object> ticket(HttpServletRequest req) {
+    Tickets.Ticket t;
+    try {
+      t = tickets.issue(key(req).keyId());
+    } catch (org.springframework.dao.DataAccessException e) {
+      return ResponseEntity.status(503).header("Retry-After", "5").header(OpenErrors.TRACE_HEADER, OpenErrors.trace(req))
+          .body(OpenErrors.body("SERVICE_UNAVAILABLE", "服务暂时不可用，请稍后再试", OpenErrors.trace(req)));
+    }
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("ticket", t.ticket());
     out.put("expiresAt", t.expiresAt().toEpochMilli());
     out.put("path", "/v1/ws?ticket=" + t.ticket());
-    return out;
+    return ResponseEntity.ok(out);
   }
 }

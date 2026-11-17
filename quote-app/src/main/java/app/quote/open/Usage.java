@@ -21,7 +21,8 @@ import org.springframework.stereotype.Component;
  * <ul>
  *   <li>REST 每秒：按秒的固定窗口；每天：UTC 日累计。<b>计数在 Redis</b>（第 3 批审查：多实例不超发），一段 Lua 脚本原子地"加一、超了就减回去"；
  *       当天的 Redis 计数不存在时（例如 Redis 清空过）先从库里的用量接上。超了只拒超出的这一次（429 + Retry-After），被拒的单独记，不算进请求数；</li>
- *   <li>WebSocket 连接数也在 Redis（同一个 Key 的所有实例合计），连上加一、断开减一；计数 24 小时不动就过期（进程崩溃时不会永久占着名额）；</li>
+ *   <li>WebSocket 连接数也在 Redis（同一个 Key 的所有实例合计），按租约算：连上领一个 60 秒的租约、连接期间每 20 秒续一次、断开立即释放；
+ *       进程崩溃没释放的最多占名额 60 秒；</li>
  *   <li>计量按 Key、按天、按接口、按品种：REST 请求数、WebSocket 推送条数、连接秒数、当天连接数峰值。先记内存，每分钟（和每次查询前）写进
  *       quote_usage_daily，所以用量页、用量接口和实际请求数一致（AC-Q4、AC-Q11）；进程崩溃最多丢最后一分钟的计数（推断够用）；</li>
  *   <li>保留 13 个月，每天清理一次。</li>
@@ -74,12 +75,21 @@ public class Usage {
           + "local d = redis.call('INCR', KEYS[2]) if d == 1 then redis.call('EXPIRE', KEYS[2], 172800) end "
           + "if d > tonumber(ARGV[2]) then redis.call('DECR', KEYS[2]) redis.call('DECR', KEYS[1]) return -2 end "
           + "return d", Long.class);
-  /** KEYS[1] 连接数；ARGV[1] 上限。返回新的连接数，超了返回 -1（不加） */
+  /**
+   * WebSocket 连接名额：每个 Key 一个有序集合，成员 = 连接的租约号，分数 = 租约到期时间（毫秒）。
+   * KEYS[1] 集合；ARGV[1] 现在、ARGV[2] 上限、ARGV[3] 到期时间、ARGV[4] 租约号、ARGV[5] 整个键的过期毫秒。先清掉过期的再数，超了返回 -1（不加）
+   */
   private static final org.springframework.data.redis.core.script.RedisScript<Long> WS_OPEN = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
-      "local n = redis.call('INCR', KEYS[1]) redis.call('EXPIRE', KEYS[1], 86400) "
-          + "if n > tonumber(ARGV[1]) then redis.call('DECR', KEYS[1]) return -1 end return n", Long.class);
-  private static final org.springframework.data.redis.core.script.RedisScript<Long> WS_CLOSE = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
-      "local n = tonumber(redis.call('GET', KEYS[1]) or '0') if n > 0 then return redis.call('DECR', KEYS[1]) end return 0", Long.class);
+      "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1]) local n = redis.call('ZCARD', KEYS[1]) "
+          + "if n >= tonumber(ARGV[2]) then return -1 end "
+          + "redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4]) redis.call('PEXPIRE', KEYS[1], ARGV[5]) return n + 1", Long.class);
+  /** 续租：KEYS[1] 集合；ARGV[1] 新的到期时间、ARGV[2] 整个键的过期毫秒、ARGV[3..] 租约号（已被清掉的不再加回来） */
+  private static final org.springframework.data.redis.core.script.RedisScript<Long> WS_RENEW = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+      "local c = 0 for i = 3, #ARGV do c = c + redis.call('ZADD', KEYS[1], 'XX', 'CH', ARGV[1], ARGV[i]) end "
+          + "redis.call('PEXPIRE', KEYS[1], ARGV[2]) return c", Long.class);
+
+  /** 本实例现在持有的连接租约：租约号 → Key */
+  private final Map<String, String> leases = new ConcurrentHashMap<>();
 
   static String secondKey(String keyId, long sec) {
     return "fxq:rl:s:" + keyId + ":" + sec;
@@ -158,38 +168,63 @@ public class Usage {
 
   // ---- WebSocket ----
 
-  /** 现在的连接数（所有实例合计） */
+  /** 现在的连接数（所有实例合计，不算租约已过期的） */
   public int connections(String keyId) {
     try {
-      String v = redis.opsForValue().get(wsKey(keyId));
-      return v == null ? 0 : Math.max(0, Integer.parseInt(v));
-    } catch (org.springframework.dao.DataAccessException | NumberFormatException e) {
+      Long n = redis.opsForZSet().count(wsKey(keyId), clock.millis() + 1, Double.POSITIVE_INFINITY);
+      return n == null ? 0 : n.intValue();
+    } catch (org.springframework.dao.DataAccessException e) {
       return 0;
     }
   }
 
-  /** 新连接：超过连接数限额返回 false（不记）；Redis 连不上也返回 false（不放行） */
-  public boolean wsOpen(ApiKeys.Key k) {
+  /**
+   * 新连接：领一个租约（{@code ws-lease}，默认 60 秒），连接期间每 {@code ws-renew}（默认 20 秒）续一次，断开立即释放。
+   * 进程崩溃没来得及释放的，最多占名额一个租约期。超过连接数限额、Redis 连不上返回 null（不放行）
+   */
+  public String wsOpen(ApiKeys.Key k) {
+    String lease = java.util.UUID.randomUUID().toString();
+    long now = clock.millis();
     Long n;
     try {
-      n = redis.execute(WS_OPEN, List.of(wsKey(k.keyId())), String.valueOf(k.limits().wsConnections()));
+      n = redis.execute(WS_OPEN, List.of(wsKey(k.keyId())), String.valueOf(now), String.valueOf(k.limits().wsConnections()),
+          String.valueOf(now + props.wsLease().toMillis()), lease, String.valueOf(props.wsLease().toMillis() * 2));
     } catch (org.springframework.dao.DataAccessException e) {
-      return false;
+      return null;
     }
-    if (n == null || n < 0) return false;
-    Instant now = clock.instant();
-    int cur = n.intValue();
-    delta(day(now), k.keyId(), "", "").peak.accumulateAndGet(cur, Math::max);
-    lastUsed.put(k.keyId(), now);
-    return true;
+    if (n == null || n < 0) return null;
+    leases.put(lease, k.keyId());
+    Instant at = clock.instant();
+    delta(day(at), k.keyId(), "", "").peak.accumulateAndGet(n.intValue(), Math::max);
+    lastUsed.put(k.keyId(), at);
+    return lease;
   }
 
-  public void wsClose(String keyId) {
+  public void wsClose(String keyId, String lease) {
+    if (lease == null) return;
+    leases.remove(lease);
     try {
-      redis.execute(WS_CLOSE, List.of(wsKey(keyId)));
+      redis.opsForZSet().remove(wsKey(keyId), lease);
     } catch (org.springframework.dao.DataAccessException e) {
-      // 24 小时后自动过期
+      // 租约到期后自动不算
     }
+  }
+
+  /** 给本实例还连着的连接续租 */
+  @Scheduled(fixedDelayString = "${quote.open.ws-renew:20s}")
+  public void renewLeases() {
+    Map<String, List<String>> byKey = new HashMap<>();
+    leases.forEach((lease, key) -> byKey.computeIfAbsent(key, x -> new ArrayList<>()).add(lease));
+    long until = clock.millis() + props.wsLease().toMillis();
+    byKey.forEach((key, ls) -> {
+      List<String> args = new ArrayList<>(List.of(String.valueOf(until), String.valueOf(props.wsLease().toMillis() * 2)));
+      args.addAll(ls);
+      try {
+        redis.execute(WS_RENEW, List.of(wsKey(key)), args.toArray());
+      } catch (org.springframework.dao.DataAccessException e) {
+        // 下次再续
+      }
+    });
   }
 
   /** 连接时长（秒），由 {@link OpenStream} 定时和断开时记 */

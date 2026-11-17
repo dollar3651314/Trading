@@ -35,16 +35,24 @@ public class LicenseRegistry implements TradingLicenses {
   private final boolean enforced;
   private volatile Map<String, QuoteLicense> byKey = Map.of();
 
-  LicenseRegistry(JdbcTemplate jdbc, Clock clock, LicenseProperties props, QuoteProperties quote) {
+  LicenseRegistry(JdbcTemplate jdbc, Clock clock, LicenseProperties props, QuoteProperties quote, app.quote.feed.QuoteFeedsProperties feeds) {
     this.jdbc = jdbc;
     this.clock = clock;
-    boolean live = QuoteRouter.mode(quote.source()) == QuoteRouter.Mode.LIVE;
-    // 生产（报价模式 live）一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在非生产有效（第 3 批审查：不能用一个变量关掉生产的转售、交易用途检查）
+    // 一律检查的情况（第 3 批审查）：报价模式 live（生产），或者在用真实报价源（任何一家配了 token / 打开了开关）——只要用的是报价商的真实数据，
+    // 交易用途和转售都要授权，不管这台机器叫不叫"生产"；FX_QUOTE_LICENSE_ENFORCE=false 只在只用模拟源时有效
+    boolean live = realData(quote, feeds);
     if (live && "false".equals(props.enforce())) {
-      org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).warn("报价模式是 live（生产），忽略 FX_QUOTE_LICENSE_ENFORCE=false，授权检查照常启用");
+      org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).warn("在用真实报价数据（报价模式 live 或配了真实报价源），忽略 FX_QUOTE_LICENSE_ENFORCE=false，授权检查照常启用");
     }
     this.enforced = live || "true".equals(props.enforce());
     reload();
+  }
+
+  /** 在用报价商的真实数据：报价模式 live，或者任何一家真实报价源配了 token / 打开了开关 */
+  public static boolean realData(QuoteProperties quote, app.quote.feed.QuoteFeedsProperties feeds) {
+    if (QuoteRouter.mode(quote.source()) == QuoteRouter.Mode.LIVE) return true;
+    if (feeds == null) return false;
+    return feeds.configured(app.quote.feed.AllTickFeed.NAME) || feeds.configured(app.quote.feed.ITickFeed.NAME) || feeds.configured(app.quote.feed.BinanceFeed.NAME);
   }
 
   @Override

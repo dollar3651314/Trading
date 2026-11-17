@@ -53,12 +53,14 @@ public class OpenStream implements QuoteStream.Tap {
   private static final class Conn {
     final WebSocketSession ws;
     final String keyId;
+    final String lease;
     /** 已经发过起点、在推实时报价的品种 */
     final Set<String> live = ConcurrentHashMap.newKeySet();
     volatile Set<String> bars = Set.of();
     volatile Instant accounted;
 
-    Conn(WebSocketSession ws, String keyId, Instant now) {
+    Conn(WebSocketSession ws, String keyId, String lease, Instant now) {
+      this.lease = lease;
       this.ws = ws;
       this.keyId = keyId;
       this.accounted = now;
@@ -100,9 +102,9 @@ public class OpenStream implements QuoteStream.Tap {
     return conns.size();
   }
 
-  void open(WebSocketSession ws, String keyId) {
+  void open(WebSocketSession ws, String keyId, String lease) {
     WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(ws, (int) streamProps.sendTimeLimit().toMillis(), streamProps.sendBufferLimit());
-    Conn c = new Conn(safe, keyId, clock.instant());
+    Conn c = new Conn(safe, keyId, lease, clock.instant());
     conns.put(ws.getId(), c);
     Map<String, Object> hello = new LinkedHashMap<>();
     hello.put("type", "hello");
@@ -115,7 +117,7 @@ public class OpenStream implements QuoteStream.Tap {
     Conn c = conns.remove(id);
     if (c != null) {
       account(c);
-      usage.wsClose(c.keyId);
+      usage.wsClose(c.keyId, c.lease);
     }
   }
 
@@ -277,7 +279,7 @@ public class OpenStream implements QuoteStream.Tap {
   private void drop(Conn c, CloseStatus why) {
     if (conns.remove(c.ws.getId()) == null) return;
     account(c);
-    usage.wsClose(c.keyId);
+    usage.wsClose(c.keyId, c.lease);
     try {
       c.ws.close(why);
     } catch (IOException | RuntimeException ignored) {
