@@ -67,6 +67,12 @@ interface PaymentMapper {
 
   int queried(@Param("id") long id, @Param("at") LocalDateTime at);
 
+  /** 查询被提供方拒绝（4xx，多半是 Key 或请求配置不对）：只记查询时间和后台提示，不改状态 */
+  int queryRefused(@Param("id") long id, @Param("note") String note, @Param("at") LocalDateTime at);
+
+  /** 去掉上次查询失败留下的提示 */
+  int clearQueryRefused(@Param("id") long id);
+
   // ---------- 回调 ----------
   int insertCallback(@Param("provider") String provider, @Param("eventId") String eventId, @Param("type") String type, @Param("ref") String ref);
 

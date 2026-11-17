@@ -74,6 +74,16 @@
 
   <update id="queried">UPDATE pay_payout SET last_query_at = #{at} WHERE id = #{id}</update>
 
+  <!-- 查询被提供方拒绝（4xx）：只记查询时间和提示，不动状态、不动 updated_at；终态不写；已有别的原因（例如 23 小时未拿到结果）时不覆盖 -->
+  <update id="queryRefused">
+    UPDATE pay_payout SET last_query_at = #{at},
+      reason = CASE WHEN reason IS NULL OR reason LIKE '查询失败：%' THEN #{note} ELSE reason END
+    WHERE id = #{id} AND status NOT IN ('COMPLETED', 'FAILED', 'REJECTED', 'CANCELLED')
+  </update>
+
+  <!-- 之后查通了或收到回调：去掉上次留下的"查询失败"提示 -->
+  <update id="clearQueryRefused">UPDATE pay_payout SET reason = NULL WHERE id = #{id} AND reason LIKE '查询失败：%'</update>
+
   <insert id="insertCallback">
     INSERT IGNORE INTO pay_callback (provider, event_id, event_type, ref) VALUES (#{provider}, #{eventId}, #{type}, #{ref})
   </insert>

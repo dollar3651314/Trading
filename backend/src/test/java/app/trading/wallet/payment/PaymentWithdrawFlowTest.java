@@ -8,6 +8,8 @@ import app.trading.payment.api.PayNetwork;
 import app.trading.payment.api.PaymentApi;
 import app.trading.payment.api.PayoutState;
 import app.trading.payment.fake.FakeTopUp;
+import app.trading.payment.topup.TopUpProperties;
+import app.trading.payment.topup.TopUpProvider;
 import app.trading.wallet.withdraw.WithdrawService;
 import app.trading.wallet.withdraw.WithdrawTestHooks;
 import java.math.BigDecimal;
@@ -205,6 +207,41 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     gone.txid = "a".repeat(64);
     assertThat(api.refreshPayout(id)).isEqualTo(PayoutState.COMPLETED);
     assertThat(status(id)).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  void 查询被提供方拒绝_4xx_Key配错_状态不变不退款_后台显示查询失败_修好后照常完成() throws Exception {
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    withdraws.approve(id, 7);
+    FakeTopUp.Withdrawal w = topup(id);
+    FAKE.pending.clear();
+    // 提供方那边其实已经失败了，但 Key 配错：查询被拒（401），说明不了这笔付款怎样了
+    FAKE.moveWithdrawal(w.no, "failed", null, "insufficient gas");
+    FAKE.pending.clear();
+    registry.register(new TopUpProvider(new TopUpProperties(FAKE.baseUrl(), FAKE.apiKey, "wrong-secret", Duration.ofSeconds(3))));
+
+    assertThat(api.refreshPayout(id)).as("后台重新查询：状态不变，不记未知").isEqualTo(PayoutState.PENDING);
+    PaymentApi.PayoutInfo info = api.payoutInfo(id).orElseThrow();
+    assertThat(info.state()).isEqualTo(PayoutState.PENDING);
+    assertThat(info.reason()).isEqualTo("查询失败：提供方拒绝（401 invalid_signature）");
+    // 定时任务过 5 分钟再查，仍被拒：不改状态、不退款
+    time().advance(Duration.ofMinutes(10));
+    WithdrawTestHooks.track(withdraws);
+    assertThat(api.payoutInfo(id).orElseThrow().state()).isEqualTo(PayoutState.PENDING);
+    assertThat(status(id)).as("查询失败不退款").isEqualTo("BROADCASTING");
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    assertThat(balance(uid)).isEqualByComparingTo("900");
+
+    // Key 改对后下次查询照常：查到失败才退款，查询失败的提示去掉
+    registry.register(fakeProvider());
+    time().advance(Duration.ofMinutes(10));
+    WithdrawTestHooks.track(withdraws);
+    assertThat(api.payoutInfo(id).orElseThrow().state()).isEqualTo(PayoutState.FAILED);
+    assertThat(api.payoutInfo(id).orElseThrow().reason()).isEqualTo("insufficient gas");
+    assertThat(status(id)).isEqualTo("FAILED_REFUNDED");
+    assertThat(frozen(uid)).isEqualByComparingTo("0");
+    assertThat(balance(uid)).isEqualByComparingTo("1000");
   }
 
   @Test

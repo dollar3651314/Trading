@@ -390,7 +390,8 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       await expectNoHorizontalScroll(page, '提现页');
       await page.getByRole('button', { name: '提交提现' }).click();
       await page.getByRole('button', { name: '确认提交' }).click();
-      await expect(page.getByText('提现已提交')).toBeVisible();
+      // 定位提交成功的 toast 标题（精确匹配）；绿框标题"已提交这笔提现"与相邻"可以提现"拼起来也含这几个字
+      await expect(page.getByText('提现已提交', { exact: true })).toBeVisible();
       await expect(page.locator('.wd-recs li').first()).toContainText(/冷静期中|待审核/);
       // 冷静期为 0：立即跑一次定时推进（不用等 30 秒），进入待审核
       await e2e.advanceWithdrawals(request);

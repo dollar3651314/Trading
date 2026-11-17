@@ -46,6 +46,8 @@ public class PaymentService implements PaymentApi, PaymentAdminApi {
   static final Duration RESUBMIT_WINDOW = Duration.ofHours(23);
   /** 回调多久没更新就主动向提供方查一次（AC-W6：恢复后 10 分钟内补上） */
   static final Duration QUERY_AFTER = Duration.ofMinutes(5);
+  /** 查询被提供方拒绝（4xx）时后台显示的提示开头 */
+  static final String QUERY_REFUSED = "查询失败：提供方拒绝";
   /** 提供方明确说"收款地址不对"：确定没付，可以退款 */
   static final Set<String> REFUSE_CODES = Set.of("invalid_address", "address_not_registered");
 
@@ -247,13 +249,22 @@ public class PaymentService implements PaymentApi, PaymentAdminApi {
     return query(row, true);
   }
 
-  /** 向提供方查一次。提供方说没有这笔 → 未知（不退款）。notify：查到变化时通知钱包模块（后台"重新查询"） */
+  /**
+   * 向提供方查一次。提供方说没有这笔 → 未知（不退款）。notify：查到变化时通知钱包模块（后台"重新查询"）。
+   * 提供方拒绝这次查询（4xx，例如 Key 配错）：是我们的配置或请求有问题，不说明这笔付款怎样了 → 状态不变、不退款，记告警和后台提示，下次再查。
+   */
   private PayoutState query(PaymentMapper.PayoutRow row, boolean notify) {
     PaymentProvider p = provider(row.provider);
     Optional<PaymentProvider.PayoutView> v;
     try {
       v = call(p, () -> p.payout(row.providerRef));
     } catch (PaymentProvider.ProviderError e) {
+      if (e.status >= 400 && e.status < 500) {
+        String note = QUERY_REFUSED + "（" + e.status + (e.code == null || e.code.isBlank() ? "" : " " + e.code) + "）";
+        log.warn("查提现 {} 的付款状态被 {} 拒绝（{} {}），多半是 Key 或请求配置不对；付款状态不变、不退款，下次再查", row.withdrawalId, p.code(), e.status, e.code);
+        mapper.queryRefused(row.id, note, now());
+        return PayoutState.valueOf(mapper.payout(row.withdrawalId).status);
+      }
       v = null;
     }
     mapper.queried(row.id, now());
@@ -266,6 +277,7 @@ public class PaymentService implements PaymentApi, PaymentAdminApi {
   /** 在事务里：付款状态往前走就记下，notify 时通知钱包模块。返回现在的状态 */
   private PayoutState applyPayout(long withdrawalId, PayoutState got, String txHash, String reason, boolean notify) {
     PaymentMapper.PayoutRow l = mapper.lockPayout(withdrawalId);
+    mapper.clearQueryRefused(l.id);
     PayoutState cur = PayoutState.valueOf(l.status);
     if (!advance(cur, got)) return cur;
     mapper.savePayout(l.id, null, got.name(), txHash, reason, now());
