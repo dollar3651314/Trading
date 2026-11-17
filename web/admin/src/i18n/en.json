@@ -1512,15 +1512,15 @@
     },
     "R12": {
       "name": "System healthy",
-      "desc": "No quote deviation alert, no global pause, and the hot wallet on this chain can pay this and earlier queued withdrawals",
+      "desc": "No quote deviation alert, no global pause, and Trading's available balance at TopUP minus approved-but-unpaid withdrawals covers this one (TD-12)",
       "fixed": "No value: all three must be normal",
-      "pass": "Quotes normal · no global pause · hot wallet {{balance}} ≥ needed {{need}}",
+      "pass": "Quotes normal · no global pause · Trading's TopUP available {{balance}} minus approved-but-unpaid covers this one (needed {{need}})",
       "fail": "System not healthy",
       "issue": {
         "quoteDeviation": "Quote deviation alert",
         "globalPause": "Global pause on",
-        "hotWallet": "Hot wallet {{balance}} < needed {{need}}",
-        "hotWalletUnknown": "Hot-wallet balance unavailable (no successful check in 10 minutes); treated as failed"
+        "hotWallet": "Trading's TopUP available {{balance}} minus approved-but-unpaid < this one (needed {{need}})",
+        "hotWalletUnknown": "Trading's TopUP available balance unavailable (no successful check in 10 minutes); treated as failed"
       }
     },
     "R13": {

@@ -518,7 +518,7 @@
       "awaitingRelease": "等待放款审核",
       "paying": "放款中"
     },
-    "doneTitle": "提现已提交（单号 {{id}}）"
+    "doneTitle": "已提交这笔提现（单号 {{id}}）"
   },
   "whitelist": {
     "title": "提现白名单",

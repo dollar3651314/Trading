@@ -1,7 +1,47 @@
-/* 官网设计 token（方向 A：和客户端同一套深色，v2-官网风格调研第 3 节）。
-   取自 web/client/src/styles/tokens.css 的深色主题和"绿涨红跌"语义色（官网只做深色、只用默认涨跌色，W2）。
-   客户端改了深色 token 时同步改这里。字体只用系统字体，数字优先 JetBrains Mono（本机有才用），不加载任何外部字体（AC-29）。 */
+/* 官网设计 token（和客户端同一套颜色）。第 1 批按 TY-7（Amos 11/17：三端都默认浅色，客户自己可以切深色）：
+   默认浅色（:root），右上角切到深色时根元素 data-theme="dark"（下面一组，原来的深色方向 A，客户端改了深色 token 时同步改这里）。
+   字体只用系统字体，数字优先 JetBrains Mono（本机有才用），不加载任何外部字体（AC-29）。 */
 :root {
+  --bg: #f4f7fb;
+  --s1: #ffffff;
+  --s2: #f8fafc;
+  --s3: #eef5f9;
+  --border: rgba(15, 23, 42, 0.12);
+  --hair: rgba(15, 23, 42, 0.07);
+  --text: #0f172a;
+  --muted: #475569;
+  --subtle: #5b6b80;
+  --cyan: #0e7490;
+  --cyan-soft: rgba(8, 145, 178, 0.1);
+  --primary: #0e7490;
+  --primary-hover: #155e75;
+  --amber: #b45309;
+  /* 涨跌（浅色：和客户端浅色主题的绿涨红跌一致） */
+  --long: #15803d;
+  --long-soft: rgba(34, 197, 94, 0.14);
+  --long-solid: #16a34a;
+  --short: #dc2626;
+  --short-text: #c81e1e;
+  --short-soft: rgba(244, 63, 94, 0.14);
+  --short-solid: #dc2626;
+  --flat-solid: #94a3b8;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB', 'WenQuanYi Zen Hei', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace;
+  --wrap: 1200px;
+  --gutter: 24px;
+  --sticky-h: 66px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --header-bg: rgba(244, 247, 251, 0.92);
+  --sticky-bg: rgba(244, 247, 251, 0.96);
+  --mask: rgba(15, 23, 42, 0.45);
+  color-scheme: light;
+}
+
+/* 深色（右上角切换，记在本机 fx.site.theme） */
+:root[data-theme='dark'] {
   --bg: #0d1117;
   --s1: #131a24;
   --s2: #0f151e;
@@ -16,7 +56,6 @@
   --primary: #0891b2;
   --primary-hover: #0e7490;
   --amber: #fbbf24;
-  /* 涨跌（和客户端深色主题的 --long* / --short* 默认值一致） */
   --long: #22c55e;
   --long-soft: rgba(34, 197, 94, 0.14);
   --long-solid: #16a34a;
@@ -25,14 +64,8 @@
   --short-soft: rgba(244, 63, 94, 0.14);
   --short-solid: #e11d48;
   --flat-solid: #334155;
-  --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB', 'WenQuanYi Zen Hei', sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'DejaVu Sans Mono', monospace;
-  --wrap: 1200px;
-  --gutter: 24px;
-  --sticky-h: 66px;
-  --safe-b: env(safe-area-inset-bottom, 0px);
+  --header-bg: rgba(13, 17, 23, 0.92);
+  --sticky-bg: rgba(13, 17, 23, 0.96);
+  --mask: rgba(2, 6, 23, 0.7);
   color-scheme: dark;
 }

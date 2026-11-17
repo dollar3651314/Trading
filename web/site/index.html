@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0d1117" />
+    <meta name="theme-color" content="#f4f7fb" />
+    <!-- TY-7：默认浅色；客户切过深色的，页面脚本加载前先设好，避免先闪一下浅色（和 src/lib/theme.ts 同一个键） -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('fx.site.theme') === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', '#0d1117');
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="description" content="Trading：用 USDT 交易黄金、外汇、指数、原油和加密货币差价合约。Trade CFDs on gold, forex, indices, oil and crypto with USDT." />
     <!-- 客户端地址：部署时 Nginx 把占位符换成 https://${APP_DOMAIN}，e2e/server.mjs 换成本机客户端；没换时用同源相对地址（src/config.ts） -->
     <meta name="tr-client-url" content="__TR_CLIENT_URL__" />

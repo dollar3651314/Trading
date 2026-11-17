@@ -7,6 +7,7 @@ import { Link } from '../app/router';
 import { clientLink, CONTACT_EMAIL } from '../config';
 import { useI18n, type Lang } from '../i18n';
 import { Icon } from './Icon';
+import { readTheme, applyTheme, type SiteTheme } from '../lib/theme';
 
 export function EnvBanner() {
   const { t } = useI18n();
@@ -147,6 +148,28 @@ export const SECTIONS = [
   ['faq', 'nav.faq'],
 ] as const;
 
+/** 深浅色切换（TY-7）：默认浅色，点一下切深色，再点切回；选择记在本机 */
+export function ThemeSwitch() {
+  const { t } = useI18n();
+  const [theme, setTheme] = useState<SiteTheme>(readTheme);
+  const next: SiteTheme = theme === 'dark' ? 'light' : 'dark';
+  return (
+    <button
+      type="button"
+      className="theme-btn"
+      data-testid="theme-switch"
+      aria-label={t(next === 'dark' ? 'common.themeDark' : 'common.themeLight')}
+      title={t(next === 'dark' ? 'common.themeDark' : 'common.themeLight')}
+      onClick={() => {
+        applyTheme(next);
+        setTheme(next);
+      }}
+    >
+      <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+    </button>
+  );
+}
+
 export function HeaderDesktop() {
   const { t, lang } = useI18n();
   return (
@@ -162,6 +185,7 @@ export function HeaderDesktop() {
         </nav>
         <div className="right">
           <LangSwitch />
+          <ThemeSwitch />
           <a className="btn sec sm" href={clientLink('login', lang)} data-testid="nav-login">
             {t('common.login')}
           </a>
@@ -183,6 +207,7 @@ export function HeaderMobile() {
         <Logo />
         <div className="right">
           <LangSwitch />
+          <ThemeSwitch />
           <button type="button" className="menu-btn" aria-label={t(open ? 'common.close' : 'common.menu')} aria-expanded={open} onClick={() => setOpen((v) => !v)} data-testid="menu-btn">
             <Icon name={open ? 'close' : 'menu'} />
           </button>
