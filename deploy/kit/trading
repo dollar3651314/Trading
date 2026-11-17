@@ -6,7 +6,8 @@
 #                              ④ TopUP Key / Secret（可跳过，联调时填）⑤ 备份（恢复演练不在这里做，在 trading off 时做）；最后打印摘要
 #   sudo trading on / off      和 TopUP 轮流用这台 2 核 2G（部署方案 07 页，TD4-20 = B）：
 #                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,000 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
-#                              off = 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 恢复演练（Trading 全停了、TopUP 还没启动，内存够）→ 调 TopUP 自己的 topup start
+#                              off = 拿自动更新的锁 → 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 恢复演练（Trading 全停了、TopUP 还没启动，内存够）→ 调 TopUP 自己的 topup start
+#                                    一般 2–5 分钟，最坏约 25 分钟；在"远程连接"的终端里运行（用"云助手"时超时设 ≥ 30 分钟）；中途断了会自己收尾：没停完就恢复 Trading，停完了就启动 TopUP
 #   sudo trading keys [topup|mail]   中文向导：逐项问、Key / Secret / 邮件密码隐藏输入，写进 .env 后自动生效（要在"远程连接"的终端里运行）
 #   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
 #   sudo trading set-key <变量名>    隐藏输入改一个密钥（只认清单里的名字，要终端）
@@ -44,27 +45,51 @@ DUMP_TIMEOUT=${TR_DUMP_TIMEOUT:-300}
 # 恢复演练：等临时库就绪、导入各最多几秒（trading off 不能被演练卡住，TopUP 要能起来）
 DRILL_READY_TIMEOUT=${TR_DRILL_READY_TIMEOUT:-180}
 DRILL_IMPORT_TIMEOUT=${TR_DRILL_IMPORT_TIMEOUT:-300}
+# trading off 等进行中的自动更新最多几秒（等不到就不切换、什么都不动）
+OFF_LOCK_WAIT=${TR_OFF_LOCK_WAIT:-300}
 TOPUP_BIN=${TR_TOPUP_BIN:-/usr/local/bin/topup}
 # 同机 TopUP 的应用配置（邮件设置从这里读，只读不改；Amos 11/17「邮箱用和TopUP一样的」）
 TOPUP_ENVF=${TR_TOPUP_ENV:-/opt/topup/.env}
 TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer trading-memguard.timer)
 
 # ---------- 公共 ----------
-# 退出时一定做的清理（正常结束、出错、Ctrl-C、kill 都会做；kill -9 做不到，下次运行时 sweep_stale 清超过 60 分钟的）：
-#   删登记的临时文件（明文 SQL）和临时容器；演练中途被打断时把停掉的 Trading 应用拉起来；trading off 停完 Trading 后被打断时照样启动 TopUP
-CLEAN_PATHS=(); CLEAN_CONTAINERS=(); OFF_START_TOPUP=""; INSTALL_HINT=""; DRILL_RESTART_PENDING=""; DRILL_MEMGUARD_WAS_ON=""
+# 退出时一定做的清理（正常结束、出错、Ctrl-C、关掉远程连接窗口、kill 都会做；kill -9 做不到，下次运行时 sweep_stale 清超过 60 分钟的）：
+#   杀掉还在等的后台命令（导出、导入、等锁）和容器里的 mysqldump；删登记的临时文件（明文 SQL）和临时容器；
+#   演练中途被打断时把停掉的 Trading 应用拉起来；trading off 停完 Trading 前被打断时按原样恢复 Trading、停完后被打断时照样启动 TopUP
+CLEAN_PATHS=(); CLEAN_CONTAINERS=(); OFF_START_TOPUP=""; OFF_RESTORE_TRADING=""; INSTALL_HINT=""; DRILL_RESTART_PENDING=""; DRILL_MEMGUARD_WAS_ON=""
+BG_PID=""; DUMP_RUNNING=""
 on_exit() {
   local rc=$? c p
+  # 清理时不能因为任何一步出错就停下（set +e）；终端可能已经断了（远程连接窗口关掉），提示写不出去也照样往下做（say 不报错、忽略 SIGPIPE），
+  # 每一步都写进日志
+  set +e
   trap - INT TERM HUP
-  for c in "${CLEAN_CONTAINERS[@]}"; do docker rm -f "$c" > /dev/null 2>&1 || true; done
+  trap '' PIPE
+  if [ -n "$BG_PID" ]; then kill -TERM "$BG_PID" 2> /dev/null; wait "$BG_PID" 2> /dev/null; BG_PID=""; fi
+  if [ -n "$DUMP_RUNNING" ]; then DUMP_RUNNING=""; log "（被打断：清理 mysql 容器里的 mysqldump）$(kill_container_dumps)" > /dev/null 2>&1; fi
+  for c in "${CLEAN_CONTAINERS[@]}"; do docker rm -f "$c" > /dev/null 2>&1; done
   for p in "${CLEAN_PATHS[@]}"; do rm -rf "$p"; done
-  if [ -n "$DRILL_RESTART_PENDING" ]; then say "（恢复演练被打断：重新启动 Trading 的应用）"; drill_restart_apps 1 || true; fi
-  if [ -n "$OFF_START_TOPUP" ]; then OFF_START_TOPUP=""; say "（被打断：Trading 已全停，照样启动 TopUP）"; restart_topup || true; fi
+  if [ -n "$DRILL_RESTART_PENDING" ]; then log "（恢复演练被打断：重新启动 Trading 的应用）"; drill_restart_apps 1; fi
+  if [ -n "$OFF_RESTORE_TRADING" ]; then OFF_RESTORE_TRADING=""; log "（trading off 没做完：Trading 按原样恢复、定时器打开，TopUP 不启动）"; off_restore_trading; fi
+  if [ -n "$OFF_START_TOPUP" ]; then OFF_START_TOPUP=""; log "（trading off 被打断：Trading 已全停，照样启动 TopUP）"; restart_topup; fi
   if [ -n "$INSTALL_HINT" ] && [ "$rc" -ne 0 ]; then say "（安装没做完。如果 TopUP 停着、要先恢复它，运行 sudo trading off；改好后再运行同一条安装命令）"; fi
+  return 0
 }
 trap on_exit EXIT
-trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
-say() { printf '%s\n' "$*"; }
+# 管道断了（例如 trading off | tee 的 tee 被关掉）也走同一套清理；子进程不继承这个 trap，管道里的命令照常
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP; trap 'exit 141' PIPE
+# 后台跑一个要等很久的命令（导出、导入、等锁）再 wait：这样 Ctrl-C、关窗口、kill 来了 trap 立刻执行（前台命令要等它结束才执行；
+# GNU timeout 还会自成进程组，终端的 Ctrl-C 到不了它）。on_exit 会杀掉它。标准输入显式传下去（后台命令默认读 /dev/null）
+run_bg() {
+  "$@" <&0 &
+  BG_PID=$!
+  local rc=0
+  wait "$BG_PID" || rc=$?
+  BG_PID=""
+  return "$rc"
+}
+# 输出写不出去（终端断了、/dev/full）不算错，不影响后面的步骤
+say() { printf '%s\n' "$*" 2> /dev/null || true; }
 log() { mkdir -p "$TR_DIR/logs"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOGF"; say "$*"; }
 ok() { say "  ✓ $*"; }
 bad() { say "  ✗ $*"; }
@@ -106,15 +131,38 @@ guard_env() {
   check_mysql_swap
 }
 
-# .env 里改了 MySQL 内存时：TR_MEMSWAP_MYSQL（内存 + 交换分区）不能小于 TR_MEM_MYSQL，否则容器起不来。两个都要写成 数字+m 或 数字+g
+# compose 认的内存写法（320m、320mb、"320M"、1g、1GB、纯数字 = 字节）换成字节；认不出来返回 1
+mem_bytes() {
+  local v
+  v=$(printf '%s' "$1" | tr -d "\"' " | tr 'A-Z' 'a-z')
+  [[ "$v" =~ ^([0-9]+)(b|k|kb|m|mb|g|gb)?$ ]] || return 1
+  case "${BASH_REMATCH[2]}" in
+    "" | b) echo "${BASH_REMATCH[1]}" ;;
+    k | kb) echo $((BASH_REMATCH[1] * 1024)) ;;
+    m | mb) echo $((BASH_REMATCH[1] * 1048576)) ;;
+    g | gb) echo $((BASH_REMATCH[1] * 1073741824)) ;;
+  esac
+}
+# 同一句提醒只写一次日志（每分钟的自动更新不会刷屏）
+log_once() {
+  [ "$(cat "$STATE/warned-$1" 2> /dev/null)" = "$2" ] && return 0
+  printf '%s' "$2" > "$STATE/warned-$1" 2> /dev/null || true
+  log "$2" > /dev/null
+}
+# .env 里改了 MySQL 内存时：TR_MEMSWAP_MYSQL（内存 + 交换分区）不能小于 TR_MEM_MYSQL，否则 MySQL 容器起不来，这里先用中文说清楚
 check_mysql_swap() {
-  local m s mm ss
+  local m s mb sb msg
   m=$(envget TR_MEM_MYSQL); m=${m:-320m}; s=$(envget TR_MEMSWAP_MYSQL); s=${s:-448m}
-  [[ "$m" =~ ^[0-9]+[mMgG]$ ]] && [[ "$s" =~ ^[0-9]+[mMgG]$ ]] || die ".env 里 TR_MEM_MYSQL=$m、TR_MEMSWAP_MYSQL=$s：要写成 数字+m（例如 320m、448m）"
-  mm=${m%?}; ss=${s%?}
-  case "$m" in *[gG]) mm=$((mm * 1024)) ;; esac
-  case "$s" in *[gG]) ss=$((ss * 1024)) ;; esac
-  [ "$ss" -ge "$mm" ] || die ".env 里 TR_MEMSWAP_MYSQL（$s，内存 + 交换分区）小于 TR_MEM_MYSQL（$m），MySQL 起不来：把 TR_MEMSWAP_MYSQL 改成 TR_MEM_MYSQL + 128m（不想用交换分区就写成和 TR_MEM_MYSQL 一样）"
+  if ! mb=$(mem_bytes "$m") || ! sb=$(mem_bytes "$s"); then
+    # 认不出来的写法不拦（交给 docker compose 自己判断），只提醒一次
+    log_once memswap ".env 里 TR_MEM_MYSQL=$m、TR_MEMSWAP_MYSQL=$s 的写法认不出来（应该像 320m、448m），没检查两者大小"
+    return 0
+  fi
+  if [ "$sb" -lt "$mb" ]; then
+    msg=".env 里 TR_MEMSWAP_MYSQL（$s，内存 + 交换分区）小于 TR_MEM_MYSQL（$m），MySQL 起不来：把 TR_MEMSWAP_MYSQL 改成 TR_MEM_MYSQL + 128m（不想用交换分区就写成和 TR_MEM_MYSQL 一样）"
+    log_once memswap "$msg"; die "$msg"
+  fi
+  rm -f "$STATE/warned-memswap"
 }
 
 # 等新版本：trading-app 健康检查 status=UP、version=提交号，quote-app 健康（最多 3 分钟）
@@ -628,8 +676,8 @@ work_dir() {
 }
 # 清掉上次被 kill -9 等打断留下的临时文件（超过 60 分钟的；正在用的不会这么老：导出最多 DUMP_TIMEOUT 秒、演练最多约 10 分钟）
 sweep_stale() {
-  [ -d "$TR_DIR/tmp" ] && find "$TR_DIR/tmp" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
-  find "$TR_DIR/backup" -maxdepth 1 -name 'trading-*.tar.age.tmp' -mmin +60 -delete 2>/dev/null
+  if [ -d "$TR_DIR/tmp" ]; then find "$TR_DIR/tmp" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2> /dev/null || true; fi
+  find "$TR_DIR/backup" -maxdepth 1 -name 'trading-*.tar.age.tmp' -mmin +60 -delete 2> /dev/null || true
   return 0
 }
 
@@ -640,26 +688,37 @@ backup_fail() {
   return 1
 }
 
-# mysql 容器里残留的 mysqldump（外层超时只杀得掉本机的 docker 客户端，容器里的进程还会跑）：按进程名找出来杀掉，返回还在跑的个数。
+# mysql 容器里残留的 mysqldump（外层超时只杀得掉本机的 docker 客户端，容器里的进程还会跑）：按进程名找出来杀掉，输出一句结果（写日志用）。
 # 容器里没有 pkill，直接看 /proc；已经结束、只等回收的僵尸进程（容器的 1 号进程 mysqld 不回收）不占内存，不算
 kill_container_dumps() {
-  timeout -k 5 30 "${COMPOSE[@]}" exec -T mysql sh -c '
+  local n
+  if [ -z "$(compose ps -q --status running mysql 2> /dev/null)" ]; then echo "mysql 容器没在运行，里面没有 mysqldump"; return 0; fi
+  n=$(timeout -k 5 30 "${COMPOSE[@]}" exec -T mysql sh -c '
     live() { [ "$(cat "$1/comm" 2>/dev/null)" = mysqldump ] && ! grep -q "^State:.*Z" "$1/status" 2>/dev/null; }
     for p in /proc/[0-9]*; do live "$p" && kill -9 "${p#/proc/}" 2>/dev/null; done
     sleep 1; n=0
     for p in /proc/[0-9]*; do live "$p" && n=$((n + 1)); done
-    echo "$n"' 2>/dev/null || echo "?"
+    echo "$n"' 2> /dev/null) || n=""
+  case "$n" in
+    0) echo "mysql 容器里没有还在跑的 mysqldump" ;;
+    "") echo "进不了 mysql 容器查 mysqldump（30 秒没反应），需要人工看：sudo docker top trading-mysql-1" ;;
+    *) echo "mysql 容器里还剩 $n 个 mysqldump 没杀掉，需要人工看：sudo docker top trading-mysql-1" ;;
+  esac
 }
 
 # 加密备份：两个库、Redis 快照、证件照片、.env 打成一个包，直接经 age 加密写盘（磁盘上只在 /opt/trading/tmp 短暂有明文 SQL）。
 # 每一步都显式检查（不靠 set -e：调用方常写成 if cmd_backup …，那样 set -e 在函数里不生效）；任何一步失败都不留备份文件、返回 1。
-# 同一时间只做一份（backup.lock，等最多 6 分钟），每天的备份和更新前、off 时的备份不会同时导出
+# 同一时间只做一份（backup.lock，默认最多等 6 分钟，trading off 里只等 2 分钟），每天的备份和更新前、off 时的备份不会同时导出
 cmd_backup() {
   need_root
   [ -f "$STATE/backup.pub" ] || die "没有备份加密密钥（先运行 install）"
   mkdir -p "$TR_DIR/backup"
+  local wait_s=${BACKUP_LOCK_WAIT:-360}
   exec 8> "$STATE/backup.lock"
-  if ! flock -w 360 8; then exec 8>&-; backup_fail "另一份备份 6 分钟还没做完"; return 1; fi
+  if ! flock -n 8; then
+    say "  另一份备份正在做，最多等 $((wait_s / 60)) 分钟（不用操作）" >&2
+    if ! run_bg flock -w "$wait_s" 8; then exec 8>&-; backup_fail "另一份备份 $((wait_s / 60)) 分钟还没做完"; return 1; fi
+  fi
   sweep_stale
   local rc=0
   backup_once "${1:-daily}" || rc=$?
@@ -668,21 +727,23 @@ cmd_backup() {
 }
 
 backup_once() {
-  local name=$1 f tmp left
+  local name=$1 f tmp
   f="$TR_DIR/backup/trading-$(date -u +%Y%m%dT%H%M%SZ)-$name.tar.age"
   CLEAN_PATHS+=("$f.tmp")
   tmp=$(work_dir backup) || { backup_fail "建不了临时目录 $TR_DIR/tmp（磁盘满了？）"; return 1; }
   CLEAN_PATHS+=("$tmp")
   # 密码用容器里已有的环境变量，不出现在命令行；--quick（默认就开）逐行导出，不把整张表读进内存。
   # 超时放在容器里（timeout 杀得到容器里的 mysqldump）；外层再多 30 秒兜底（docker exec 本身卡住时）
-  if ! timeout -k 10 $((DUMP_TIMEOUT + 30)) "${COMPOSE[@]}" exec -T mysql \
+  DUMP_RUNNING=1
+  if ! run_bg timeout -k 10 $((DUMP_TIMEOUT + 30)) "${COMPOSE[@]}" exec -T mysql \
       sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec timeout -k 10 "$1" mysqldump -uroot --single-transaction --quick --routines --triggers --set-gtid-purged=OFF --databases trading quote' \
-      sh "$DUMP_TIMEOUT" > "$tmp/mysql.sql"; then
-    left=$(kill_container_dumps)
-    [ "$left" = 0 ] || log "备份：mysql 容器里还剩 ${left} 个 mysqldump 没杀掉，需要人工看（sudo docker top trading-mysql-1）" > /dev/null
+      sh "$DUMP_TIMEOUT" > "$tmp/mysql.sql" < /dev/null; then
+    DUMP_RUNNING=""
+    log "备份：$(kill_container_dumps)" > /dev/null
     rm -rf "$tmp"
     backup_fail "mysqldump 没成功（退出码非 0 或超过 ${DUMP_TIMEOUT} 秒；常见原因：MySQL 内存顶到上限、没在运行）"; return 1
   fi
+  DUMP_RUNNING=""
   if ! dump_complete "$tmp/mysql.sql"; then
     rm -rf "$tmp"; backup_fail "mysqldump 的导出不完整（缺 trading 或 quote 库，或没有结尾的 Dump completed）"; return 1
   fi
@@ -736,7 +797,8 @@ cmd_restore_drill() {
   need=$((DRILL_MEM_MB + 64))
   if [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading --filter label=com.docker.compose.service=trading-app)" ]; then
     exec 7> "$STATE/update.lock"
-    if ! flock -w 300 7; then
+    flock -n 7 || say "  自动更新正在进行，最多等 5 分钟（不用操作）"
+    if ! flock -n 7 && ! run_bg flock -w 300 7; then
       exec 7>&-; rm -rf "$tmp"
       bad "自动更新正在进行（5 分钟没做完），这次不演练；等一会儿再运行，或 sudo trading off 时自动做"; drill_result "跳过：自动更新正在进行"; return 1
     fi
@@ -769,7 +831,7 @@ cmd_restore_drill() {
     drill_cleanup "$tmp" "$stopped"; bad "临时数据库 ${DRILL_READY_TIMEOUT} 秒还没就绪"; drill_result "失败：临时数据库 ${DRILL_READY_TIMEOUT} 秒没就绪"; return 1
   fi
   # 导入有时间上限：超时只杀得掉本机的 docker 客户端，所以紧接着删整个临时容器
-  if ! timeout -k 10 "$DRILL_IMPORT_TIMEOUT" docker exec -i "$cid" mysql -uroot < "$tmp/mysql.sql"; then
+  if ! run_bg timeout -k 10 "$DRILL_IMPORT_TIMEOUT" docker exec -i "$cid" mysql -uroot < "$tmp/mysql.sql"; then
     drill_cleanup "$tmp" "$stopped"
     bad "导入临时库失败或超过 ${DRILL_IMPORT_TIMEOUT} 秒"; drill_result "失败：导入 $(basename "$f") 出错或超时"; return 1
   fi
@@ -879,7 +941,7 @@ stop_topup_and_check_mem() {
   if topup_running; then
     [ -x "$TOPUP_BIN" ] || { bad "TopUP 的容器在跑，但找不到 $TOPUP_BIN"; return 1; }
     say "  停 TopUP（topup stop，数据保留；约 1～2 分钟）"
-    "$TOPUP_BIN" stop > /dev/null 2>&1 || { bad "topup stop 没成功（看 sudo topup status），Trading 不启动"; return 1; }
+    "$TOPUP_BIN" stop > /dev/null 2>&1 7>&- 8>&- 9>&- || { bad "topup stop 没成功（看 sudo topup status），Trading 不启动"; return 1; }
   fi
   topup_running && { bad "TopUP 的容器还在跑，Trading 不启动"; return 1; }
   local p
@@ -898,7 +960,8 @@ stop_topup_and_check_mem() {
 restart_topup() {
   [ -x "$TOPUP_BIN" ] || return 0
   say "  启动 TopUP（topup start，它自己再查内存和健康检查）"
-  if "$TOPUP_BIN" start > /dev/null 2>&1; then ok "TopUP 已启动"; else bad "topup start 没成功（看 sudo topup status，截图给主会话）"; return 1; fi
+  # 不把锁的文件描述符带给 TopUP（它起的进程要是一直在，锁就一直放不掉）
+  if "$TOPUP_BIN" start > /dev/null 2>&1 7>&- 8>&- 9>&-; then ok "TopUP 已启动"; else bad "topup start 没成功（看 sudo topup status，截图给主会话）"; return 1; fi
 }
 
 cmd_on() {
@@ -916,27 +979,41 @@ cmd_on() {
   log "trading on"
 }
 
+# trading off 被打断（或备份失败）而 Trading 还没全停时：按原样恢复 Trading、打开定时器（TopUP 不启动）
+off_restore_trading() {
+  compose up -d > /dev/null 2>&1 || true
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
+}
+
+# 最坏情况（自动更新正在跑 5 分钟 + 等另一份备份 2 分钟 + 导出 5.5 分钟 + 停容器约 2 分钟 + 恢复演练 8 分钟 + topup start）约 25 分钟，
+# 正常 2–5 分钟。要在"远程连接"的终端里运行；用"云助手 → 执行命令"时超时要设 ≥ 30 分钟。中途窗口断了也会按上面的规则收尾（on_exit）
 cmd_off() {
   need_root
-  say "== 切回 TopUP（Trading 停下，数据保留）"
+  say "== 切回 TopUP（Trading 停下，数据保留；一般 2–5 分钟）"
   # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删
   docker rm -f trading-restore-drill > /dev/null 2>&1 || true
-  sysctl_ disable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
-  # 和 trading update 用同一把锁：等进行中的自动更新做完（它最多 15 分钟），拿到锁以后它也不会再把 Trading 拉起来
+  # 先拿和 trading update 同一把锁、再停定时器：等锁时被打断，Trading 和定时器都还是原样；拿到锁以后自动更新也不会再把 Trading 拉起来
   exec 9> "$STATE/update.lock"
-  if ! flock -w 960 9; then
-    bad "自动更新 16 分钟还没做完，这次不切换：Trading 照常跑、定时器已恢复、TopUP 不启动（看 $LOGF，截图给主会话）"
-    if [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading)" ]; then sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 || true; fi
-    exit 1
+  if ! flock -n 9; then
+    say "  自动更新正在进行，最多等 $((OFF_LOCK_WAIT / 60)) 分钟（不用操作）"
+    if ! run_bg flock -w "$OFF_LOCK_WAIT" 9; then
+      bad "自动更新 $((OFF_LOCK_WAIT / 60)) 分钟还没做完，这次没切换：Trading 照常跑、定时器没动、TopUP 不启动。过几分钟再运行 sudo trading off"
+      exit 1
+    fi
   fi
+  local running=""
+  [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading)" ] && running=1
+  # 从这里到数据库停下之前被打断（或备份失败）：按原样恢复 Trading、打开定时器（on_exit）
+  [ -z "$running" ] || OFF_RESTORE_TRADING=1
+  sysctl_ disable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
   ok "定时器已停"
-  if [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading)" ]; then
+  if [ -n "$running" ]; then
     compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
     ok "应用已停"
-    if cmd_backup before-off > /dev/null; then ok "备份完成"; else bad "备份失败：Trading 按原样恢复，TopUP 不启动"; compose up -d > /dev/null 2>&1 || true; sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 || true; exit 1; fi
+    if BACKUP_LOCK_WAIT=120 cmd_backup before-off > /dev/null; then ok "备份完成"; else bad "备份失败：Trading 按原样恢复，TopUP 不启动"; exit 1; fi
     compose stop > /dev/null 2>&1 || true
-    # 从这里起 Trading 全停了：不管后面演练成败、被 Ctrl-C 还是 kill，退出时都启动 TopUP（on_exit）
-    OFF_START_TOPUP=1
+    # 从这里起 Trading 全停了：不管后面演练成败、被 Ctrl-C、窗口断了还是 kill，退出时都启动 TopUP（on_exit）
+    OFF_RESTORE_TRADING=""; OFF_START_TOPUP=1
     ok "MySQL、Redis 已停"
     # 恢复演练放在这里：Trading 全停了、TopUP 还没启动，2 核 2G 的内存够起临时数据库；只用刚才成功的那份备份（备份失败上面已经退出）
     say "  恢复演练（用刚做的备份，约 1–3 分钟；不通过也照样切回 TopUP）"
