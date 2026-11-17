@@ -1,0 +1,21 @@
+{
+  "_说明": "项目地图和项目索引的检查配置。由 scripts/check-project-index.mjs 读取，CI 会运行。",
+  "map": "项目地图.md",
+  "index": "项目索引.md",
+  "entry": ["CLAUDE.md", "AGENTS.md"],
+  "files": {
+    "include": ["scripts/**", ".github/workflows/**", "项目索引.config.json", "*.md"],
+    "exclude": ["**/.gitignore"]
+  },
+  "lists": [
+    {
+      "name": "环境变量",
+      "section": "2. 环境变量",
+      "sources": [".github/workflows/", "scripts/"],
+      "patterns": ["\\benv(?:\\.|\\[['\"])([A-Z][A-Z0-9_]+)", "\\$\\{\\{\\s*(?:vars|secrets)\\.([A-Z][A-Z0-9_]+)", "^\\s+([A-Z][A-Z0-9_]+):\\s"],
+      "match": "firstColumn",
+      "twoWay": "word",
+      "token": "^[A-Z][A-Z0-9_]+$"
+    }
+  ]
+}

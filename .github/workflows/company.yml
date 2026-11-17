@@ -1,0 +1,35 @@
+# 工作台上报：把本仓库的 PR 和 main 的 CI 推到公司工作台。照 Marketing 的 company.yml，只改 COMPANY_SOURCE: trading。
+# 没填 GitHub Secret COMPANY_INGEST_TOKEN 时打印"跳过"并成功；fork 来的 PR 拿不到 Secret，同样跳过。
+name: company
+on:
+  pull_request:
+    types: [opened, closed, reopened, edited]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+concurrency:
+  group: company-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+      - name: 上报 PR 和 CI 到公司运营仪表盘
+        env:
+          COMPANY_SOURCE: trading
+          COMPANY_INGEST_TOKEN: ${{ secrets.COMPANY_INGEST_TOKEN }}
+          COMPANY_INGEST_URL: ${{ vars.COMPANY_INGEST_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/company-report.mjs

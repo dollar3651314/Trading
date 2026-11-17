@@ -1,0 +1,63 @@
+# 每个 PR 的自动检查：不通过的 PR 不能合并到 staging（测试环境）和 main（生产）。
+# 分支规则只把汇总 job "ci-ok" 设为"必须通过"。系统固定 ubuntu-24.04（不用 latest，免得系统升级悄悄改变结果）。
+# 第 0 批只有骨架：项目索引检查 + staging 上"main 是不是祖先"检查（C149）；业务代码进来后再加构建和测试。
+name: ci
+on:
+  pull_request:
+    branches: [staging, main]
+  push:
+    branches: [staging, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  basic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+      - name: 项目索引检查
+        run: node scripts/check-project-index.mjs
+
+  # 改动只能经 staging 进 main：PR 目标或推送分支是 staging 时，main 必须是它的祖先，不是就报红并列出差的提交
+  main-ancestor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: main 是不是 staging 的祖先
+        env:
+          TARGET: ${{ github.base_ref || github.ref_name }}
+        run: |
+          if [ "$TARGET" != "staging" ]; then echo "目标不是 staging，跳过"; exit 0; fi
+          if ! git rev-parse -q --verify origin/main >/dev/null; then echo "还没有 main，跳过"; exit 0; fi
+          if git merge-base --is-ancestor origin/main HEAD; then echo "main 是祖先"; exit 0; fi
+          echo "main 不是祖先，差这些提交（先把 main 合回 staging）："
+          git log --oneline HEAD..origin/main
+          exit 1
+
+  # 汇总：任何一个检查失败或被取消就失败
+  ci-ok:
+    needs: [basic, main-ancestor]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: 汇总结果
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          BAD: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          echo "$NEEDS"
+          if [ "$BAD" = "true" ]; then echo "有检查失败或被取消"; exit 1; fi
