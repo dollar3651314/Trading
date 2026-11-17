@@ -22,11 +22,9 @@ trading:
     ws-handshake-per-minute: 1000000
     user-write-per-minute: 1000000
     admin-login-per-ip: 1000000
-  # 测试里不启动模拟行情源，由测试直接喂报价；K 线不定时清理，测试里直接调用（KlineRetentionTest）
+  # 测试里不连报价服务，由测试直接喂报价（跨进程测试另起报价服务，见 support/QuoteAppHarness）
   market:
     source: none
-    kline-retention:
-      enabled: false
   # 撮合引擎默认关：其他测试手动平仓时不会被引擎抢先强平；撮合测试里单独打开
   trading:
     engine-enabled: false

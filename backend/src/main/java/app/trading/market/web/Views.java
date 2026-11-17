@@ -2,7 +2,7 @@ package app.trading.market.web;
 
 import app.trading.market.api.MarketApi;
 import app.trading.market.api.SymbolSpec;
-import app.trading.market.kline.Bar;
+import app.quote.protocol.Message;
 import app.trading.market.quote.QuoteBook;
 import app.trading.market.quote.RecentTicks;
 import java.math.BigDecimal;
@@ -46,7 +46,7 @@ final class Views {
         e.quote().time().toString());
   }
 
-  static KlineView kline(Bar b, int digits) {
+  static KlineView kline(Message.Bar b, int digits) {
     return new KlineView(b.time(), price(b.open(), digits), price(b.high(), digits), price(b.low(), digits), price(b.close(), digits), String.valueOf(b.ticks()));
   }
 

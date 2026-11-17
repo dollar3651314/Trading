@@ -9,7 +9,6 @@ import app.trading.market.api.QuoteListener;
 import app.trading.market.api.QuoteStatus;
 import app.trading.market.api.SymbolSpec;
 import app.trading.market.config.SymbolCatalog;
-import app.trading.market.kline.KlineService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -32,7 +31,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 交易侧的本地报价簿（第 2 批拆进程后）：收报价服务推来的干净报价（{@link QuoteFrame}，已按序号排好） → 交易时段 → 最后一道检查 → <b>加点</b> →
- * 最新报价 → 逐笔 → K 线 → 订阅者（撮合）。按品种分到固定的处理线程（同一品种严格按顺序），不同品种并行。
+ * 最新报价 → 逐笔 → 订阅者（撮合）（K 线在报价服务里算，第 2 批第二步）。按品种分到固定的处理线程（同一品种严格按顺序），不同品种并行。
  * <ul>
  *   <li><b>过期保护</b>（技术方案 02 页第 2 节）：一个品种超过 {@code max-quote-age}（默认 3 秒）没收到新报价，或报价时间超过 {@code stale-after}，
  *       {@link #latest} 就返回不可成交——拒新开仓、平仓也拒（"报价暂不可用"）。时间都用注入的时钟（测试里拨时钟，确定性断言）；</li>
@@ -52,7 +51,6 @@ public class QuoteProcessor {
   private static final int STRIPES = 8;
 
   private final SymbolCatalog catalog;
-  private final KlineService klines;
   private final MarketProperties props;
   private final QuoteBook book = new QuoteBook();
   private final RecentTicks ticks = new RecentTicks();
@@ -75,9 +73,8 @@ public class QuoteProcessor {
   /** 报价服务的报价模式（none / simulated / live）；还没连上为空 */
   private volatile String quoteMode;
 
-  QuoteProcessor(SymbolCatalog catalog, KlineService klines, MarketProperties props, Clock clock, MeterRegistry metrics) {
+  QuoteProcessor(SymbolCatalog catalog, MarketProperties props, Clock clock, MeterRegistry metrics) {
     this.catalog = catalog;
-    this.klines = klines;
     this.props = props;
     this.clock = clock;
     this.metrics = metrics;
@@ -130,7 +127,6 @@ public class QuoteProcessor {
         stale ? QuoteStatus.STALE : QuoteStatus.FRESH, !stale);
     book.put(mq);
     ticks.add(f.symbol(), new RecentTicks.Tick(time, mq.bid(), mq.ask()));
-    klines.accept(f.symbol(), mq.mid(), time);
     changed.add(f.symbol());
     if (stale) return QuoteStatus.STALE; // 旧报价只更新显示，不交给撮合（不按过期价触发止盈止损、强平）
     for (QuoteListener l : listeners) {

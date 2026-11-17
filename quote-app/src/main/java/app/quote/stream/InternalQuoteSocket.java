@@ -10,7 +10,7 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
-/** 内部 WebSocket 的连接处理：连上发 hello，收 subscribe / resync，转给 {@link QuoteStream}。 */
+/** 内部 WebSocket 的连接处理：连上发 hello，收 subscribe / resync / watchBars，转给 {@link QuoteStream}。 */
 @Component
 class InternalQuoteSocket extends TextWebSocketHandler {
 
@@ -39,7 +39,8 @@ class InternalQuoteSocket extends TextWebSocketHandler {
     switch (m) {
       case Message.Subscribe sub -> stream.subscribe(s.getId(), sub);
       case Message.Resync r -> stream.resync(s.getId(), r);
-      default -> stream.error(s.getId(), "BAD_MESSAGE", "客户端只能发 subscribe、resync");
+      case Message.WatchBars w -> stream.watchBars(s.getId(), w);
+      default -> stream.error(s.getId(), "BAD_MESSAGE", "客户端只能发 subscribe、resync、watchBars");
     }
   }
 

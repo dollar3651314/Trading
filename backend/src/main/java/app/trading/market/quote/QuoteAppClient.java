@@ -13,7 +13,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * 调报价服务（quote-app）的内部接口（请求头带内部 Key）：同步品种和时段、端到端测试推动模拟报价。
+ * 调报价服务（quote-app）的内部接口（请求头带内部 Key）：同步品种和时段、K 线历史、端到端测试推动模拟报价。
  * 只在 {@code trading.market.source=remote} 时创建（{@link RemoteQuotes}）。Key 不写日志。
  */
 public class QuoteAppClient {
@@ -46,9 +46,40 @@ public class QuoteAppClient {
     return r.statusCode() == 200 ? Optional.of(json.readTree(r.body())) : Optional.empty();
   }
 
+  /** GET /internal/klines：最近 limit 根，从旧到新 */
+  java.util.List<app.quote.protocol.Message.Bar> klines(String symbol, app.quote.protocol.Timeframe tf, int limit) {
+    HttpResponse<String> r = send("GET", "/internal/klines?symbol=" + enc(symbol) + "&tf=" + tf.code + "&limit=" + limit, null);
+    if (r.statusCode() != 200) throw new IllegalStateException("报价服务取 K 线失败：HTTP " + r.statusCode());
+    java.util.List<app.quote.protocol.Message.Bar> out = new java.util.ArrayList<>();
+    for (JsonNode n : json.readTree(r.body())) {
+      out.add(new app.quote.protocol.Message.Bar(symbol, tf.code, n.path("time").asLong(), new BigDecimal(n.path("open").asString()),
+          new BigDecimal(n.path("high").asString()), new BigDecimal(n.path("low").asString()), new BigDecimal(n.path("close").asString()), n.path("ticks").asInt()));
+    }
+    return out;
+  }
+
+  /** GET /internal/klines/closes：每个品种最近 limit 根的收盘价 */
+  Map<String, java.util.List<BigDecimal>> closes(java.util.List<String> symbols, app.quote.protocol.Timeframe tf, int limit) {
+    HttpResponse<String> r = send("GET", "/internal/klines/closes?symbols=" + enc(String.join(",", symbols)) + "&tf=" + tf.code + "&limit=" + limit, null);
+    if (r.statusCode() != 200) throw new IllegalStateException("报价服务取收盘价失败：HTTP " + r.statusCode());
+    Map<String, java.util.List<BigDecimal>> out = new java.util.LinkedHashMap<>();
+    JsonNode body = json.readTree(r.body());
+    for (String s : symbols) {
+      java.util.List<BigDecimal> closes = new java.util.ArrayList<>();
+      for (JsonNode c : body.path(s)) closes.add(new BigDecimal(c.asString()));
+      out.put(s, closes);
+    }
+    return out;
+  }
+
+  private static String enc(String s) {
+    return java.net.URLEncoder.encode(s, java.nio.charset.StandardCharsets.UTF_8);
+  }
+
   private HttpResponse<String> send(String method, String path, String body) {
     HttpRequest req = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(10)).header(QuoteStreamClient.KEY_HEADER, key)
-        .header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(body)).build();
+        .header("Content-Type", "application/json").method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body))
+        .build();
     try {
       return http.send(req, HttpResponse.BodyHandlers.ofString());
     } catch (java.io.IOException e) {

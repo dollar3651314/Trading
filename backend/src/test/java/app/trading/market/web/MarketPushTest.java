@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 
-import app.trading.market.kline.KlineService;
 import app.trading.market.quote.QuoteProcessor;
 import app.trading.market.quote.RawQuote;
 import app.trading.notification.api.MailApi;
@@ -54,7 +53,6 @@ class MarketPushTest {
 
   @LocalServerPort int port;
   @Autowired QuoteProcessor processor;
-  @Autowired KlineService klines;
   @MockitoBean MailApi mail;
 
   final HttpClient http = HttpClient.newHttpClient();
@@ -108,7 +106,7 @@ class MarketPushTest {
   }
 
   @Test
-  void 登录后收到报价推送和订阅的K线() throws Exception {
+  void 登录后收到报价推送() throws Exception {
     String cookie = loginCookie();
     Collector c = new Collector();
     WebSocket ws = http.newWebSocketBuilder().header("Cookie", cookie).connectTimeout(Duration.ofSeconds(5))
@@ -118,11 +116,7 @@ class MarketPushTest {
     processor.process(new RawQuote("NZDUSD", new BigDecimal("0.57010"), new BigDecimal("0.57030"), NOW));
     // 推送的是对客报价，含加点（V24：5 位小数，每边 10 点 = 0.00010）
     assertThat(c.next("\"symbol\":\"NZDUSD\"")).contains("\"bid\":\"0.57000\"").contains("\"ask\":\"0.57040\"");
-
-    ws.sendText("{\"op\":\"subKline\",\"symbol\":\"NZDUSD\",\"tf\":\"1m\"}", true).get(5, TimeUnit.SECONDS);
-    Thread.sleep(300);
-    klines.accept("NZDUSD", new BigDecimal("0.57040"), NOW.plusSeconds(1));
-    assertThat(c.next("\"type\":\"kline\"")).contains("\"tf\":\"1m\"").contains("\"close\":\"0.57040\"");
+    // 订阅的 K 线推送：K 线在报价服务里算（第 2 批第二步），这部分搬到跨进程的 KlineCrossProcessTest
     ws.sendClose(WebSocket.NORMAL_CLOSURE, "").get(5, TimeUnit.SECONDS);
   }
 }

@@ -2,6 +2,8 @@
 # 密钥（内部 Key、报价源 token、数据库密码）只从环境变量来，仓库里只有变量名。
 server:
   port: ${FX_QUOTE_HTTP_PORT:8090}
+  # 只监听内网：默认 127.0.0.1（和 trading-app 在同一台机器）；第 4 批部署时改成内网地址（FX_QUOTE_BIND_ADDRESS），不对公网开放
+  address: ${FX_QUOTE_BIND_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -47,6 +49,18 @@ quote:
     max-tick-jump-rate: 0.10
     max-volatility-rate: 0.05
     volatility-window: 60s
+    # K 线保留条数（v2 第 11.2 节，quote-app 的 kline/KlineRetention，第 2 批第二步从 trading-app 搬来）：每个品种每个周期只保留最近 N 根，每天 UTC 20:10 分批清理一次
+    kline-retention:
+      enabled: true
+      cron: "0 10 20 * * *"
+      batch-size: 5000
+      keep:
+        1m: 10080
+        5m: 8640
+        15m: 8640
+        1h: 8760
+        4h: 4380
+        1d: 3650
   # 内部 WebSocket /internal/ws/quotes（协议见 quote-protocol 模块）
   stream:
     # 内部 Key：只由负责人填进服务器 .env（FX_QUOTE_INTERNAL_KEY），trading-app 配同一个值；为空时拒绝所有连接

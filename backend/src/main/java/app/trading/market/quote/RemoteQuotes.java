@@ -27,6 +27,7 @@ import tools.jackson.databind.ObjectMapper;
  * <ul>
  *   <li>内部 WebSocket（{@link QuoteStreamClient}：序号检查、断线补齐、快照恢复）收到的报价交给 {@link QuoteProcessor}（按品种分线程，同品种有序）；</li>
  *   <li>启动时、每次连上报价服务时、后台改了品种 / 时段 / 休市日 / 模拟起始价以后，把这些整份同步给报价服务（失败按 sync-retry 重试）；</li>
+ *   <li>K 线（{@link app.trading.market.kline.Klines}）：历史走报价服务的内部接口，实时变化走内部 WebSocket 的 bar；</li>
  *   <li>告警（{@link AlertCheck}）：{@code quote.stream} 连不上报价服务；报价服务心跳里带来的告警项（报价源断线、切备源、偏差）原样列出，照样发告警邮件。</li>
  * </ul>
  * 报价服务断了：不再有新报价，{@link QuoteProcessor#latest} 3 秒后不可成交（拒新开仓），撮合没有新报价也不会触发强平；连回来后按序号补齐。
@@ -46,6 +47,7 @@ public class RemoteQuotes implements AlertCheck {
   private final Instant startedAt;
   private volatile List<Message.Alert> remoteAlerts = List.of();
   private volatile boolean synced;
+  private volatile java.util.function.Consumer<Message.Bar> onBar = b -> {};
 
   RemoteQuotes(QuoteProcessor processor, SymbolCatalog catalog, QuoteAppProperties props, MarketProperties market, ObjectMapper json, Clock clock) {
     this.processor = processor;
@@ -56,7 +58,7 @@ public class RemoteQuotes implements AlertCheck {
     this.startedAt = clock.instant();
     if (props.url().isEmpty()) throw new IllegalStateException("trading.market.source=remote 时要配置 trading.market.quote-app.url（FX_QUOTE_APP_URL）");
     this.stream = new QuoteStreamClient(client.streamUri(), props.key(), new Listener(),
-        new QuoteStreamClient.Options(props.reconnectInitial(), props.reconnectMax(), props.idleTimeout(), Duration.ofSeconds(5)), Clock.systemUTC());
+        new QuoteStreamClient.Options(props.reconnectInitial(), props.reconnectMax(), props.idleTimeout(), Duration.ofSeconds(5), props.sendTimeout()), Clock.systemUTC());
     catalog.onReload(this::requestSync);
   }
 
@@ -101,6 +103,32 @@ public class RemoteQuotes implements AlertCheck {
     }
   }
 
+  public List<Message.Bar> history(String symbol, app.quote.protocol.Timeframe tf, int limit) {
+    try {
+      return client.klines(symbol, tf, limit);
+    } catch (RuntimeException e) {
+      log.warn("取 K 线失败（{} {}）：{}", symbol, tf.code, e.getMessage());
+      return List.of();
+    }
+  }
+
+  public java.util.Map<String, List<java.math.BigDecimal>> closes(List<String> symbols, app.quote.protocol.Timeframe tf, int limit) {
+    try {
+      return client.closes(symbols, tf, limit);
+    } catch (RuntimeException e) {
+      log.warn("取今日走势失败：{}", e.getMessage());
+      return app.trading.market.kline.Klines.NONE.closes(symbols, tf, limit);
+    }
+  }
+
+  public void onUpdate(java.util.function.Consumer<Message.Bar> listener) {
+    this.onBar = listener;
+  }
+
+  public void watch(java.util.Set<String> keys) {
+    stream.watchBars(keys);
+  }
+
   @Override
   public List<Item> evaluate() {
     List<Item> out = new ArrayList<>();
@@ -128,6 +156,11 @@ public class RemoteQuotes implements AlertCheck {
     @Override
     public void onSample(Message.Sample sample) {
       processor.acceptSample(sample);
+    }
+
+    @Override
+    public void onBar(Message.Bar bar) {
+      onBar.accept(bar);
     }
 
     @Override

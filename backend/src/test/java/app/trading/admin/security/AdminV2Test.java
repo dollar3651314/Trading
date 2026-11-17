@@ -225,9 +225,8 @@ class AdminV2Test extends AdminTestSupport {
       assertThat(placed.getStatus()).as(placed.getContentAsString()).isEqualTo(200);
       long positionId = jdbc.queryForObject("SELECT id FROM trading_position WHERE user_id = ? AND symbol = ? AND status = 'OPEN'", Long.class, c.id(), code);
       assertThat(jdbc.queryForObject("SELECT open_price FROM trading_position WHERE id = ?", BigDecimal.class, positionId)).isEqualByComparingTo("100.15");
-      // 风控看板的敞口、K 线都认得新品种
+      // 风控看板的敞口认得新品种（"K 线也认得新品种"在 K 线搬到报价服务后改在跨进程的 AdminSimStartPriceTest 里测）
       assertThat(body(call(get("/api/admin/risk"), m.cookie(), null)).get("symbols").toString()).contains("\"symbol\":\"" + code + "\"");
-      assertThat(body(call(get("/api/market/klines?symbol=" + code + "&tf=1m"), c.cookie(), null)).size()).isEqualTo(1);
       // 平仓（不留下没有品种的持仓）
       // 路径里是持仓的对外编号（雪花 ID，v2 第 11.4 节），不是内部 id
       long positionNo = jdbc.queryForObject("SELECT public_no FROM trading_position WHERE id = ?", Long.class, positionId);

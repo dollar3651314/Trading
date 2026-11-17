@@ -44,6 +44,9 @@ public final class QuoteStreamClient implements AutoCloseable {
 
     default void onHeartbeat(Message.Heartbeat heartbeat) {}
 
+    /** 关注的 K 线有变化（{@link #watchBars}） */
+    default void onBar(Message.Bar bar) {}
+
     /** 连接状态变化 */
     default void onConnection(boolean connected) {}
   }
@@ -52,12 +55,25 @@ public final class QuoteStreamClient implements AutoCloseable {
    * 连接参数。
    *
    * @param idleTimeout 多久没收到任何消息就断开重连（服务器每秒一条心跳）
+   * @param sendTimeout 发一条消息最多等多久；超时说明连接半死，断开并重连（不让发送一直占着锁、卡住重连和定时检查）
    */
-  public record Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout) {
+  public record Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout, Duration sendTimeout) {
+    public Options {
+      sendTimeout = sendTimeout == null || sendTimeout.isZero() || sendTimeout.isNegative() ? DEFAULT_SEND_TIMEOUT : sendTimeout;
+    }
+
+    /** 发送超时用默认值（{@link #DEFAULT_SEND_TIMEOUT}） */
+    public Options(Duration reconnectInitial, Duration reconnectMax, Duration idleTimeout, Duration connectTimeout) {
+      this(reconnectInitial, reconnectMax, idleTimeout, connectTimeout, DEFAULT_SEND_TIMEOUT);
+    }
+
     public static Options defaults() {
       return new Options(Duration.ofMillis(500), Duration.ofSeconds(30), Duration.ofSeconds(10), Duration.ofSeconds(5));
     }
   }
+
+  /** 发送超时的默认值 */
+  public static final Duration DEFAULT_SEND_TIMEOUT = Duration.ofSeconds(3);
 
   private final URI uri;
   private final String key;
@@ -77,9 +93,13 @@ public final class QuoteStreamClient implements AutoCloseable {
   private volatile Instant lastMessageAt;
   private volatile long reconnects;
   private volatile String lastError;
+  /** 关注的 K 线（"品种|周期"），每次连上都重新告诉服务器 */
+  private volatile java.util.Set<String> watchedBars = java.util.Set.of();
   private Duration backoff;
   /** 连接代数：旧连接的回调晚到时不处理 */
   private volatile long generation;
+  /** 发送锁：只管"上一条发完再发下一条"，和重连用的对象锁分开，发送卡住时不挡重连 */
+  private final Object sendLock = new Object();
 
   public QuoteStreamClient(URI uri, String key, Listener listener, Options options, Clock clock) {
     this.uri = uri;
@@ -121,6 +141,13 @@ public final class QuoteStreamClient implements AutoCloseable {
 
   public String epoch() {
     return tracker.epoch();
+  }
+
+  /** 要推哪些 K 线的实时变化（整份替换）；连着时立即告诉服务器，重连后自动再告诉一次 */
+  public void watchBars(java.util.Set<String> keys) {
+    watchedBars = java.util.Set.copyOf(keys);
+    WebSocket w = ws;
+    if (connected && w != null) send(w, new Message.WatchBars(watchedBars));
   }
 
   /** 测试用：从客户端这边断开当前连接（不发关闭帧），之后照常重连 */
@@ -184,8 +211,34 @@ public final class QuoteStreamClient implements AutoCloseable {
     }
   }
 
-  private void send(WebSocket w, Message m) {
-    w.sendText(QuoteCodec.encode(m), true);
+  /**
+   * JDK WebSocket 上一条没发完不能发下一条：用发送锁串行，最多等 {@code sendTimeout}。
+   * 超时说明连接半死（对方不读、网络卡住）：断开这条连接（abort）并按正常的退避重连；发送锁只在这段时间内占着，
+   * 而且和重连用的锁分开，所以不会卡住重连和定时检查。
+   */
+  void send(WebSocket w, Message m) {
+    synchronized (sendLock) {
+      try {
+        w.sendText(QuoteCodec.encode(m), true).orTimeout(options.sendTimeout().toMillis(), TimeUnit.MILLISECONDS).join();
+      } catch (java.util.concurrent.CompletionException e) {
+        if (e.getCause() instanceof java.util.concurrent.TimeoutException) {
+          log.warn("发给报价服务 {} 毫秒还没发完，断开重连", options.sendTimeout().toMillis());
+          lastError = "send-timeout";
+          w.abort();
+          if (w == ws) scheduleReconnect(generation);
+        } else {
+          log.debug("发给报价服务失败：{}", e.getCause() == null ? e.getClass().getSimpleName() : e.getCause().getClass().getSimpleName());
+        }
+      } catch (RuntimeException e) {
+        log.debug("发给报价服务失败：{}", e.getClass().getSimpleName());
+      }
+    }
+  }
+
+  /** 测试用：把当前连接换成给定的（模拟连接半死） */
+  void useConnectionForTest(WebSocket w) {
+    ws = w;
+    connected = true;
   }
 
   private void handle(WebSocket w, String text) {
@@ -203,6 +256,7 @@ public final class QuoteStreamClient implements AutoCloseable {
         backoff = options.reconnectInitial();
         connected = true;
         send(w, new Message.Subscribe(h.epoch(), changed ? Map.of() : tracker.since()));
+        if (!watchedBars.isEmpty()) send(w, new Message.WatchBars(watchedBars));
         listener.onConnection(true);
         listener.onHello(h, changed);
       }
@@ -219,6 +273,7 @@ public final class QuoteStreamClient implements AutoCloseable {
       }
       case Message.Sample s -> listener.onSample(s);
       case Message.Heartbeat h -> listener.onHeartbeat(h);
+      case Message.Bar b -> listener.onBar(b);
       case Message.Error e -> log.warn("报价服务返回错误 {}：{}", e.code(), e.message());
       default -> log.debug("忽略客户端方向的消息");
     }

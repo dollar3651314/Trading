@@ -1,22 +1,21 @@
-package app.trading.market.kline;
+package app.quote.kline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import app.trading.support.FixedClockConfig;
+import app.quote.protocol.Timeframe;
+import app.quote.support.FixedClockConfig;
+import app.quote.support.QuoteAppTest;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
 
 /** K 线保留条数（v2 第 11.2 节，AC2-19）：真实 MySQL，用一个测试专用的品种代码，测完删掉。 */
-@SpringBootTest
-@ActiveProfiles("test")
+@QuoteAppTest
 @Import(FixedClockConfig.class)
 class KlineRetentionTest {
 

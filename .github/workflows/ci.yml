@@ -47,6 +47,8 @@ jobs:
               - 'scripts/check-brand.mjs'
             client:
               - 'web/client/**'
+              # 客户端品种表测试核对报价服务模拟源的起始价（web/client/src/mocks/data/symbols.test.ts）
+              - 'quote-app/**/simulated-prices.csv'
             admin:
               - 'web/admin/**'
             site:
