@@ -85,11 +85,11 @@ export const e2e = {
   async mailSubjects(api: APIRequestContext, email: string): Promise<string[]> {
     return ok(await api.get(`/api/e2e/mail/subjects?email=${encodeURIComponent(email)}`), '取邮件标题');
   },
-  /** 在链替身的下一个区块里向充值地址转 USDT（此时待确认） */
+  /** 假 TopUP：向充值地址转入 USDT 并确认，回调 Trading（直接入账，返回 status = CREDITED） */
   async deposit(api: APIRequestContext, chain: string, address: string, amount: string): Promise<{ txHash: string; status: string }> {
     return ok(await api.post('/api/e2e/wallet/deposit', { data: { chain, address, amount } }), '注入充值');
   },
-  /** 链替身再出 blocks 个区块并扫块 */
+  /** 兼容旧脚本：TopUP 只在确认后回调，没有"出块"这一步，后端什么也不做 */
   async mine(api: APIRequestContext, chain: string, blocks: number): Promise<void> {
     await ok(await api.post('/api/e2e/wallet/mine', { data: { chain, blocks } }), '出块');
   },
@@ -104,7 +104,7 @@ export const e2e = {
   async advanceWithdrawals(api: APIRequestContext): Promise<void> {
     await ok(await api.post('/api/e2e/wallet/withdrawals/advance'), '推进提现');
   },
-  /** 这笔提现的链上交易确认了 */
+  /** 假 TopUP：这笔提现人工放款审核通过、广播、链上成功（依次回调） */
   async confirmWithdrawal(api: APIRequestContext, id: string): Promise<void> {
     await ok(await api.post(`/api/e2e/wallet/withdrawals/${id}/confirm`), '确认提现上链');
   },

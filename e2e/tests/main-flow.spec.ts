@@ -2,7 +2,8 @@
  * 主流程（S19；需求说明书第 7 节 AC 对照见 内部文档 第 5 节）：
  * 客户在 390px 宽的手机上：注册（邮箱验证码）→ 退出后登录 → 充值到账 → 提交 KYC → 市价下单 → 设止盈止损 → 报价触发止盈自动平仓
  * → 再开一单先部分平仓、再全部平仓 → 资金流水 → 加白名单 → 提现；超管在电脑上：首次登录改密码 → 审核 KYC → 出金审核 → 查看客户；
- * 广播成功、链上确认后客户看到提现已完成。v2：检查品牌改名（标题、页面文字、邮件标题没有旧品牌名，AC2-11、AC2-12）。
+ * 第 1 批：充值地址第一次选链才向（假）TopUP 要，到账由 TopUP 回调入账；提现两道审——后台审核通过后交 TopUP"等待放款审核"，
+ * 假 TopUP 放款成功回调后客户看到提现已完成。v2：检查品牌改名（标题、页面文字、邮件标题没有旧品牌名，AC2-11、AC2-12）。
  * 体验优化 1021（第一批）：注册后第一次进来弹出新手引导（这里点"跳过"）；电脑顶栏没有"我的"和跑马灯；交易页左栏只列自选名称、
  * 图表上没有卖出 / 买入按钮，1366×633（1366×768 屏幕的浏览器可视区）下确认按钮不用滚动就能看到；站内信有欢迎、开仓、平仓三类。
  * 每轮用新邮箱、新证件号，不依赖上一轮的数据。外部依赖（邮件、链、LP 行情、提现广播）由后端 e2e profile 的替身代替。
@@ -221,11 +222,14 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
     });
 
     let address = '';
-    await step('客户：三条链的充值地址（ERC20 和 BSC 相同）', async () => {
+    await step('客户：三条链的充值地址（第一次选链才生成；假 TopUP 给 ERC20 和 BSC 同一个地址）', async () => {
       await page.goto('/assets');
       const addr = page.locator('.qr-wrap .addr .num');
       const read = async (net: string) => {
-        await page.getByRole('radio', { name: new RegExp(`^${net}`) }).click();
+        const radio = page.getByRole('radio', { name: new RegExp(`^${net}`) });
+        await radio.click();
+        // 第 1 批（AC-W1）：第一次选这条链时向钱包提供方要地址，生成后按钮上出现"已生成"
+        await expect(radio).toContainText('已生成');
         await expect(addr).toBeVisible();
         return (await addr.innerText()).replace(/\s+/g, '');
       };
@@ -238,14 +242,13 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       await expectNoHorizontalScroll(page, '资产页');
     });
 
-    await step(`客户：链上转入 ${DEPOSIT} USDT（TRC20），先显示待确认，确认数够了到账`, async () => {
+    await step(`客户：链上转入 ${DEPOSIT} USDT（TRC20），TopUP 确认后回调，到账`, async () => {
       // 先等交易推送连上再转账。D-2 已修（每次连上都重新拉取），保留这一步让测试不依赖时间窗口
       await waitSocketOpen(page, '/api/ws/trading');
       const r = await e2e.deposit(request, 'TRC20', address, DEPOSIT);
-      expect(r.status).toBe('PENDING');
-      // 发现待确认的充值时后端就推送 deposit 事件，不刷新页面也能看到"待确认"（E2E-2 已修复）
-      await expect(page.getByText(/待确认 \d+\/19/)).toBeVisible();
-      await e2e.mine(request, 'TRC20', 25);
+      // 第 1 批：TopUP 只在确认后回调一次（TG-5），Trading 没有"待确认"这一步，回调到了就入账
+      expect(r.status).toBe('CREDITED');
+      // 入账后后端推送 deposit 事件，不刷新页面也能看到
       await expect(page.getByText('已到账 · TRC20')).toBeVisible();
       // 站内信推送的提示（AC-07 客户收到通知）
       await expect(page.getByText('充值已到账').first()).toBeVisible();
@@ -395,7 +398,7 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
     });
 
     let withdrawalId = '';
-    await step('后台：出金审核通过（立即广播）', async () => {
+    await step('后台：出金审核通过（立即交给 TopUP，客户看到"等待放款审核"）', async () => {
       await adminPage.goto('/admin/funds/withdrawals');
       await adminPage.getByRole('row').filter({ hasText: email }).first().click();
       const detail = adminPage.getByRole('complementary', { name: '出金详情' });
@@ -406,10 +409,10 @@ test('客户主流程（手机 390px）和后台审核', async ({ browser }) => 
       await expect(detail.getByRole('region', { name: '规则判定' })).toContainText('总开关关闭，全部人工审核');
       await detail.getByRole('button', { name: cjk('通过') }).click();
       await confirmAndWait(adminPage, cjk('通过'), `/api/admin/withdrawals/${withdrawalId}/approve`);
-      await expect(page.locator('.wd-recs li').first()).toContainText('上链中');
+      await expect(page.locator('.wd-recs li').first()).toContainText('等待放款审核');
     });
 
-    await step('链上确认：提现完成，客户看到已完成', async () => {
+    await step('TopUP 人工放款审核通过、链上成功（假 TopUP 回调）：提现完成，客户看到已完成', async () => {
       await e2e.confirmWithdrawal(request, withdrawalId);
       await expect(page.locator('.wd-recs li').first()).toContainText('已完成');
       await page.goto('/assets/ledger');
