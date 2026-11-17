@@ -10,13 +10,27 @@ import { useIsDesktop } from './hooks/useMediaQuery';
 import { useI18n } from './i18n';
 import { LangProvider } from './i18n/I18nProvider';
 import type { Lang } from './i18n/lang';
+import { LEGAL } from './content/legal';
+import type { Page } from './lib/route';
 import { HomeDesktop, HomeMobile } from './pages/Home';
 import { LegalPage } from './pages/Legal';
+
+/** 浏览器标签标题按页面设（测试环境验收 T-3）：首页用完整标题，法律页、不存在的页用"页面名｜Trading" */
+function usePageTitle(page: Page) {
+  const { t, lang } = useI18n();
+  useEffect(() => {
+    let name: string | null = null;
+    if (page === 'terms' || page === 'privacy' || page === 'risk') name = LEGAL[page][lang].title;
+    else if (page !== 'home') name = t('notFound.title');
+    document.title = name === null ? t('meta.title') : t('meta.pageTitle', { page: name });
+  }, [page, lang, t]);
+}
 
 function Shell() {
   const desktop = useIsDesktop();
   const { page } = useRouter();
   const { t } = useI18n();
+  usePageTitle(page);
   // 直接打开带锚点的地址（例如 /#faq）时滚到对应区块
   useEffect(() => {
     const id = window.location.hash.slice(1);

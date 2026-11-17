@@ -1,5 +1,6 @@
 # 测试环境站点（第 4 批，部署方案 v1 02 页第 2 节）。${APP_DOMAIN}、${ADMIN_DOMAIN}、${WWW_DOMAIN}、${QUOTE_DOMAIN} 和限流阈值在容器启动时由环境变量替换
 # （nginx 镜像的 envsubst 只替换已定义的环境变量，Nginx 自己的 $host 等不受影响）。
+# 每个子域名都 include robots.inc（/robots.txt）和 security.inc（含 X-Robots-Tag）。
 # 证书：一张 Let's Encrypt 证书包含四个子域名，名字固定为 trading（trading setup 申请，certbot 自动续期，续完重新加载 Nginx）。
 #
 # 每个子域名转发什么（其余一律 404）：
@@ -8,6 +9,15 @@
 #   官网    WWW_DOMAIN   官网；/api/public/quotes、/api/health → trading-app。其他 /api/** 404
 #   报价    QUOTE_DOMAIN /v1/**（含 WebSocket /v1/ws）、/docs/ → quote-app。/internal/** 和其他一切 404
 # 路径里有分号的一律 400（Spring 忽略分号后面的内容，前缀判断会被绕过；后端 CrossSiteGuard、报价服务 PathGuardFilter 也拒绝）。
+
+# 搜索引擎收录（测试环境验收 T-2）：FX_NGINX_NOINDEX（web.Dockerfile 默认 true，测试环境 docker-compose.yml 也写死 true）
+#   true  → 四个子域名所有响应带 X-Robots-Tag: noindex, nofollow（security.inc），/robots.txt 回"全部禁止"（robots.inc）
+#   false → 不发 X-Robots-Tag，/robots.txt 用前端目录里的文件、没有就回"全部允许"（生产要让官网被收录时由运维设 false）
+# 只有值是 false（Nginx 的 map 不分大小写）才让收录；没设、写错（例如 no、0）一律按不收录处理，宁可不被收录
+map "${FX_NGINX_NOINDEX}" $tr_robots_tag {
+  default "noindex, nofollow";
+  "false" "";
+}
 
 limit_req_zone $binary_remote_addr zone=tr_api:10m rate=${FX_NGINX_API_RATE};
 limit_req_zone $binary_remote_addr zone=tr_ws:10m rate=${FX_NGINX_WS_RATE};
@@ -48,6 +58,7 @@ server {
   ssl_protocols TLSv1.2 TLSv1.3;
   include /etc/nginx/snippets/security.inc;
   include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
 
   root /usr/share/nginx/client;
 
@@ -93,6 +104,7 @@ server {
   ssl_protocols TLSv1.2 TLSv1.3;
   include /etc/nginx/snippets/security.inc;
   include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
 
   root /usr/share/nginx;
 
@@ -134,6 +146,7 @@ server {
   ssl_protocols TLSv1.2 TLSv1.3;
   include /etc/nginx/snippets/security.inc;
   include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
 
   root /usr/share/nginx/site;
 
@@ -173,6 +186,7 @@ server {
   ssl_protocols TLSv1.2 TLSv1.3;
   include /etc/nginx/snippets/security.inc;
   include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
 
   if ($request_uri ~ ";") { return 400; }
   # 报价服务的 PathGuardFilter 另外拒绝 % 编码、.. 等；这里先挡 /internal（大小写、编码都算）

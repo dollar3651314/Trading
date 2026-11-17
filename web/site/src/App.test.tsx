@@ -92,6 +92,30 @@ describe('法律页（AC2-08）', () => {
     expect(screen.getByTestId('footer-risk')).toHaveTextContent('风险提示');
   });
 
+  it.each([
+    ['/', 'zh-CN', 'Trading｜快人一步，交易全球行情'],
+    ['/terms', 'zh-CN', '服务条款｜Trading'],
+    ['/privacy', 'zh-CN', '隐私政策｜Trading'],
+    ['/risk', 'zh-CN', '风险披露｜Trading'],
+    ['/nope', 'zh-CN', '页面不存在｜Trading'],
+    ['/risk', 'en', 'Risk Disclosure | Trading'],
+    ['/nope', 'en', 'Page not found | Trading'],
+  ] as const)('%s（%s）浏览器标签标题是"%s"（测试环境验收 T-3）', (path, lang, title) => {
+    window.history.replaceState(null, '', path);
+    render(<App initialLang={lang} />);
+    expect(document.title).toBe(title);
+  });
+
+  it('页内切换页面时标题跟着变', () => {
+    window.history.replaceState(null, '', '/');
+    render(<App initialLang="en" />);
+    expect(document.title).toBe('Trading | Trade global markets, one step ahead');
+    act(() => {
+      fireEvent.click(within(screen.getByTestId('footer')).getByText('Privacy Policy'));
+    });
+    expect(document.title).toBe('Privacy Policy | Trading');
+  });
+
   it('页脚链接在页面内切换，不重新加载', () => {
     render(<App initialLang="en" />);
     act(() => {
