@@ -19,7 +19,9 @@ import org.springframework.stereotype.Component;
 /**
  * 限额和计量（需求 03 页第三节；只计量不收费，TD-6 A）。
  * <ul>
- *   <li>REST 每秒：按秒的固定窗口；每天：UTC 日累计（重启后从库里接上）。超了只拒超出的这一次（429 + Retry-After），被拒的单独记，不算进请求数；</li>
+ *   <li>REST 每秒：按秒的固定窗口；每天：UTC 日累计。<b>计数在 Redis</b>（第 3 批审查：多实例不超发），一段 Lua 脚本原子地"加一、超了就减回去"；
+ *       当天的 Redis 计数不存在时（例如 Redis 清空过）先从库里的用量接上。超了只拒超出的这一次（429 + Retry-After），被拒的单独记，不算进请求数；</li>
+ *   <li>WebSocket 连接数也在 Redis（同一个 Key 的所有实例合计），连上加一、断开减一；计数 24 小时不动就过期（进程崩溃时不会永久占着名额）；</li>
  *   <li>计量按 Key、按天、按接口、按品种：REST 请求数、WebSocket 推送条数、连接秒数、当天连接数峰值。先记内存，每分钟（和每次查询前）写进
  *       quote_usage_daily，所以用量页、用量接口和实际请求数一致（AC-Q4、AC-Q11）；进程崩溃最多丢最后一分钟的计数（推断够用）；</li>
  *   <li>保留 13 个月，每天清理一次。</li>
@@ -60,17 +62,39 @@ public class Usage {
   private final Clock clock;
   /** day|key|endpoint|symbol → 还没写库的增量 */
   private final Map<String, Delta> pending = new ConcurrentHashMap<>();
-  /** day|key → 当天已通过的 REST 请求数（限额用） */
-  private final Map<String, AtomicLong> today = new ConcurrentHashMap<>();
-  /** key → {秒, 这一秒的请求数} */
-  private final Map<String, long[]> second = new ConcurrentHashMap<>();
-  /** key → 现在的 WebSocket 连接数 */
-  private final Map<String, AtomicInteger> open = new ConcurrentHashMap<>();
+  private final org.springframework.data.redis.core.StringRedisTemplate redis;
   /** day|key → 当天被拒（429）的次数（后台"今天已拒绝超出的 N 次请求"） */
   private final Map<String, AtomicLong> rejectedToday = new ConcurrentHashMap<>();
   private final Map<String, Instant> lastUsed = new ConcurrentHashMap<>();
 
-  Usage(JdbcTemplate jdbc, ApiKeys keys, OpenProperties props, Clock clock) {
+  /** KEYS[1] 每秒计数、KEYS[2] 当天计数；ARGV[1] 每秒上限、ARGV[2] 每天上限。返回 -1 超每秒、-2 超每天，否则当天已通过的次数 */
+  private static final org.springframework.data.redis.core.script.RedisScript<Long> REST = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+      "local s = redis.call('INCR', KEYS[1]) if s == 1 then redis.call('EXPIRE', KEYS[1], 5) end "
+          + "if s > tonumber(ARGV[1]) then redis.call('DECR', KEYS[1]) return -1 end "
+          + "local d = redis.call('INCR', KEYS[2]) if d == 1 then redis.call('EXPIRE', KEYS[2], 172800) end "
+          + "if d > tonumber(ARGV[2]) then redis.call('DECR', KEYS[2]) redis.call('DECR', KEYS[1]) return -2 end "
+          + "return d", Long.class);
+  /** KEYS[1] 连接数；ARGV[1] 上限。返回新的连接数，超了返回 -1（不加） */
+  private static final org.springframework.data.redis.core.script.RedisScript<Long> WS_OPEN = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+      "local n = redis.call('INCR', KEYS[1]) redis.call('EXPIRE', KEYS[1], 86400) "
+          + "if n > tonumber(ARGV[1]) then redis.call('DECR', KEYS[1]) return -1 end return n", Long.class);
+  private static final org.springframework.data.redis.core.script.RedisScript<Long> WS_CLOSE = new org.springframework.data.redis.core.script.DefaultRedisScript<>(
+      "local n = tonumber(redis.call('GET', KEYS[1]) or '0') if n > 0 then return redis.call('DECR', KEYS[1]) end return 0", Long.class);
+
+  static String secondKey(String keyId, long sec) {
+    return "fxq:rl:s:" + keyId + ":" + sec;
+  }
+
+  static String dayKey(String keyId, LocalDate day) {
+    return "fxq:rl:d:" + keyId + ":" + day;
+  }
+
+  static String wsKey(String keyId) {
+    return "fxq:ws:" + keyId;
+  }
+
+  Usage(JdbcTemplate jdbc, ApiKeys keys, OpenProperties props, Clock clock, org.springframework.data.redis.core.StringRedisTemplate redis) {
+    this.redis = redis;
     this.jdbc = jdbc;
     this.keys = keys;
     this.props = props;
@@ -79,30 +103,23 @@ public class Usage {
 
   // ---- REST ----
 
-  /** 判断一次 REST 请求能不能放行；放行就记一次（接口 endpoint，品种 symbol 可以为空） */
+  /** 判断一次 REST 请求能不能放行；放行就记一次（接口 endpoint，品种 symbol 可以为空）。Redis 连不上抛 DataAccessException */
   public Decision rest(ApiKeys.Key k, String endpoint, String symbol) {
     Instant now = clock.instant();
     LocalDate day = day(now);
     long sec = now.getEpochSecond();
     Limits l = k.limits();
-    long[] w = second.computeIfAbsent(k.keyId(), x -> new long[2]);
-    AtomicLong used = today.computeIfAbsent(day + "|" + k.keyId(), x -> new AtomicLong(loadToday(k.keyId(), day)));
-    synchronized (w) {
-      if (w[0] != sec) {
-        w[0] = sec;
-        w[1] = 0;
-      }
-      if (w[1] >= l.restPerSecond()) return reject(k, day, endpoint, symbol, new Rejected("second", l.restPerSecond(), 1, Instant.ofEpochSecond(sec + 1)));
-      if (used.get() >= l.restPerDay()) {
-        Instant reset = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
-        return reject(k, day, endpoint, symbol, new Rejected("day", l.restPerDay(), Math.max(1, reset.getEpochSecond() - sec), reset));
-      }
-      w[1]++;
-      long n = used.incrementAndGet();
-      delta(day, k.keyId(), endpoint, symbol).calls.incrementAndGet();
-      lastUsed.put(k.keyId(), now);
-      return new Ok(n);
+    String dk = dayKey(k.keyId(), day);
+    if (!Boolean.TRUE.equals(redis.hasKey(dk))) redis.opsForValue().setIfAbsent(dk, String.valueOf(loadToday(k.keyId(), day)), java.time.Duration.ofDays(2));
+    Long r = redis.execute(REST, List.of(secondKey(k.keyId(), sec), dk), String.valueOf(l.restPerSecond()), String.valueOf(l.restPerDay()));
+    if (r != null && r == -1) return reject(k, day, endpoint, symbol, new Rejected("second", l.restPerSecond(), 1, Instant.ofEpochSecond(sec + 1)));
+    if (r != null && r == -2) {
+      Instant reset = day.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+      return reject(k, day, endpoint, symbol, new Rejected("day", l.restPerDay(), Math.max(1, reset.getEpochSecond() - sec), reset));
     }
+    delta(day, k.keyId(), endpoint, symbol).calls.incrementAndGet();
+    lastUsed.put(k.keyId(), now);
+    return new Ok(r == null ? 0 : r);
   }
 
   private Rejected reject(ApiKeys.Key k, LocalDate day, String endpoint, String symbol, Rejected r) {
@@ -111,10 +128,16 @@ public class Usage {
     return r;
   }
 
-  /** 今天已通过的 REST 请求数（80% 提醒、后台用量页） */
+  /** 今天已通过的 REST 请求数（80% 提醒、后台用量页）：Redis 里的计数（所有实例合计）；Redis 没有或连不上时用库里的 */
   public long usedToday(String keyId) {
     LocalDate day = day(clock.instant());
-    return today.computeIfAbsent(day + "|" + keyId, x -> new AtomicLong(loadToday(keyId, day))).get();
+    try {
+      String v = redis.opsForValue().get(dayKey(keyId, day));
+      if (v != null) return Long.parseLong(v);
+    } catch (org.springframework.dao.DataAccessException | NumberFormatException e) {
+      // 用库里的
+    }
+    return loadToday(keyId, day);
   }
 
   public long rejectedToday(String keyId) {
@@ -126,35 +149,47 @@ public class Usage {
 
   private long loadToday(String keyId, LocalDate day) {
     Long v = jdbc.queryForObject("SELECT COALESCE(SUM(rest_calls), 0) FROM quote_usage_daily WHERE day = ? AND key_id = ?", Long.class, day, keyId);
-    return v == null ? 0 : v;
+    // 加上本实例还没写库的
+    String prefix = day + "|" + keyId + "|";
+    long pending = 0;
+    for (var e : this.pending.entrySet()) if (e.getKey().startsWith(prefix)) pending += e.getValue().calls.get();
+    return (v == null ? 0 : v) + pending;
   }
 
   // ---- WebSocket ----
 
-  /** 现在的连接数 */
+  /** 现在的连接数（所有实例合计） */
   public int connections(String keyId) {
-    AtomicInteger n = open.get(keyId);
-    return n == null ? 0 : n.get();
-  }
-
-  /** 新连接：超过连接数限额返回 false（不记） */
-  public boolean wsOpen(ApiKeys.Key k) {
-    AtomicInteger n = open.computeIfAbsent(k.keyId(), x -> new AtomicInteger());
-    while (true) {
-      int cur = n.get();
-      if (cur >= k.limits().wsConnections()) return false;
-      if (n.compareAndSet(cur, cur + 1)) {
-        Instant now = clock.instant();
-        delta(day(now), k.keyId(), "", "").peak.accumulateAndGet(cur + 1, Math::max);
-        lastUsed.put(k.keyId(), now);
-        return true;
-      }
+    try {
+      String v = redis.opsForValue().get(wsKey(keyId));
+      return v == null ? 0 : Math.max(0, Integer.parseInt(v));
+    } catch (org.springframework.dao.DataAccessException | NumberFormatException e) {
+      return 0;
     }
   }
 
+  /** 新连接：超过连接数限额返回 false（不记）；Redis 连不上也返回 false（不放行） */
+  public boolean wsOpen(ApiKeys.Key k) {
+    Long n;
+    try {
+      n = redis.execute(WS_OPEN, List.of(wsKey(k.keyId())), String.valueOf(k.limits().wsConnections()));
+    } catch (org.springframework.dao.DataAccessException e) {
+      return false;
+    }
+    if (n == null || n < 0) return false;
+    Instant now = clock.instant();
+    int cur = n.intValue();
+    delta(day(now), k.keyId(), "", "").peak.accumulateAndGet(cur, Math::max);
+    lastUsed.put(k.keyId(), now);
+    return true;
+  }
+
   public void wsClose(String keyId) {
-    AtomicInteger n = open.get(keyId);
-    if (n != null) n.updateAndGet(v -> Math.max(0, v - 1));
+    try {
+      redis.execute(WS_CLOSE, List.of(wsKey(keyId)));
+    } catch (org.springframework.dao.DataAccessException e) {
+      // 24 小时后自动过期
+    }
   }
 
   /** 连接时长（秒），由 {@link OpenStream} 定时和断开时记 */
@@ -201,7 +236,6 @@ public class Usage {
     }
     // 过了零点：清掉前一天的内存计数（库里已经有）
     LocalDate d = day(clock.instant());
-    today.keySet().removeIf(k -> !k.startsWith(d + "|"));
     rejectedToday.keySet().removeIf(k -> !k.startsWith(d + "|"));
   }
 

@@ -38,20 +38,38 @@ final class OpenClient {
   }
 
   Res call(String keyId, String secret, String method, String pathWithQuery) throws Exception {
+    return callNonce(keyId, secret, method, pathWithQuery, java.util.UUID.randomUUID().toString().replace("-", ""));
+  }
+
+  /** 指定 nonce（测防重放用） */
+  Res callNonce(String keyId, String secret, String method, String pathWithQuery, String nonce) throws Exception {
     String ts = String.valueOf(clock.instant().getEpochSecond());
-    String sig = OpenAuthFilter.sign(secret.getBytes(StandardCharsets.UTF_8), ts + "\n" + method + "\n" + pathWithQuery + "\n");
-    return raw(method, pathWithQuery, keyId, ts, sig);
+    String sig = OpenAuthFilter.sign(secret.getBytes(StandardCharsets.UTF_8), ts + "\n" + nonce + "\n" + method + "\n" + pathWithQuery + "\n");
+    return raw(method, pathWithQuery, keyId, ts, sig, nonce);
   }
 
   Res raw(String method, String pathWithQuery, String keyId, String ts, String sig) throws Exception {
+    return raw(method, pathWithQuery, keyId, ts, sig, java.util.UUID.randomUUID().toString().replace("-", ""));
+  }
+
+  Res raw(String method, String pathWithQuery, String keyId, String ts, String sig, String nonce) throws Exception {
     HttpRequest.Builder b = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + pathWithQuery)).method(method, HttpRequest.BodyPublishers.noBody());
     if (keyId != null) b.header("X-QK-Key", keyId);
     if (ts != null) b.header("X-QK-Timestamp", ts);
     if (sig != null) b.header("X-QK-Signature", sig);
+    if (nonce != null) b.header("X-QK-Nonce", nonce);
     HttpResponse<String> r = http.send(b.build(), HttpResponse.BodyHandlers.ofString());
     JsonNode n = r.body() == null || r.body().isBlank() ? null : JSON.readTree(r.body());
     if (n != null) seen.add(n);
     return new Res(r.statusCode(), n, r);
+  }
+
+  /** 不带任何 Key 发请求（测畸形路径），路径原样 */
+  Res bare(String method, String rawPath, String body) throws Exception {
+    HttpRequest req = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + rawPath)).header("Content-Type", "application/json")
+        .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body)).build();
+    HttpResponse<String> r = http.send(req, HttpResponse.BodyHandlers.ofString());
+    return new Res(r.statusCode(), null, r);
   }
 
   /** 内部接口（后台用，带内部 Key） */

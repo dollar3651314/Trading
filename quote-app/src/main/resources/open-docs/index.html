@@ -30,33 +30,36 @@
 
 <h2 id="auth">1. 鉴权（签名）</h2>
 <p>每个 Key 有一个 <code>Key ID</code>（<code>qk_</code> 开头）和一个 <code>Secret</code>（<code>qs_</code> 开头）。Secret 只在建 Key 时给你一次，请妥善保存；丢了只能让运营"轮换"出一个新 Key（旧 Key 立即停用）。</p>
-<p>每个 REST 请求带三个请求头：</p>
+<p>每个 REST 请求带四个请求头：</p>
 <table data-fields="auth.headers">
   <tr><th>请求头</th><th>类型</th><th>说明</th></tr>
   <tr><td><code>X-QK-Key</code></td><td>字符串</td><td>Key ID</td></tr>
   <tr><td><code>X-QK-Timestamp</code></td><td>整数（秒）</td><td>当前 Unix 时间戳（秒），和服务器时间相差不能超过 300 秒</td></tr>
+  <tr><td><code>X-QK-Nonce</code></td><td>字符串</td><td>每个请求一个新的随机串（8～64 位字母、数字、<code>-</code>、<code>_</code>）；同一个 Key 10 分钟内用过的 nonce 再用会被拒（防重放）</td></tr>
   <tr><td><code>X-QK-Signature</code></td><td>字符串</td><td>HMAC-SHA256(Secret, 签名原文)，小写十六进制</td></tr>
 </table>
-<p>签名原文 = <code>时间戳 + "\n" + 方法 + "\n" + 路径（带 ? 和查询串，和请求里一模一样）+ "\n" + 请求体</code>；GET 请求的请求体是空字符串。</p>
+<p>签名原文 = <code>时间戳 + "\n" + nonce + "\n" + 方法 + "\n" + 路径（带 ? 和查询串，和请求里一模一样）+ "\n" + 请求体</code>；GET 请求的请求体是空字符串。路径里不能有 <code>;</code>、<code>%</code> 编码、<code>..</code>（返回 400）。</p>
 <pre>// Node.js 示例
 import crypto from 'node:crypto';
 const base = 'https://报价服务地址';          // 测试环境地址由运营告诉你
 const keyId = process.env.QK_KEY, secret = process.env.QK_SECRET;
 async function call(method, pathWithQuery, body = '') {
   const ts = String(Math.floor(Date.now() / 1000));
-  const sig = crypto.createHmac('sha256', secret).update(`${ts}\n${method}\n${pathWithQuery}\n${body}`).digest('hex');
+  const nonce = crypto.randomUUID().replaceAll('-', '');
+  const sig = crypto.createHmac('sha256', secret).update(`${ts}\n${nonce}\n${method}\n${pathWithQuery}\n${body}`).digest('hex');
   const r = await fetch(base + pathWithQuery, { method, body: body || undefined,
-    headers: { 'X-QK-Key': keyId, 'X-QK-Timestamp': ts, 'X-QK-Signature': sig } });
+    headers: { 'X-QK-Key': keyId, 'X-QK-Timestamp': ts, 'X-QK-Nonce': nonce, 'X-QK-Signature': sig } });
   return [r.status, await r.json()];
 }
 console.log(await call('GET', '/v1/quotes?symbols=EURUSD,XAUUSD'));</pre>
 <pre># Python 示例
-import hashlib, hmac, os, time, urllib.request, json
+import hashlib, hmac, os, time, urllib.request, json, uuid
 def call(method, path, body=''):
     ts = str(int(time.time()))
-    sig = hmac.new(os.environ['QK_SECRET'].encode(), f'{ts}\n{method}\n{path}\n{body}'.encode(), hashlib.sha256).hexdigest()
+    nonce = uuid.uuid4().hex
+    sig = hmac.new(os.environ['QK_SECRET'].encode(), f'{ts}\n{nonce}\n{method}\n{path}\n{body}'.encode(), hashlib.sha256).hexdigest()
     req = urllib.request.Request(os.environ['QK_BASE'] + path, method=method, data=body.encode() or None,
-                                 headers={'X-QK-Key': os.environ['QK_KEY'], 'X-QK-Timestamp': ts, 'X-QK-Signature': sig})
+                                 headers={'X-QK-Key': os.environ['QK_KEY'], 'X-QK-Timestamp': ts, 'X-QK-Nonce': nonce, 'X-QK-Signature': sig})
     return json.load(urllib.request.urlopen(req))
 print(call('GET', '/v1/symbols'))</pre>
 
@@ -70,7 +73,9 @@ print(call('GET', '/v1/symbols'))</pre>
 </table>
 <table>
   <tr><th>HTTP</th><th>code</th><th>什么时候</th></tr>
-  <tr><td>401</td><td><code>UNAUTHORIZED</code></td><td>Key 不存在、已停用、签名不对、时间戳超出 ±300 秒</td></tr>
+  <tr><td>401</td><td><code>UNAUTHORIZED</code></td><td>Key 不存在、已停用、签名不对、时间戳超出 ±300 秒、nonce 用过了</td></tr>
+  <tr><td>400</td><td><code>BAD_PATH</code></td><td>路径里有 <code>;</code>、<code>%</code> 编码、<code>..</code> 等</td></tr>
+  <tr><td>503</td><td><code>SERVICE_UNAVAILABLE</code></td><td>服务暂时不可用，按 <code>Retry-After</code> 稍后重试</td></tr>
   <tr><td>403</td><td><code>OPEN_SERVICE_CLOSED</code></td><td>报价对外服务还没有开放（外部 Key 暂时不能用）</td></tr>
   <tr><td>429</td><td><code>RATE_LIMITED</code></td><td>超过每秒或每天请求数限额；响应头 <code>Retry-After</code>（秒）。另带 <code>scope</code>（second / day）、<code>limit</code>、<code>remaining</code>（0）、<code>resetAt</code>（毫秒）</td></tr>
   <tr><td>400</td><td><code>SYMBOLS_REQUIRED</code>、<code>TOO_MANY_SYMBOLS</code>、<code>TIMEFRAME_INVALID</code>、<code>SYMBOL_NOT_AVAILABLE</code></td><td>参数不对；或这个 Key 拿不到这个品种</td></tr>

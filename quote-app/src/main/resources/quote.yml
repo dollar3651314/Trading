@@ -16,6 +16,14 @@ spring:
       connection-init-sql: SET time_zone = '+00:00'
       maximum-pool-size: ${FX_QUOTE_DB_POOL_SIZE:5}
       minimum-idle: 1
+  # 第 3 批：报价对外的限额计数、防重放、WebSocket 票据（键前缀 fxq:）。默认和 trading-app 同一个 Redis；连不上时对外接口返回 503，内部接口不受影响
+  data:
+    redis:
+      host: ${FX_QUOTE_REDIS_HOST:${FX_REDIS_HOST:localhost}}
+      port: ${FX_QUOTE_REDIS_PORT:${FX_REDIS_PORT:6379}}
+      password: ${FX_QUOTE_REDIS_PASSWORD:${FX_REDIS_PASSWORD:}}
+      timeout: 2s
+      connect-timeout: 2s
   # 报价进程自己的表（quote_symbol、quote_session、quote_holiday、quote_source_license），和 trading-app 的库分开
   flyway:
     locations: classpath:db/quote
@@ -80,9 +88,12 @@ quote:
     usage-flush: 60s
     retention-months: 13
     sweep: 1s
+    # 签名里的 nonce 记多久（防重放；要不短于时间戳允许的偏差 × 2）
+    nonce-ttl: 600s
     # 开发者文档：auto = 报价模式不是 live 时能看（对外开放前只在测试环境能看）
     docs: ${FX_QUOTE_OPEN_DOCS:auto}
-  # 报价源授权登记（技术方案 08 页，TQ-11 A）：auto = 报价模式 live（生产）时只用"交易用途"已授权的源开仓；测试环境不受限制
+  # 报价源授权登记（技术方案 08 页，TQ-11 A）：auto = 报价模式 live（生产）时只用"交易用途"已授权的源开仓、外部 Key 只拿转售已授权的品种；测试环境不受限制。
+  # 报价模式 live 时一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在非生产（测试、开发）有效
   license:
     enforce: ${FX_QUOTE_LICENSE_ENFORCE:auto}
     reload-interval: 60s

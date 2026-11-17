@@ -62,6 +62,7 @@ class OpenServiceTest {
   @Autowired QuoteProcessor processor;
   @Autowired Usage usage;
   @Autowired List<AlertCheck> alerts;
+  @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
   @MockitoBean QuoteRouter router;
 
   OpenClient c;
@@ -222,6 +223,90 @@ class OpenServiceTest {
     assertThat(q.body().path("unavailable").get(0).asString()).as("现在在用的源没授权，列表和报价都拿不到").isEqualTo("EURUSD");
   }
 
+  // ---- 审查 🔴：畸形路径不能绕过内部 Key 和对外签名 ----
+
+  @Test
+  void 畸形路径_分号_编码字母_编码斜杠_点点_都被拒_无Key不能开总开关也不能建外部Key() throws Exception {
+    long clientId = c.internal("POST", "/internal/open/clients", "{\"name\":\"路径测试\"}").body().path("id").asLong();
+    String openGate = "{\"open\":true,\"amosApproved\":true,\"by\":\"x\",\"reason\":\"x\"}";
+    String extKey = "{\"clientId\":" + clientId + ",\"kind\":\"EXTERNAL\",\"symbols\":[]}";
+    List<String> internalPaths = List.of("/internal;x/open/overview", "/%69nternal/open/overview", "/internal/open;x/overview", "/internal%2Fopen/overview",
+        "/v1/../internal/open/overview", "/v1/%2e%2e/internal/open/overview", "//internal/open/overview", "/internal//open/overview", "/internal/./open/overview");
+    for (String p : internalPaths) {
+      int st = c.bare("GET", p, null).status();
+      assertThat(st).as(p).isIn(400, 401, 404);
+    }
+    for (String p : List.of("/internal;x/open/gate", "/%69nternal/open/gate", "/internal/open/gate;x", "/internal/open/%67ate")) {
+      assertThat(c.bare("PUT", p, openGate).status()).as(p).isIn(400, 401, 404);
+    }
+    for (String p : List.of("/internal;x/open/keys", "/%69nternal/open/keys", "/internal/open/keys;x")) {
+      assertThat(c.bare("POST", p, extKey).status()).as(p).isIn(400, 401, 404);
+    }
+    assertThat(c.bare("PUT", "/internal/open/gate", openGate).status()).as("正常路径没有内部 Key").isEqualTo(401);
+    settings.reload();
+    assertThat(settings.gateOpen()).as("总开关还是关").isFalse();
+    keys.reload();
+    assertThat(keys.keys()).as("没有建出任何 Key").isEmpty();
+    // 对外 /v1/**：畸形路径 400，不会跳过验签
+    for (String p : List.of("/v1;x/symbols", "/v1/symbols;x", "/%76" + "1/symbols", "/v1/%73ymbols", "/v1//symbols", "/v1/./symbols")) {
+      assertThat(c.bare("GET", p, null).status()).as(p).isIn(400, 401);
+    }
+    assertThat(PathGuard.bad("/internal;x/open/gate")).isTrue();
+  }
+
+  /** 路径守卫的判断（单独测，不经过 HTTP 客户端的规范化） */
+  static final class PathGuard {
+    static boolean bad(String p) {
+      return app.quote.web.PathGuardFilter.malformed(p);
+    }
+  }
+
+  @Test
+  void 路径守卫判断() {
+    for (String p : List.of("/internal;x/a", "/%69nternal/a", "/a%2Fb", "/a/../b", "/a/..", "/a/./b", "//a", "/a\\b")) assertThat(PathGuard.bad(p)).as(p).isTrue();
+    for (String p : List.of("/internal/open/overview", "/v1/symbols", "/docs/", "/v1/ws", "/internal/ws/quotes", "/api/health")) assertThat(PathGuard.bad(p)).as(p).isFalse();
+  }
+
+  // ---- 审查 🟡：防重放、限额计数在 Redis ----
+
+  @Test
+  void 防重放_同一个nonce只能用一次_签名不对的不占nonce() throws Exception {
+    K k = key("INTERNAL_TEST");
+    assertThat(c.callNonce(k.id(), "qs_wrong", "GET", "/v1/symbols", "nonce-abcdef-1").status()).isEqualTo(401);
+    assertThat(c.callNonce(k.id(), k.secret(), "GET", "/v1/symbols", "nonce-abcdef-1").status()).as("乱签名没有占掉 nonce").isEqualTo(200);
+    var again = c.callNonce(k.id(), k.secret(), "GET", "/v1/symbols", "nonce-abcdef-1");
+    assertThat(again.status()).as("同一个请求原样重放").isEqualTo(401);
+    assertThat(again.body().path("message").asString()).contains("已经用过");
+    assertThat(c.callNonce(k.id(), k.secret(), "GET", "/v1/symbols", "short").status()).as("nonce 太短").isEqualTo(401);
+    assertThat(c.raw("GET", "/v1/symbols", k.id(), String.valueOf(clock.instant().getEpochSecond()), "x", null).status()).as("没带 nonce").isEqualTo(401);
+    assertThat(redis.hasKey("fxq:nonce:" + k.id() + ":nonce-abcdef-1")).isTrue();
+    assertThat(redis.getExpire("fxq:nonce:" + k.id() + ":nonce-abcdef-1")).isBetween(1L, 600L);
+  }
+
+  @Test
+  void 限额计数在Redis_另一个实例用掉的也算_不超发() throws Exception {
+    K k = key("INTERNAL_TEST");
+    limits(k.id(), 100, 5, 2, 50);
+    assertThat(c.call(k.id(), k.secret(), "GET", "/v1/symbols").status()).isEqualTo(200);
+    String dk = "fxq:rl:d:" + k.id() + ":2026-10-14";
+    assertThat(redis.opsForValue().get(dk)).isEqualTo("1");
+    // 模拟另一个实例已经放行了 3 次
+    redis.opsForValue().increment(dk, 3);
+    assertThat(c.call(k.id(), k.secret(), "GET", "/v1/symbols").status()).as("第 5 次").isEqualTo(200);
+    assertThat(c.call(k.id(), k.secret(), "GET", "/v1/symbols").status()).as("合计超过 5 次").isEqualTo(429);
+    assertThat(redis.opsForValue().get(dk)).as("被拒的不计").isEqualTo("5");
+    // 每秒计数也在 Redis：另一个实例这一秒已经用满
+    K k2 = key("INTERNAL_TEST");
+    redis.opsForValue().set("fxq:rl:s:" + k2.id() + ":" + clock.instant().getEpochSecond(), "10");
+    assertThat(c.call(k2.id(), k2.secret(), "GET", "/v1/symbols").status()).isEqualTo(429);
+    // WebSocket 连接数也按所有实例合计
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    redis.opsForValue().set("fxq:ws:" + k2.id(), "2");
+    assertThat(c.handshakeStatus(k2.id(), k2.secret())).as("别的实例已经占了 2 条").isEqualTo(429);
+    redis.opsForValue().set("fxq:ws:" + k2.id(), "1");
+    assertThat(c.handshakeStatus(k2.id(), k2.secret())).isEqualTo(101);
+  }
+
   // ---- AC-Q2 Key 管理 ----
 
   @Test
@@ -242,8 +327,8 @@ class OpenServiceTest {
     assertThat(c.raw("GET", "/v1/symbols", null, null, null).status()).isEqualTo(401);
     assertThat(c.call(k.id(), "qs_wrong", "GET", "/v1/symbols").status()).isEqualTo(401);
     String old = String.valueOf(clock.instant().getEpochSecond() - 301);
-    String sig = OpenAuthFilter.sign(k.secret().getBytes(java.nio.charset.StandardCharsets.UTF_8), old + "\nGET\n/v1/symbols\n");
-    assertThat(c.raw("GET", "/v1/symbols", k.id(), old, sig).status()).isEqualTo(401);
+    String sig = OpenAuthFilter.sign(k.secret().getBytes(java.nio.charset.StandardCharsets.UTF_8), old + "\nnonce-expired-1\nGET\n/v1/symbols\n");
+    assertThat(c.raw("GET", "/v1/symbols", k.id(), old, sig, "nonce-expired-1").status()).isEqualTo(401);
     assertThat(c.call(k.id(), k.secret(), "GET", "/v1/symbols").status()).isEqualTo(200);
     assertThat(c.call(k.id(), k.secret(), "GET", "/v1/quotes?symbols=EURUSD").status()).as("查询串参与签名").isEqualTo(200);
   }

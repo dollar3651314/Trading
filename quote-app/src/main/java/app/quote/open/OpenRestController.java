@@ -162,11 +162,11 @@ class OpenRestController {
 
   @PostMapping("/v1/ws-ticket")
   Map<String, Object> ticket(HttpServletRequest req) {
-    String t = tickets.issue(key(req).keyId());
+    Tickets.Ticket t = tickets.issue(key(req).keyId());
     Map<String, Object> out = new LinkedHashMap<>();
-    out.put("ticket", t);
-    out.put("expiresAt", tickets.expiresAt(t).toEpochMilli());
-    out.put("path", "/v1/ws?ticket=" + t);
+    out.put("ticket", t.ticket());
+    out.put("expiresAt", t.expiresAt().toEpochMilli());
+    out.put("path", "/v1/ws?ticket=" + t.ticket());
     return out;
   }
 }
