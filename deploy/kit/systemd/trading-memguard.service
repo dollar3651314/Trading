@@ -1,0 +1,9 @@
+# 内存守护：运行一次 trading memguard（可用内存低于阈值时只停 Trading，不碰 TopUP）。由 trading-memguard.timer 每 30 秒触发
+[Unit]
+Description=Trading 测试环境内存守护
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/trading/trading memguard
+TimeoutStartSec=3min

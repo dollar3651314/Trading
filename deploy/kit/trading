@@ -5,7 +5,7 @@
 #   sudo trading setup         中文向导（隐藏输入，要终端）：① 邮件（同机有 TopUP 就沿用它的 MAIL_FROM、MAIL_TO，问是否沿用它的 Resend Key；只读不改）并发测试邮件 ② 后台第一个超管的初始密码 ③ 验收令牌（测试管理员）
 #                              ④ TopUP Key / Secret（可跳过，联调时填）⑤ 备份 + 恢复演练；最后打印摘要
 #   sudo trading on / off      和 TopUP 轮流用这台 2 核 2G（部署方案 07 页，TD4-20 = B）：
-#                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,060 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
+#                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,000 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
 #                              off = 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 调 TopUP 自己的 topup start
 #   sudo trading keys [topup|mail]   中文向导：逐项问、Key / Secret / 邮件密码隐藏输入，写进 .env 后自动生效（要在"远程连接"的终端里运行）
 #   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
@@ -17,6 +17,7 @@
 #   sudo trading backup [名字]       加密备份（两个库、Redis、证件照片、.env），本机留 7 天
 #   sudo trading restore-drill       恢复演练：解密最新备份到临时目录 → 导入不联网的临时 MySQL → 核对表和行数 → 删临时文件
 #   sudo trading test-mail           给告警邮箱发一封测试邮件
+#   sudo trading memguard            内存守护（定时器每 30 秒）：可用内存低于 80 MB（TR_MEMGUARD_MB）就停 Trading 的全部容器、停自动更新、发邮件；不碰 TopUP
 #   sudo trading watch               每 5 分钟的检查，状态变化时发邮件（定时器运行；trading-deploy 定时器停着时不检查）
 # 给 TopUP 用的约定（TopUP topup.sh 的 stop_other）：装在 /opt/trading/，更新定时器叫 trading-deploy.timer，/opt/trading/backup.sh before-topup 能备份
 #   sudo trading gen-test-admin      设测试管理员令牌：Amos 用密码管理器生成 40 位，这里隐藏输入；.env 只存 SHA-256，屏幕上不显示（再运行一次就换）
@@ -32,14 +33,16 @@ IMAGES=(trading-app trading-quote trading-web)
 ENVF="$TR_DIR/.env"
 STATE="$TR_DIR/state"
 LOGF="$TR_DIR/logs/trading.log"
-# 启动前要求的可用内存：容器上限合计 960 + Docker 约 100（部署方案按 816 估的是 916，实测后改，见 docker-compose.yml 开头）
-MIN_MEM_MB=${TR_MIN_MEM_MB:-1060}
+# 启动前要求的可用内存：容器上限合计 900 + Docker 约 80 = 980，再留 20 MB（Amos 11/17 选 B，批准的 C75 例外，见 docker-compose.yml 开头）
+MIN_MEM_MB=${TR_MIN_MEM_MB:-1000}
+# 内存守护：可用内存低于这个数（MB）就只停 Trading（不碰 TopUP）
+MEMGUARD_MB=${TR_MEMGUARD_MB:-80}
 # 恢复演练用的临时 MySQL 上限（MB）；和正式库同样设置（缓冲池 32 MB），实测空闲约 172 MB
 DRILL_MEM_MB=${TR_DRILL_MEM_MB:-224}
 TOPUP_BIN=${TR_TOPUP_BIN:-/usr/local/bin/topup}
 # 同机 TopUP 的应用配置（邮件设置从这里读，只读不改；Amos 11/17「邮箱用和TopUP一样的」）
 TOPUP_ENVF=${TR_TOPUP_ENV:-/opt/topup/.env}
-TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer)
+TIMERS=(trading-deploy.timer trading-backup.timer trading-watch.timer trading-memguard.timer)
 
 # ---------- 公共 ----------
 say() { printf '%s\n' "$*"; }
@@ -495,6 +498,7 @@ cmd_status() {
   say "版本：${tag:-还没部署}（上一个：$(cat "$STATE/previous" 2>/dev/null || echo 无)）"
   [ -s "$STATE/skip" ] && say "  ⚠ 跳过的版本：$(cat "$STATE/skip")（修好后 sudo trading retry）"
   [ -f "$STATE/paused" ] && say "  ⚠ 自动更新已暂停到：$(cat "$STATE/paused")（手动回滚后；下一次合并时恢复）"
+  [ -f "$STATE/memguard-stopped" ] && say "  ⚠ 内存守护在 $(cat "$STATE/memguard-stopped") 停了 Trading（可用内存不够）；查清原因后 sudo trading on"
   body=$(health)
   say "trading-app：status=$(health_field status "$body") version=$(health_field version "$body") env=$(health_field env "$body")"
   quote_healthy && ok "quote-app 健康" || bad "quote-app 不健康"
@@ -695,6 +699,21 @@ cmd_test_admin_off() {
   ok "测试管理员已关，旧令牌立刻作废"; log "测试管理员已关"
 }
 
+# 内存守护：Trading 在跑、可用内存低于阈值时，只停 Trading（先停自动更新，再停全部容器，数据保留），记日志、发邮件；
+# 不碰 TopUP 的任何容器。恢复：查清原因后 sudo trading on（它会重新检查可用内存）
+cmd_memguard() {
+  need_root
+  [ -n "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] || return 0
+  local avail
+  avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
+  [ "$avail" -lt "$MEMGUARD_MB" ] || return 0
+  log "内存守护：可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），停 Trading（不碰 TopUP）"
+  sysctl_ disable --now trading-deploy.timer trading-backup.timer trading-watch.timer > /dev/null 2>&1 || true
+  compose stop > /dev/null 2>&1 || true
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/memguard-stopped"
+  send_mail "内存守护已停 Trading" "可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），已停 Trading 的全部容器和自动更新，数据保留；TopUP 没动。查清原因后运行 sudo trading on。" || true
+}
+
 # 停 TopUP（调它自己的 topup stop，按它的顺序：停定时器 → 停应用 → 备份 → 停数据库），确认 80/443 空出来、可用内存够
 stop_topup_and_check_mem() {
   if topup_running; then
@@ -730,7 +749,8 @@ cmd_on() {
   guard_env
   compose up -d > /dev/null 2>&1
   if wait_healthy "$(current_tag)"; then ok "Trading 已启动，健康检查通过"; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
-  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开"
+  sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开（含内存守护）"
+  rm -f "$STATE/memguard-stopped"
   log "trading on"
 }
 
@@ -773,9 +793,10 @@ main() {
     restore-drill) cmd_restore_drill ;;
     test-mail) cmd_test_mail ;;
     watch) cmd_watch ;;
+    memguard) cmd_memguard ;;
     gen-test-admin) cmd_gen_test_admin ;;
     test-admin-off) cmd_test_admin_off ;;
-    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' ;;
   esac
 }
 main "$@"

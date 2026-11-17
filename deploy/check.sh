@@ -22,8 +22,8 @@ check "compose 能解析" cfg -q
 cfg --format json > "$tmp/compose.json"
 jqc() { jq -e "$1" "$tmp/compose.json" > /dev/null; }
 check "每个容器 mem_limit = memswap_limit" jqc '[.services[] | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
-check "默认内存上限合计 960 MB（实测后的默认值；+ Docker 约 100 = 1,060，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (960 * 1024 * 1024)'
-check "JVM 堆 + 元空间 + 代码缓存 + 直接内存 < 容器上限（trading-app 336 < 416、quote-app 208 < 256）" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=\${TR_META_APP:-128m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-48m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-16m}" deploy/kit/docker-compose.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-32m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-16m}" deploy/kit/docker-compose.yml'
+check "默认内存上限合计 900 MB（+ Docker 约 80 = 980；Amos 批准的 C75 例外，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (900 * 1024 * 1024)'
+check "JVM 堆 + 元空间 + 代码缓存 + 直接内存 < 容器上限（trading-app 304 < 384、quote-app 188 < 248）" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=\${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-16m}" deploy/kit/docker-compose.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-88m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-8m}" deploy/kit/docker-compose.yml'
 check "只有 trading-web 映射公网端口（80、443）" jqc '[.services | to_entries[] | select(.value.ports != null) | .value.ports[] | select((.host_ip // "") != "127.0.0.1") | .published] | sort == ["443","80"]'
 check "trading-app 只绑 127.0.0.1:8080" jqc '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"8080","protocol":"tcp"}]'
 check "quote-app、mysql、redis 不映射端口" jqc '[.services["quote-app","mysql","redis"].ports] | all(. == null)'
@@ -32,6 +32,7 @@ check "mysql、redis 只在不能出公网的 internal 网络" jqc '(.services.m
 check "测试环境标识和报价模式写死（不是 live）" jqc '.services["trading-app"].environment.FX_ENV_LABEL == "test" and .services["quote-app"].environment.FX_QUOTE_MARKET_SOURCE == "simulated" and .services["trading-app"].environment.FX_QUOTE_MARKET_SOURCE == "simulated"'
 check "Redis 只在 internal 网络、不映射端口" jqc '(.services.redis.networks | keys) == ["internal"] and .services.redis.ports == null'
 check "给 TopUP 的约定：trading-deploy 定时器的服务指向 /opt/trading/、有 backup.sh" bash -c 'grep -q "^ExecStart=/opt/trading/" deploy/kit/systemd/trading-deploy.service && test -x deploy/kit/backup.sh'
+check "内存守护定时器在、trading on 会打开它" bash -c 'grep -q "^ExecStart=/opt/trading/trading memguard" deploy/kit/systemd/trading-memguard.service && grep -q "trading-memguard.timer" deploy/kit/trading'
 check "trading-web 只挂 Trading 自己的证书目录（不挂整个 /etc/letsencrypt）" jqc '[.services[].volumes[]? | select(.source | startswith("/etc/letsencrypt")) | .source] | sort == ["/etc/letsencrypt/archive/trading","/etc/letsencrypt/live/trading"]'
 check "compose 里没有 FX_E2E_ENABLED、e2e profile" bash -c '! grep -Eq "FX_E2E_ENABLED|SPRING_PROFILES_ACTIVE" deploy/kit/docker-compose.yml'
 
