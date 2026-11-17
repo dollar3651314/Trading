@@ -14,6 +14,9 @@ public record LicenseProperties(String enforce) {
     enforce = enforce == null || enforce.isBlank() ? "false" : enforce.strip().toLowerCase(java.util.Locale.ROOT);
   }
 
+  /** 认得的值；其他值（写错）按关处理，启动时记 warn */
+  static final java.util.Set<String> KNOWN = java.util.Set.of("true", "false", "auto");
+
   /** 只有明确设 true 才检查 */
   public boolean enforced() {
     return "true".equals(enforce);

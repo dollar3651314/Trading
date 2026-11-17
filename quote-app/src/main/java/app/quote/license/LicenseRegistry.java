@@ -42,6 +42,9 @@ public class LicenseRegistry implements TradingLicenses {
     // 是否检查只看 FX_QUOTE_LICENSE_ENFORCE（Amos 2026-11-17 决定"授权检查彻底关掉"，所有环境默认关，含报价模式 live、配了真实报价源；
     // 推翻第 3 批审查"在用真实数据时一律检查"）。只有明确设 true 才检查；登记照常可以录、照常显示
     this.enforced = props.enforced();
+    if (!LicenseProperties.KNOWN.contains(props.enforce())) {
+      org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).warn("FX_QUOTE_LICENSE_ENFORCE 的值不认得（只认 true / false / auto），按关处理：{}", props.enforce());
+    }
     if (!enforced) org.slf4j.LoggerFactory.getLogger(LicenseRegistry.class).info("报价源授权检查没启用（FX_QUOTE_LICENSE_ENFORCE 不是 true）：开仓、转售不看授权登记");
     reload();
   }

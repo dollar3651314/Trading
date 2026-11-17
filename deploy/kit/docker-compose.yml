@@ -148,7 +148,8 @@ services:
       FX_QUOTE_MARKET_SOURCE: simulated
       FX_QUOTE_BINANCE_ENABLED: ${FX_QUOTE_BINANCE_ENABLED:-true}
       FX_QUOTE_BINANCE_FUTURES_ENABLED: "false"
-      FX_QUOTE_LICENSE_ENFORCE: auto
+      # 报价源授权检查关（Amos 2026-11-17"授权检查彻底关掉"，所有环境默认关；代码默认也是 false，这里写明）
+      FX_QUOTE_LICENSE_ENFORCE: "false"
       FX_QUOTE_OPEN_DOCS: auto
       FX_QUOTE_ALLTICK_TOKEN: ${FX_QUOTE_ALLTICK_TOKEN:-}
       FX_QUOTE_ITICK_TOKEN: ${FX_QUOTE_ITICK_TOKEN:-}
