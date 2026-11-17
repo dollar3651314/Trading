@@ -174,7 +174,7 @@ class BinanceFeedTest {
   void 握手被拒绝451时记下状态并退避重试() throws Exception {
     server.rejectStatus = 451;
     start(binance(false, 200, null), Duration.ofSeconds(30), Map.of("spot", List.of("BTCUSDT")));
-    await("被拒绝至少两次（在退避重试）", () -> server.handshakes >= 2);
+    await("被拒绝至少两次（在退避重试）", () -> server.handshakes.get() >= 2);
     assertThat(feed.status().getFirst().lastError()).contains("451");
     server.rejectStatus = 0;
     server.awaitConnection(1, WAIT);

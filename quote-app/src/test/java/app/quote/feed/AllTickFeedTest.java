@@ -137,7 +137,7 @@ class AllTickFeedTest {
   void 握手被拒绝时记下HTTP状态_错误里没有token_服务恢复后连上() throws Exception {
     server.rejectStatus = 401;
     start(Duration.ofSeconds(30), Map.of("fx", List.of("EURUSD")));
-    await("被拒绝至少两次（在退避重试）", () -> server.handshakes >= 2);
+    await("被拒绝至少两次（在退避重试）", () -> server.handshakes.get() >= 2);
     QuoteFeed.ChannelStatus st = feed.status().getFirst();
     assertThat(st.state()).isNotEqualTo(QuoteFeed.State.CONNECTED);
     assertThat(st.lastError()).contains("401").doesNotContain(FAKE_TOKEN);
@@ -145,6 +145,30 @@ class AllTickFeedTest {
     FakeWsServer.Conn c = server.awaitConnection(1, WAIT);
     c.nextContaining("22002", WAIT);
     await("连上", () -> feed.status().getFirst().state() == QuoteFeed.State.CONNECTED);
+  }
+
+  @Test
+  void 握手挂住_超时后断开重连_重连成功并订阅() throws Exception {
+    server.hangHandshakes.set(1); // 第一次握手：服务器读完请求后既不回 101 也不关连接
+    QuoteFeedsProperties p = FeedTestSupport.props(server.url("/quote-b-ws-api"), server.url("/quote-stock-b-ws-api"), server.baseUrl(),
+        Duration.ofSeconds(30), Map.of());
+    feed = new AllTickFeed(p, Map.of("fx", List.of("EURUSD")), sink, JSON, metrics) {
+      @Override
+      protected Duration connectTimeout() {
+        return Duration.ofMillis(300);
+      }
+    };
+    feed.start();
+    await("第一次握手被挂住", () -> server.hungHandshakes.get() == 1);
+    FakeWsServer.Conn c = server.awaitConnection(1, WAIT);
+    assertThat(server.handshakes.get()).as("挂住的那次 + 重连的那次").isEqualTo(2);
+    assertThat(c.nextContaining("22002", WAIT)).as("重连后照常订阅").contains("EURUSD");
+    await("连上", () -> feed.status().getFirst().state() == QuoteFeed.State.CONNECTED);
+    QuoteFeed.ChannelStatus st = feed.status().getFirst();
+    assertThat(st.reconnects()).isEqualTo(1);
+    assertThat(st.lastError()).as("记下的是握手超时（JDK 按 connectTimeout 给整个握手计时）").contains("HttpTimeoutException").doesNotContain(FAKE_TOKEN);
+    c.send(depth("EURUSD", "1.12501", "1.12512", 1_792_000_000_123L));
+    assertThat(sink.next().code()).isEqualTo("EURUSD");
   }
 
   @Test

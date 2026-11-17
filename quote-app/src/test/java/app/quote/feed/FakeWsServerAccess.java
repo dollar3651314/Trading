@@ -4,6 +4,7 @@ import app.quote.support.FixedClockConfig;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 给别的包的测试（{@code QuoteFeedsWiringTest}）用的假服务器：同一个端口同时扮演 AllTick（路径 /quote-b-ws-api、/quote-stock-b-ws-api）
@@ -15,7 +16,8 @@ public final class FakeWsServerAccess implements AutoCloseable {
   private static final List<String> ITICK = List.of("/forex", "/indices", "/crypto", "/stock");
 
   private final FakeWsServer server;
-  private volatile int subscribed;
+  /** 每条连接在自己的读线程上回调 onMessage，几条连接同时订阅时 volatile 的 ++ 会丢计数，所以用原子计数 */
+  private final AtomicInteger subscribed = new AtomicInteger();
 
   private FakeWsServerAccess(FakeWsServer server) {
     this.server = server;
@@ -27,12 +29,12 @@ public final class FakeWsServerAccess implements AutoCloseable {
     };
     server.onMessage = (c, m) -> {
       if (m.contains("\"cmd_id\":22002")) {
-        subscribed++;
+        subscribed.incrementAndGet();
         c.send("{\"ret\":200,\"msg\":\"ok\",\"cmd_id\":22003,\"seq_id\":1,\"trace\":\"x\",\"data\":{}}");
       } else if (m.contains("\"cmd_id\":22000")) {
         c.send("{\"ret\":200,\"msg\":\"ok\",\"cmd_id\":22001,\"seq_id\":1,\"trace\":\"x\",\"data\":{}}");
       } else if (m.contains("\"ac\":\"subscribe\"")) {
-        subscribed++;
+        subscribed.incrementAndGet();
         c.send("{\"code\":1,\"resAc\":\"subscribe\",\"msg\":\"subscribe Successfully\"}");
       } else if (m.contains("\"ac\":\"ping\"")) {
         c.send("{\"resAc\":\"pong\",\"data\":{\"params\":\"1\"}}");
@@ -58,7 +60,7 @@ public final class FakeWsServerAccess implements AutoCloseable {
 
   /** 收到的订阅请求数（两家合计，含重连后的） */
   public int subscribed() {
-    return subscribed;
+    return subscribed.get();
   }
 
   public String allTickQuery() {
