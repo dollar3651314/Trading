@@ -51,4 +51,21 @@ class OpenRedisDownTest {
     QuoteProperties live = new QuoteProperties("live", null, null, null, null, null, null, null);
     assertThat(new OpenDocsController(auto, live, none).docs().getStatusCode().value()).isEqualTo(404);
   }
+
+  @Test
+  void 测试环境_模拟加币安_auto看不到文档_明确打开后能看() throws Exception {
+    // 测试环境验收 T-1：deploy/kit 的测试环境是 simulated + 币安默认打开（TD4-11），auto 会把文档藏掉，所以测试环境要明确设 true（deploy/check.sh 也查）
+    QuoteProperties sim = new QuoteProperties("simulated", null, null, null, null, null, null, null);
+    app.quote.feed.QuoteFeedsProperties binance = new app.quote.feed.QuoteFeedsProperties(null, null, null, null, null, null, null, null, null, null, null, null,
+        new app.quote.feed.QuoteFeedsProperties.Binance(true, null, false, null, null, 0, null), null);
+    OpenProperties auto = new OpenProperties("x", null, null, null, 0, null, "auto", null, null);
+    OpenProperties on = new OpenProperties("x", null, null, null, 0, null, "true", null, null);
+    assertThat(new OpenDocsController(auto, sim, binance).docs().getStatusCode().value()).as("auto + 币安").isEqualTo(404);
+    ResponseEntity<String> r = new OpenDocsController(on, sim, binance).docs();
+    assertThat(r.getStatusCode().value()).as("测试环境设 true").isEqualTo(200);
+    assertThat(r.getBody()).contains("报价 API 开发者文档");
+    OpenProperties off = new OpenProperties("x", null, null, null, 0, null, "false", null, null);
+    app.quote.feed.QuoteFeedsProperties none = new app.quote.feed.QuoteFeedsProperties(null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    assertThat(new OpenDocsController(off, sim, none).docs().getStatusCode().value()).as("明确关掉").isEqualTo(404);
+  }
 }
