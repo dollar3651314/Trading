@@ -70,6 +70,17 @@ public class SymbolCatalog implements SimulatedQuoteSource.SimStartPrices {
     return Optional.ofNullable(symbols.get(code));
   }
 
+  /**
+   * 这个品种的每周交易时段（UTC，第 3 批对外品种列表用）：周几（1=周一 … 7=周日）→ [开始分钟, 结束分钟) 的列表；没有配置为空。
+   */
+  public Map<Integer, List<int[]>> sessions(String code) {
+    List<int[]>[] week = sessions.get(code);
+    Map<Integer, List<int[]>> out = new LinkedHashMap<>();
+    if (week == null) return out;
+    for (int d = 1; d <= 7; d++) if (week[d] != null) out.put(d, List.copyOf(week[d]));
+    return out;
+  }
+
   public boolean isOpen(String code, Instant at) {
     ZonedDateTime t = at.atZone(ZoneOffset.UTC);
     LocalDate d = t.toLocalDate();

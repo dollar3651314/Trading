@@ -19,6 +19,7 @@ export function StatusTags({ s }: { s: SymbolInfo }) {
   const { t } = useTranslation();
   return (
     <>
+      {s.tradable === false && <span className="status-tag closed">{t('market.notTradable')}</span>}
       {s.openPaused && <span className="status-tag paused">{t('market.paused')}</span>}
       {!s.tradingOpen && <span className="status-tag closed">{t('market.closed')}</span>}
     </>

@@ -513,3 +513,32 @@ body { overflow-x: hidden; }
 .pv-audit { width: 100%; border-collapse: collapse; font-size: 13px; }
 .pv-audit th, .pv-audit td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--border, #e5e7eb); }
 .pv-impact { margin: 8px 0 0; padding-left: 18px; }
+
+/* ---------- 第 3 批：报价服务（原型 P8～P11） ---------- */
+.row-warn > td { background: color-mix(in srgb, #d97706 10%, transparent) !important; }
+.q-mb { margin-bottom: 12px; }
+.q-mt { margin-top: 12px; }
+.q-gate-box { margin-bottom: 12px; }
+.q-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.q-card-head h3 { margin: 0; }
+.q-hero { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-left: 4px solid #d97706; }
+.q-hero.ok { border-left-color: var(--primary, #0e7490); }
+.q-hero.err { border-left-color: var(--danger, #dc2626); }
+.q-hero .t { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.q-hero .t span { color: var(--muted); font-size: 13px; }
+.q-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.q-stats > div { background: var(--s2); border-radius: var(--r); padding: 8px 10px; display: flex; flex-direction: column; }
+.q-stats small { color: var(--subtle); font-size: 12px; }
+.q-stats b { font-family: var(--mono); font-size: 18px; }
+.q-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.q-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+@media (max-width: 767px) { .q-grid2 { grid-template-columns: 1fr; } }
+.q-gate { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.q-gate > b { font-size: 22px; }
+.q-gate > span { flex: 1 1 220px; }
+.q-ops { display: inline-flex; gap: 6px; }
+.q-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 12px 0 4px; }
+.q-kv dt { color: var(--muted); }
+.q-kv dd { margin: 0; }
+.q-secret { font-family: var(--mono); background: var(--s2); border: 1px dashed var(--hair); border-radius: var(--r); padding: 10px; word-break: break-all; user-select: all; }
+.q-err { color: var(--danger, #dc2626); font-size: 12px; margin-top: 4px; }

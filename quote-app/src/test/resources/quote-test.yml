@@ -20,3 +20,8 @@ quote:
   stream:
     # 测试用的假 Key，明显不是密钥
     internal-key: ci_only_fake_internal_key
+  open:
+    # 测试用的假加密密钥，明显不是密钥
+    key-enc-key: ci_only_fake_key_enc_key
+    # 用量不定时写库，测试里查询前会写
+    usage-flush: 1h

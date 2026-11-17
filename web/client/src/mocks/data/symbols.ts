@@ -163,6 +163,7 @@ export const SYMBOL_SEEDS: SymbolSeed[] = SEEDS.map((s) => {
     hot: !!s.hot,
     openPaused: !!s.paused,
     tradingOpen: !s.closed,
+    tradable: true,
   };
   return { info, price: s.price, spread: s.spread, quoteToUsd: QUOTE_TO_USD[quote] ?? '1' };
 });

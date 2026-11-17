@@ -16,6 +16,8 @@ export const ERROR_KEYS: Record<string, string> = {
   // 登录、权限（AdminInterceptor、AdminAuthService）
   UNAUTHORIZED: 'errors.unauthorized',
   FORBIDDEN: 'errors.forbidden',
+  QUOTE_SERVICE_UNAVAILABLE: 'errors.quoteServiceUnavailable',
+  QUOTE_SERVICE_REJECTED: 'errors.quoteServiceRejected',
   IP_NOT_ALLOWED: 'errors.ipNotAllowed',
   PASSWORD_CHANGE_REQUIRED: 'errors.passwordChangeRequired',
   ACCOUNT_DISABLED: 'errors.accountDisabled',
@@ -101,6 +103,8 @@ export function toApiError(status: number, body: ErrorBody | null): ApiError {
     if (fields[0].code === 'required') return new ApiError('errors.reasonRequired', undefined, { status, code, fields });
     if (fields[0].code === 'tooLong') return new ApiError('errors.reasonTooLong', undefined, { status, code, fields });
   }
+  // 第 3 批：报价服务拒绝时带具体原因（例如"同名客户已存在""到期日不能早于起始日"）
+  if (code === 'QUOTE_SERVICE_REJECTED' && body?.message) return new ApiError('errors.quoteServiceRejected', { detail: body.message }, { status, code });
   if (code === 'VALIDATION_FAILED' && fields.length === 1 && fields[0].code === 'weak') {
     return new ApiError('errors.passwordWeak', undefined, { status, code, fields });
   }

@@ -11,7 +11,7 @@ const TIMEOUT_MS = 5_000;
 export function parsePublicQuotes(body: unknown): PublicQuotes {
   const b = body as Partial<PublicQuotes> | null;
   if (!b || !Array.isArray(b.items)) throw new Error('行情返回格式不对');
-  return { sample: b.sample === true, items: b.items.filter((i) => i && typeof i.symbol === 'string') };
+  return { sample: b.sample === true, pricesHidden: b.pricesHidden === true, items: b.items.filter((i) => i && typeof i.symbol === 'string') };
 }
 
 async function realPublicQuotes(): Promise<PublicQuotes> {

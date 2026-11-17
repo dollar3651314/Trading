@@ -32,6 +32,8 @@ import tools.jackson.databind.ObjectMapper;
  *   <li>连上后先推一次全部报价，之后每 250 毫秒推一次有变化的报价：{"type":"quotes","data":[…]}</li>
  *   <li>K 线：客户端发 {"op":"subKline","symbol":"XAUUSD","tf":"15m"} 订阅（同时只订阅一个），之后推 {"type":"kline",…}；
  *       K 线在报价服务里算，这里把所有客户端订阅的"品种|周期"告诉报价服务（{@link Klines#watch}），收到变化再转给订阅的客户端</li>
+ *   <li>第 3 批（原型 P3"暂无报价"）：连着报价服务时（source=remote），开市的品种没有一个能成交的报价（超过 {@code max-quote-age} 3 秒没收到新报价等）就推
+ *       {"type":"quoteStatus","available":false}，恢复后推 true（连上时先推一次当前状态）；客户端据此显示"报价暂时中断"、灰掉下单</li>
  * </ul>
  */
 @Component
@@ -47,13 +49,18 @@ class MarketPush extends TextWebSocketHandler {
   /** 会话 → 订阅的 "symbol|tf" */
   private final Map<String, String> klineSubs = new ConcurrentHashMap<>();
   private final Map<String, Message.Bar> pendingBars = new ConcurrentHashMap<>();
+  private final app.trading.market.MarketProperties props;
+  private final java.time.Clock clock;
+  private volatile Boolean lastAvailable;
   private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "market-push"));
 
-  MarketPush(QuoteProcessor processor, MarketApi market, Klines klines, ObjectMapper json, app.trading.market.MarketProperties props) {
+  MarketPush(QuoteProcessor processor, MarketApi market, Klines klines, ObjectMapper json, app.trading.market.MarketProperties props, java.time.Clock clock) {
+    this.clock = clock;
     this.processor = processor;
     this.market = market;
     this.json = json;
     this.klines = klines;
+    this.props = props;
     klines.onUpdate(b -> pendingBars.put(b.symbol() + "|" + b.tf(), b));
     long ms = props.pushInterval().toMillis();
     timer.scheduleAtFixedRate(this::flush, ms, ms, TimeUnit.MILLISECONDS);
@@ -64,6 +71,26 @@ class MarketPush extends TextWebSocketHandler {
     WebSocketSession safe = new ConcurrentWebSocketSessionDecorator(s, 2000, 512 * 1024);
     sessions.put(s.getId(), safe);
     send(safe, Map.of("type", "quotes", "data", quotes(null)));
+    if (remote()) send(safe, Map.of("type", "quoteStatus", "available", quoteAvailable()));
+  }
+
+  private boolean remote() {
+    return "remote".equalsIgnoreCase(String.valueOf(props.source()).strip());
+  }
+
+  /**
+   * 开市的品种里有没有至少一个现在可以成交的报价（新鲜、没过期、最近 max-quote-age 内收到过，和撮合的过期保护同一口径）；没有开市的品种算有。
+   * 报价服务停了（收不到报价）或者只推过期 / 暂无报价状态时为 false
+   */
+  boolean quoteAvailable() {
+    java.time.Instant now = clock.instant();
+    boolean anyOpen = false;
+    for (SymbolSpec s : market.symbols()) {
+      if (!market.isTradingOpen(s.code(), now)) continue;
+      anyOpen = true;
+      if (processor.latest(s.code()).map(app.trading.market.api.MarketQuote::executable).orElse(false)) return true;
+    }
+    return !anyOpen;
   }
 
   @Override
@@ -102,6 +129,14 @@ class MarketPush extends TextWebSocketHandler {
 
   void flush() {
     try {
+      if (remote()) {
+        boolean available = quoteAvailable();
+        if (lastAvailable == null || lastAvailable != available) {
+          lastAvailable = available;
+          Map<String, Object> st = Map.of("type", "quoteStatus", "available", available);
+          sessions.values().forEach(x -> send(x, st));
+        }
+      }
       Set<String> changed = processor.drainChanged();
       if (!changed.isEmpty() && !sessions.isEmpty()) {
         Map<String, Object> msg = Map.of("type", "quotes", "data", quotes(changed));

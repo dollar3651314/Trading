@@ -1455,3 +1455,12 @@ export function updateSystemConfig(key: string, value: string, reason: string): 
     audit('config.update', key, true, r, { value: before }, { value });
   });
 }
+
+/** 第 3 批报价服务的模拟层（mocks/quoteService.ts）用的权限、原因、审计 */
+export const mockGuards = {
+  requirePerm,
+  requireReason,
+  isSuper: () => isSuper(currentAdmin()),
+  adminName: () => currentAdmin().displayName,
+  audit,
+};

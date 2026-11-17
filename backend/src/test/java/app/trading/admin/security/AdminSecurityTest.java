@@ -199,6 +199,7 @@ class AdminSecurityTest extends AdminTestSupport {
     @SuppressWarnings("unchecked") Map<String, Object> nested = (Map<String, Object>) m.get("nested");
     assertThat(nested).containsEntry("apiToken", "***").containsEntry("secretKey", "***").containsEntry("ok", 1);
     // 第 1 批：去掉资金归集的 3 个（sweep:view / operate / config，自带钱包淘汰），加钱包提供方的 2 个（provider:view / operate）
-    assertThat(Set.of(Permission.values())).hasSize(51);
+    // 第 3 批：加报价服务的 4 个（quote_service:view、quote_key:operate、quote_limit:edit、quote_license:edit）
+    assertThat(Set.of(Permission.values())).hasSize(55);
   }
 }

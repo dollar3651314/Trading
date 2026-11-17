@@ -10,7 +10,7 @@ import { tpSlSummary, useOrderForm } from '../hooks/useOrderForm';
 import { formatAmount, formatPrice } from '../lib/format';
 import { contractUnitText } from '../lib/symbol';
 import { Icon } from './Icon';
-import { LeverageField, LimitPriceField, LotsField, Notice, OrderConfirm, RejectAndSummary, SubmitButton, TpSlFields, TypeSwitch } from './order/parts';
+import { LeverageField, LimitPriceField, LotsField, NotTradableNote, Notice, OrderConfirm, RejectAndSummary, SubmitButton, TpSlFields, TypeSwitch } from './order/parts';
 
 /** sideRequest：图表上点"卖出 / 买入"时由交易页传入，n 每次点击加一 */
 export function OrderPanel({ symbol, initialSide = 'buy', sideRequest }: { symbol: SymbolInfo; initialSide?: Side; sideRequest?: { side: Side; n: number }; inline?: boolean }) {
@@ -91,6 +91,7 @@ export function OrderPanel({ symbol, initialSide = 'buy', sideRequest }: { symbo
       {/* 体验优化 1021 第 3 条：电脑右栏里确认按钮固定在面板底部，笔记本屏幕上不用滚动也能看到（面板内容在它上面滚动） */}
       <div className="op-sticky">
         <SubmitButton f={f} symbol={symbol} />
+        <NotTradableNote f={f} symbol={symbol} />
         <div className="op-foot">{t('order.footNote')}</div>
       </div>
       <OrderConfirm f={f} symbol={symbol} />

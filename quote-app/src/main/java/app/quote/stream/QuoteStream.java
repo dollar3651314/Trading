@@ -47,6 +47,8 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
  *   <li>每秒一条心跳，带本进程的告警项（报价源断线、切备源、偏差），trading-app 照样发告警邮件；</li>
  *   <li>K 线变化（{@code bar}）只发给用 {@code watchBars} 关注了那个"品种|周期"的连接（trading-app 按客户端图表订阅的来关注）。</li>
  * </ul>
+ * 第 3 批：对外 WebSocket（{@code app.quote.open}）用 {@link #addTap} 在同一把品种锁里收每条报价和 K 线变化，用 {@link #attach} 补齐或拿快照，
+ * 所以对外和对内是同一套序号、同一套补齐规则（TQ-2 A）。
  * 发送用 {@link ConcurrentWebSocketSessionDecorator}：一条连接发不出去（超时或积压太多）就断开它，客户端重连后补齐，不拖慢其他连接和报价处理线程。
  */
 @Component
@@ -89,6 +91,7 @@ public class QuoteStream {
   private final String epoch = UUID.randomUUID().toString();
   private final Map<String, Sym> syms = new ConcurrentHashMap<>();
   private final Map<String, Conn> conns = new ConcurrentHashMap<>();
+  private final List<Tap> taps = new java.util.concurrent.CopyOnWriteArrayList<>();
   private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "quote-stream-heartbeat"));
 
   QuoteStream(StreamProperties props, ObjectProvider<QuoteRouter> router, TradingLicenses licenses, ObjectProvider<List<AlertCheck>> alerts, QuoteProperties quote,
@@ -101,6 +104,35 @@ public class QuoteStream {
     this.alerts = alerts;
     this.quote = quote;
     this.clock = clock;
+  }
+
+  /** 第 3 批：在品种锁里收每条报价（编号以后）和每根 K 线变化（对外 WebSocket、报价源状态统计用）。回调要快，不能阻塞 */
+  public interface Tap {
+    void onQuote(QuoteFrame f);
+
+    default void onBar(app.quote.kline.Bar b) {}
+  }
+
+  public void addTap(Tap t) {
+    taps.add(t);
+  }
+
+  /**
+   * 第 3 批：在这个品种的锁里，按和内部连接一样的规则把 after 之后的报价交给 sink（缓存里有就按序号补齐，没有或 after 为空就给快照），
+   * 然后执行 live（调用方在这里把品种标成"已在推"），保证补齐和之后的实时报价之间不漏不重。这个品种还没有报价时只执行 live。
+   */
+  public void attach(String symbol, Long after, java.util.function.Consumer<QuoteFrame> sink, Runnable live) {
+    Sym s = syms.computeIfAbsent(symbol, k -> new Sym());
+    synchronized (s) {
+      if (s.latest != null && (after == null || after < s.seq)) {
+        if (after != null && !s.buffer.isEmpty() && s.buffer.peekFirst().seq() <= after + 1) {
+          for (QuoteFrame f : s.buffer) if (f.seq() > after) sink.accept(f);
+        } else {
+          sink.accept(s.latest.asSnapshot());
+        }
+      }
+      live.run();
+    }
   }
 
   @EventListener(ApplicationReadyEvent.class)
@@ -132,6 +164,7 @@ public class QuoteStream {
       while (s.buffer.size() > props.replayBuffer()) s.buffer.removeFirst();
       String text = QuoteCodec.encode(f);
       for (Conn c : conns.values()) if (c.wants(q.symbol())) send(c, text);
+      for (Tap t : taps) tap(() -> t.onQuote(f));
     }
   }
 
@@ -143,6 +176,7 @@ public class QuoteStream {
 
   /** 一根 K 线有变化：发给关注了它的连接（不编号、不缓存，只用来显示）。由该品种的处理线程调用 */
   void bar(app.quote.kline.Bar b) {
+    for (Tap t : taps) tap(() -> t.onBar(b));
     String key = b.symbol() + "|" + b.tf().code;
     String text = null;
     for (Conn c : conns.values()) {
@@ -248,6 +282,14 @@ public class QuoteStream {
 
   private String mode() {
     return QuoteRouter.mode(quote.source()).name().toLowerCase(java.util.Locale.ROOT);
+  }
+
+  private static void tap(Runnable r) {
+    try {
+      r.run();
+    } catch (RuntimeException e) {
+      log.error("报价分发（对外）出错", e);
+    }
   }
 
   private void send(Conn c, String text) {

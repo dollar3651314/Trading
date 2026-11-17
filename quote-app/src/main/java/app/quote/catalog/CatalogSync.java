@@ -18,12 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * trading-app 同步品种、交易时段、休市日、模拟起始价（PUT /internal/catalog，要内部 Key）。
  * 第 2 批过渡做法：这些参数仍在 trading-app 后台改，改完（和 trading-app 启动时）整份同步过来；第 3 批报价后台做好后改成在报价服务里改。
- * 同步后立即重新加载；模拟源下新出现起始价的品种立即开始报价（{@link SimulatedQuoteSource#seedFromDatabase}）。
+ * 第 3 批起带上中英文名（对外品种列表用；老版本 trading-app 不带时为空）。同步后立即重新加载；模拟源下新出现起始价的品种立即开始报价（{@link SimulatedQuoteSource#seedFromDatabase}）。
  */
 @RestController
 class CatalogSync {
 
-  record Symbol(String code, String category, Integer digits, BigDecimal simStartPrice) {}
+  record Symbol(String code, String category, Integer digits, BigDecimal simStartPrice, String nameZh, String nameEn) {}
 
   record Session(String symbol, Integer dayOfWeek, Integer openMinute, Integer closeMinute) {}
 
@@ -52,7 +52,7 @@ class CatalogSync {
           || s.digits() < 0 || s.digits() > 10 || (s.simStartPrice() != null && s.simStartPrice().signum() <= 0)) {
         return bad("品种格式不对：" + (s == null ? null : s.code()));
       }
-      symbols.add(new QuoteSymbol(s.code(), s.category(), s.digits(), s.simStartPrice()));
+      symbols.add(new QuoteSymbol(s.code(), s.category(), s.digits(), s.simStartPrice(), cut(s.nameZh()), cut(s.nameEn())));
     }
     List<SessionRow> sessions = new ArrayList<>();
     for (Session s : b.sessions() == null ? List.<Session>of() : b.sessions()) {
@@ -72,6 +72,13 @@ class CatalogSync {
     SimulatedQuoteSource sim = simulated.getIfAvailable();
     List<String> seeded = sim == null ? List.of() : sim.seedFromDatabase();
     return ResponseEntity.ok(Map.of("symbols", symbols.size(), "seeded", seeded));
+  }
+
+  /** 品种名最多 64 字（第 3 批：对外品种列表用） */
+  private static String cut(String name) {
+    if (name == null || name.isBlank()) return null;
+    String n = name.strip();
+    return n.length() <= 64 ? n : n.substring(0, 64);
   }
 
   private static ResponseEntity<Map<String, Object>> bad(String message) {

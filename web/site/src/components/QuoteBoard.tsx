@@ -1,6 +1,8 @@
 /**
  * 行情面板（v2 需求 4.2，方向 A：和客户端行情表同一个样子）。电脑版在首屏右栏，有"走势"小图；手机版在第二屏，三列。
  * 每一行都是去注册页的链接（"点品种跳到注册页"）。休市显示"休市"、没有报价显示"暂无报价"，不显示价格。
+ * 第 3 批（TD-9 A、TY-4，原型 P12）：生产没有公开展示授权，接口标 pricesHidden：标题改"交易品种"，每行只列品种名和一个"登录后查看实时行情"按钮（去登录），
+ * 不显示价格、走势、涨跌，没有闪动。测试环境照旧显示模拟价并标"示例行情"。
  */
 import { useState } from 'react';
 import { CATEGORIES, clientLink, SYMBOL_META, symbolName, type Category } from '../config';
@@ -63,9 +65,26 @@ function QuoteRow({ row, desktop }: { row: Row; desktop: boolean }) {
   );
 }
 
+/** 生产（pricesHidden）：只列品种名 + 每行一个"登录后查看实时行情" */
+function HiddenRow({ row }: { row: Row }) {
+  const { t, lang } = useI18n();
+  const name = symbolName(row.symbol, lang, row);
+  return (
+    <div className="q-row q-row-hidden" data-testid="quote-row" data-symbol={row.symbol}>
+      <div className="q-name">
+        <b>{row.symbol}</b>
+        <span>{name}</span>
+      </div>
+      <a className="btn-login-quote" href={clientLink('login', lang)} data-testid="login-to-view">
+        {t('board.loginToView')}
+      </a>
+    </div>
+  );
+}
+
 export function QuoteBoard({ desktop }: { desktop: boolean }) {
   const { t, lang } = useI18n();
-  const { rows, sample } = useQuotes();
+  const { rows, sample, pricesHidden } = useQuotes();
   const [cat, setCat] = useState<Category>('hot');
   const shown = cat === 'hot' ? rows : rows.filter((r) => SYMBOL_META[r.symbol]?.category === cat);
   return (
@@ -73,9 +92,9 @@ export function QuoteBoard({ desktop }: { desktop: boolean }) {
       <div className="board-head">
         <h2>
           <i className="live" aria-hidden="true" />
-          {t('board.title')}
+          {pricesHidden ? t('board.titleHidden') : t('board.title')}
         </h2>
-        {sample && (
+        {sample && !pricesHidden && (
           <span className="tag-sample" title={t('board.sampleNote')} data-testid="sample-tag">
             {t('board.sample')}
           </span>
@@ -88,7 +107,7 @@ export function QuoteBoard({ desktop }: { desktop: boolean }) {
           </button>
         ))}
       </div>
-      {desktop && (
+      {desktop && !pricesHidden && (
         <div className="q-head" aria-hidden="true">
           <span>{t('board.colSymbol')}</span>
           <span>{t('board.colTrend')}</span>
@@ -97,14 +116,20 @@ export function QuoteBoard({ desktop }: { desktop: boolean }) {
         </div>
       )}
       <div role="tabpanel">
-        {shown.length === 0 ? <div className="q-empty">{t('board.empty')}</div> : shown.map((r) => <QuoteRow key={r.symbol} row={r} desktop={desktop} />)}
+        {shown.length === 0 ? (
+          <div className="q-empty">{t('board.empty')}</div>
+        ) : pricesHidden ? (
+          shown.map((r) => <HiddenRow key={r.symbol} row={r} />)
+        ) : (
+          shown.map((r) => <QuoteRow key={r.symbol} row={r} desktop={desktop} />)
+        )}
       </div>
       <div className="board-foot">
         {desktop && <span>{t('board.footHint')}</span>}
         <a href={clientLink('register', lang)}>{t('board.all')}</a>
       </div>
       <p className="board-note" data-testid="board-note">
-        {t(sample ? 'board.sampleNote' : 'board.liveNote')}
+        {t(pricesHidden ? 'board.hiddenNote' : sample ? 'board.sampleNote' : 'board.liveNote')}
       </p>
     </div>
   );

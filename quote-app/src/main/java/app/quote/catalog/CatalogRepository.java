@@ -22,8 +22,8 @@ public class CatalogRepository {
   }
 
   List<QuoteSymbol> symbols() {
-    return jdbc.query("SELECT code, category, digits, sim_start_price FROM quote_symbol ORDER BY sort_order, code",
-        (rs, i) -> new QuoteSymbol(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getBigDecimal(4)));
+    return jdbc.query("SELECT code, category, digits, sim_start_price, name_zh, name_en FROM quote_symbol ORDER BY sort_order, code",
+        (rs, i) -> new QuoteSymbol(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getBigDecimal(4), rs.getString(5), rs.getString(6)));
   }
 
   List<SessionRow> sessions() {
@@ -45,8 +45,8 @@ public class CatalogRepository {
     int order = 0;
     for (QuoteSymbol s : symbols) {
       BigDecimal sim = s.simStartPrice();
-      jdbc.update("INSERT INTO quote_symbol (code, category, digits, sim_start_price, sort_order) VALUES (?, ?, ?, ?, ?)", s.code(), s.category(), s.digits(), sim,
-          ++order);
+      jdbc.update("INSERT INTO quote_symbol (code, category, name_zh, name_en, digits, sim_start_price, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", s.code(),
+          s.category(), s.nameZh(), s.nameEn(), s.digits(), sim, ++order);
     }
     for (SessionRow r : sessions) {
       jdbc.update("INSERT INTO quote_session (symbol, day_of_week, open_minute, close_minute) VALUES (?, ?, ?, ?)", r.symbol(), r.dayOfWeek(), r.openMinute(),

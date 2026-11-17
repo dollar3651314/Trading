@@ -47,6 +47,11 @@ export const PERMISSIONS = [
   { code: 'session:edit', module: 'market', highRisk: false },
   { code: 'fx:view', module: 'market', highRisk: false },
 
+  { code: 'quote_service:view', module: 'quote_service', highRisk: false },
+  { code: 'quote_key:operate', module: 'quote_service', highRisk: true },
+  { code: 'quote_limit:edit', module: 'quote_service', highRisk: true },
+  { code: 'quote_license:edit', module: 'quote_service', highRisk: true },
+
   { code: 'params:view', module: 'params', highRisk: false },
   { code: 'params:edit', module: 'params', highRisk: true },
 

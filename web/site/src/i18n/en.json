@@ -56,7 +56,10 @@
     "empty": "No instruments in this category yet",
     "footHint": "Pick any instrument and sign up to trade it",
     "all": "See all instruments →",
-    "rowLabel": "{name}: sign up to trade"
+    "rowLabel": "{name}: sign up to trade",
+    "titleHidden": "Trading symbols",
+    "loginToView": "Log in to view live prices",
+    "hiddenNote": "Live prices are available on the trading page after you log in."
   },
   "cat": {
     "hot": "Popular",

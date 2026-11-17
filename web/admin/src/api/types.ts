@@ -929,3 +929,141 @@ export interface SystemConfig {
 }
 
 
+
+// ---- 第 3 批：报价服务（原型 P8～P11；数据在报价服务里，后台转发，只计量不收费） ----
+export interface QuoteLimits {
+  restPerSecond: number;
+  restPerDay: number;
+  wsConnections: number;
+  /** 每条 WebSocket 连接最多订阅几个品种 */
+  wsSymbols: number;
+}
+/** 对外开放总开关（默认关；只有超管能改） */
+export interface QuoteGate {
+  open: boolean;
+  updatedBy: string | null;
+  reason: string | null;
+  updatedAt: string | null;
+}
+export interface QuoteClient {
+  id: number;
+  code: string;
+  name: string;
+  email: string | null;
+  active: boolean;
+  note: string | null;
+  createdAt: string;
+  keyCount: number;
+}
+export type QuoteKeyKind = 'INTERNAL_TEST' | 'EXTERNAL';
+export interface QuoteKey {
+  keyId: string;
+  clientId: number;
+  clientName: string | null;
+  kind: QuoteKeyKind;
+  active: boolean;
+  /** 现在能不能用：没停用，并且（内部测试 Key，或总开关开着） */
+  usableNow: boolean;
+  /** 可用品种；空 = 全部已授权品种 */
+  symbols: string[];
+  limits: QuoteLimits;
+  createdAt: string;
+  disabledAt: string | null;
+  lastUsedAt: string | null;
+  rotatedFrom: string | null;
+  usedToday: number;
+  rejectedToday: number;
+  connections: number;
+}
+export interface QuoteOverview {
+  gate: QuoteGate;
+  defaults: QuoteLimits;
+  /** 服务器配好了加密 Secret 的密钥（FX_QUOTE_KEY_ENC_KEY）；没配不能建 Key */
+  keyEncReady: boolean;
+  clients: QuoteClient[];
+  keys: QuoteKey[];
+}
+/** 建 Key、轮换的返回：secret 只在这里出现这一次 */
+export interface QuoteKeyCreated {
+  key: QuoteKey;
+  secret: string;
+}
+export interface QuoteUsageDay {
+  day: string;
+  keyId: string;
+  restCalls: number;
+  restRejected: number;
+  wsPushes: number;
+  wsSeconds: number;
+  wsPeak: number;
+}
+export interface QuoteUsageRow extends QuoteUsageDay {
+  /** 空 = WebSocket */
+  endpoint: string;
+  /** 空 = 不分品种 */
+  symbol: string;
+}
+export interface QuoteUsage {
+  from: string;
+  to: string;
+  rows: QuoteUsageRow[];
+  days: QuoteUsageDay[];
+}
+export interface QuoteUsageQuery {
+  from?: string;
+  to?: string;
+  keyId?: string;
+  clientId?: number;
+  symbol?: string;
+}
+export type QuoteGrantState = 'ok' | 'soon' | 'expired' | 'none' | 'notYet';
+export interface QuoteGrant {
+  granted: boolean;
+  from: string | null;
+  until: string | null;
+  state: QuoteGrantState;
+  daysLeft: number | null;
+}
+export interface QuoteLicenseRow {
+  feed: string;
+  symbol: string;
+  trading: QuoteGrant;
+  display: QuoteGrant;
+  resale: QuoteGrant;
+  note: string | null;
+}
+export interface QuoteLicenses {
+  gate: QuoteGate;
+  /** 授权检查是否启用（生产启用；测试环境不受限制） */
+  enforced: boolean;
+  today: string;
+  items: QuoteLicenseRow[];
+  /** 没有任何报价源登记"交易用途"的品种：生产里只显示、不开仓 */
+  notTradable: string[];
+}
+export interface QuoteLicenseInput {
+  feed: string;
+  symbol: string;
+  trading: { granted: boolean; from: string | null; until: string | null };
+  display: { granted: boolean; from: string | null; until: string | null };
+  resale: { granted: boolean; from: string | null; until: string | null };
+  note: string;
+  reason: string;
+}
+export type QuoteSourceState = 'ok' | 'backup' | 'deviation' | 'down' | 'closed';
+export interface QuoteSourceRow {
+  symbol: string;
+  primary: string | null;
+  backup: string | null;
+  current: string | null;
+  lastQuoteAt: string | null;
+  switches24h: number;
+  deviations24h: number;
+  lastSwitchAt: string | null;
+  state: QuoteSourceState;
+}
+export interface QuoteSources {
+  mode: string;
+  feeds: { feed: string; configured: boolean; ok: boolean; detail: string | null }[];
+  rows: QuoteSourceRow[];
+}

@@ -20,6 +20,14 @@ class RemoteQuotesConfig {
     return new RemoteQuotes(processor, catalog, props, market, json, clock);
   }
 
+  /** 第 3 批：后台"报价服务"菜单转发到报价服务；没连报价服务时为空（后台显示"报价服务没连上"） */
+  @Bean
+  app.trading.market.api.QuoteServiceApi quoteServiceApi(org.springframework.beans.factory.ObjectProvider<RemoteQuotes> remote) {
+    RemoteQuotes r = remote.getIfAvailable();
+    if (r == null) return app.trading.market.api.QuoteServiceApi.NONE;
+    return (method, path, body) -> java.util.Optional.of(r.client().raw(method, path, body));
+  }
+
   /** K 线：连着报价服务时由它提供，否则没有 */
   @Bean
   app.trading.market.kline.Klines klines(org.springframework.beans.factory.ObjectProvider<RemoteQuotes> remote) {

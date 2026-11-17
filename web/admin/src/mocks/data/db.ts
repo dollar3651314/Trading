@@ -637,6 +637,8 @@ const opsPerms: PermissionCode[] = [
   'dashboard:view', 'customer:view', 'customer:freeze', 'kyc:view', 'kyc:review',
   'deposit:view', 'withdrawal:view', 'withdrawal:review', 'recon:view', 'recon:resolve', 'provider:view', 'task:view', 'task:retry',
   'order:view', 'notify_template:view', 'notify:send', 'notify_record:view', 'admin:view', 'admin:edit', 'audit:view',
+  // 第 3 批：报价服务（对外总开关只有超管能改，不是权限点）
+  'quote_service:view', 'quote_key:operate', 'quote_limit:edit', 'quote_license:edit',
 ];
 const riskPerms: PermissionCode[] = [
   'dashboard:view', 'customer:view', 'withdrawal:view', 'withdrawal:emergency_cancel',

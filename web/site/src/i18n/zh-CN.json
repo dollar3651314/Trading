@@ -56,7 +56,10 @@
     "empty": "这个分类暂时没有品种",
     "footHint": "点击任一品种，注册后即可交易",
     "all": "查看全部品种 →",
-    "rowLabel": "{name}：注册后交易"
+    "rowLabel": "{name}：注册后交易",
+    "titleHidden": "交易品种",
+    "loginToView": "登录后查看实时行情",
+    "hiddenNote": "实时价格登录后在交易页查看。"
   },
   "cat": {
     "hot": "热门",

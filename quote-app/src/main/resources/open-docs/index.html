@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>报价 API 开发者文档</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1d21; --muted:#5d6570; --line:#e3e6ea; --code:#f4f6f8; --accent:#1f6feb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14171a; --fg:#e6e8ea; --muted:#9aa3ad; --line:#2b3036; --code:#1d2126; --accent:#58a6ff; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.65 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width:920px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:26px; margin:8px 0 4px; } h2 { font-size:20px; margin:36px 0 8px; border-bottom:1px solid var(--line); padding-bottom:6px; } h3 { font-size:16px; margin:24px 0 6px; }
+  p, li { color:var(--fg); } .muted { color:var(--muted); }
+  code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:13px; background:var(--code); border-radius:4px; }
+  code { padding:1px 4px; } pre { padding:12px; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; margin:8px 0 16px; display:block; overflow-x:auto; }
+  th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; font-size:14px; }
+  th { background:var(--code); white-space:nowrap; }
+  .note { border-left:3px solid var(--accent); padding:4px 12px; background:var(--code); }
+</style>
+</head>
+<body>
+<main>
+<h1>报价 API 开发者文档</h1>
+<p class="muted">版本 v1 · 中文 · 示例行情（测试环境的价格来自模拟报价源，不是真实市场价格）</p>
+<div class="note">
+  <p>报价服务对外提供 REST 和 WebSocket 两种接口，和平台自己的交易应用用的是同一套报价、同一套 WebSocket 协议。价格是报价商整合后的<b>原始买卖价</b>，不含任何点差加价。</p>
+  <p>第一版<b>只计量、不收费</b>：没有账单和在线支付。Key 由平台运营在后台建好后交给你，没有自助注册。</p>
+</div>
+
+<h2 id="auth">1. 鉴权（签名）</h2>
+<p>每个 Key 有一个 <code>Key ID</code>（<code>qk_</code> 开头）和一个 <code>Secret</code>（<code>qs_</code> 开头）。Secret 只在建 Key 时给你一次，请妥善保存；丢了只能让运营"轮换"出一个新 Key（旧 Key 立即停用）。</p>
+<p>每个 REST 请求带三个请求头：</p>
+<table data-fields="auth.headers">
+  <tr><th>请求头</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>X-QK-Key</code></td><td>字符串</td><td>Key ID</td></tr>
+  <tr><td><code>X-QK-Timestamp</code></td><td>整数（秒）</td><td>当前 Unix 时间戳（秒），和服务器时间相差不能超过 300 秒</td></tr>
+  <tr><td><code>X-QK-Signature</code></td><td>字符串</td><td>HMAC-SHA256(Secret, 签名原文)，小写十六进制</td></tr>
+</table>
+<p>签名原文 = <code>时间戳 + "\n" + 方法 + "\n" + 路径（带 ? 和查询串，和请求里一模一样）+ "\n" + 请求体</code>；GET 请求的请求体是空字符串。</p>
+<pre>// Node.js 示例
+import crypto from 'node:crypto';
+const base = 'https://报价服务地址';          // 测试环境地址由运营告诉你
+const keyId = process.env.QK_KEY, secret = process.env.QK_SECRET;
+async function call(method, pathWithQuery, body = '') {
+  const ts = String(Math.floor(Date.now() / 1000));
+  const sig = crypto.createHmac('sha256', secret).update(`${ts}\n${method}\n${pathWithQuery}\n${body}`).digest('hex');
+  const r = await fetch(base + pathWithQuery, { method, body: body || undefined,
+    headers: { 'X-QK-Key': keyId, 'X-QK-Timestamp': ts, 'X-QK-Signature': sig } });
+  return [r.status, await r.json()];
+}
+console.log(await call('GET', '/v1/quotes?symbols=EURUSD,XAUUSD'));</pre>
+<pre># Python 示例
+import hashlib, hmac, os, time, urllib.request, json
+def call(method, path, body=''):
+    ts = str(int(time.time()))
+    sig = hmac.new(os.environ['QK_SECRET'].encode(), f'{ts}\n{method}\n{path}\n{body}'.encode(), hashlib.sha256).hexdigest()
+    req = urllib.request.Request(os.environ['QK_BASE'] + path, method=method, data=body.encode() or None,
+                                 headers={'X-QK-Key': os.environ['QK_KEY'], 'X-QK-Timestamp': ts, 'X-QK-Signature': sig})
+    return json.load(urllib.request.urlopen(req))
+print(call('GET', '/v1/symbols'))</pre>
+
+<h2 id="errors">2. 错误和限额</h2>
+<p>出错时返回统一格式，每个响应头都有 <code>X-Trace-Id</code>（和 <code>traceId</code> 一样），联系运营时请带上。</p>
+<table data-fields="error">
+  <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>code</code></td><td>字符串</td><td>错误码，见下表</td></tr>
+  <tr><td><code>message</code></td><td>字符串</td><td>中文说明</td></tr>
+  <tr><td><code>traceId</code></td><td>字符串</td><td>追踪号</td></tr>
+</table>
+<table>
+  <tr><th>HTTP</th><th>code</th><th>什么时候</th></tr>
+  <tr><td>401</td><td><code>UNAUTHORIZED</code></td><td>Key 不存在、已停用、签名不对、时间戳超出 ±300 秒</td></tr>
+  <tr><td>403</td><td><code>OPEN_SERVICE_CLOSED</code></td><td>报价对外服务还没有开放（外部 Key 暂时不能用）</td></tr>
+  <tr><td>429</td><td><code>RATE_LIMITED</code></td><td>超过每秒或每天请求数限额；响应头 <code>Retry-After</code>（秒）。另带 <code>scope</code>（second / day）、<code>limit</code>、<code>remaining</code>（0）、<code>resetAt</code>（毫秒）</td></tr>
+  <tr><td>400</td><td><code>SYMBOLS_REQUIRED</code>、<code>TOO_MANY_SYMBOLS</code>、<code>TIMEFRAME_INVALID</code>、<code>SYMBOL_NOT_AVAILABLE</code></td><td>参数不对；或这个 Key 拿不到这个品种</td></tr>
+</table>
+<p>默认限额（每个 Key 可以单独调整，用 <a href="#usage">用量接口</a> 查看自己的）：REST 每秒 10 次、每天 10 万次（UTC 0 点重置）；WebSocket 同时 2 条连接、每条最多订阅 50 个品种。超了只拒超出的那部分，已订阅的照常推送。被拒的请求不算进请求数。</p>
+
+<h2 id="status">3. 状态</h2>
+<table>
+  <tr><th>status</th><th>含义</th><th>有没有价格</th></tr>
+  <tr><td><code>OPEN</code></td><td>开市，正常报价</td><td>有</td></tr>
+  <tr><td><code>DEVIATION</code></td><td>两家报价商价格偏差过大，照常给主报价商的价格</td><td>有</td></tr>
+  <tr><td><code>CLOSED</code></td><td>休市</td><td>没有</td></tr>
+  <tr><td><code>NO_QUOTE</code></td><td>暂无报价（报价源中断、报价过期，或这个品种暂时不能对外提供）</td><td>没有</td></tr>
+</table>
+
+<h2 id="symbols">4. REST · 品种列表 <code>GET /v1/symbols</code></h2>
+<p>返回这个 Key 现在能拿到的品种：<code>{"items": [...]}</code>，每项：</p>
+<table data-fields="symbols.item">
+  <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>code</code></td><td>字符串</td><td>品种代码，例如 EURUSD</td></tr>
+  <tr><td><code>nameZh</code></td><td>字符串</td><td>中文名</td></tr>
+  <tr><td><code>nameEn</code></td><td>字符串</td><td>英文名</td></tr>
+  <tr><td><code>category</code></td><td>字符串</td><td>类别：fx 外汇 / metal 贵金属 / index 指数 / energy 能源 / crypto 加密货币 / stock 美股</td></tr>
+  <tr><td><code>digits</code></td><td>整数</td><td>价格小数位</td></tr>
+  <tr><td><code>sessions</code></td><td>数组</td><td>每周交易时段（UTC），每项 <code>{"day": 1～7（周一～周日）, "open": "22:00", "close": "24:00"}</code>，含开始、不含结束</td></tr>
+  <tr><td><code>status</code></td><td>字符串</td><td>见第 3 节</td></tr>
+</table>
+
+<h2 id="quotes">5. REST · 最新报价 <code>GET /v1/quotes?symbols=EURUSD,XAUUSD</code></h2>
+<p><code>symbols</code> 必填，逗号分隔，一次最多 50 个。返回 <code>{"items": [...], "unavailable": [拿不到的品种]}</code>，每项：</p>
+<table data-fields="quotes.item">
+  <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>symbol</code></td><td>字符串</td><td>品种代码</td></tr>
+  <tr><td><code>bid</code></td><td>字符串（数字）</td><td>买价（你卖出的价格）；休市、暂无报价时没有这个字段</td></tr>
+  <tr><td><code>ask</code></td><td>字符串（数字）</td><td>卖价（你买入的价格）；休市、暂无报价时没有这个字段</td></tr>
+  <tr><td><code>time</code></td><td>整数（毫秒）</td><td>报价时间，Unix 毫秒；还没有报价时为 null</td></tr>
+  <tr><td><code>status</code></td><td>字符串</td><td>见第 3 节</td></tr>
+</table>
+
+<h2 id="klines">6. REST · K 线 <code>GET /v1/klines?symbol=XAUUSD&amp;tf=15m&amp;limit=300</code></h2>
+<p>参数：<code>symbol</code>（必填）、<code>tf</code>（必填：1m、5m、15m、1h、4h、1d）、<code>from</code>、<code>to</code>（可选，UTC 秒，含两头）、<code>limit</code>（默认 300，最多 1,000）。K 线按买卖中间价算。返回 <code>{"symbol", "tf", "items": [...]}</code>，从旧到新，每项：</p>
+<table data-fields="klines.item">
+  <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>time</code></td><td>整数（秒）</td><td>这根 K 线的开始时间，UTC 秒</td></tr>
+  <tr><td><code>open</code></td><td>字符串（数字）</td><td>开盘价</td></tr>
+  <tr><td><code>high</code></td><td>字符串（数字）</td><td>最高价</td></tr>
+  <tr><td><code>low</code></td><td>字符串（数字）</td><td>最低价</td></tr>
+  <tr><td><code>close</code></td><td>字符串（数字）</td><td>收盘价（最后一根未收盘时是最新价）</td></tr>
+</table>
+
+<h2 id="usage">7. REST · 用量 <code>GET /v1/usage</code></h2>
+<p>这个 Key 的限额、今天和最近 30 天的用量（按 UTC 日）。返回 <code>{"limits": {...}, "today": {...}, "days": [...]}</code>。</p>
+<table data-fields="usage.limits">
+  <tr><th>字段（limits）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>restPerSecond</code></td><td>整数</td><td>REST 每秒请求数</td></tr>
+  <tr><td><code>restPerDay</code></td><td>整数</td><td>REST 每天请求数</td></tr>
+  <tr><td><code>wsConnections</code></td><td>整数</td><td>WebSocket 同时连接数</td></tr>
+  <tr><td><code>wsSymbolsPerConnection</code></td><td>整数</td><td>每条连接最多订阅品种数</td></tr>
+</table>
+<table data-fields="usage.day">
+  <tr><th>字段（today、days 的每项）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>date</code></td><td>字符串</td><td>日期（UTC），例如 2026-11-17</td></tr>
+  <tr><td><code>restRequests</code></td><td>整数</td><td>REST 请求数（不含被拒的）</td></tr>
+  <tr><td><code>restRejected</code></td><td>整数</td><td>因超限被拒（429）的请求数</td></tr>
+  <tr><td><code>wsPushes</code></td><td>整数</td><td>WebSocket 推送条数（报价和 K 线，不含心跳）</td></tr>
+  <tr><td><code>wsConnectionSeconds</code></td><td>整数（秒）</td><td>WebSocket 连接时长合计</td></tr>
+  <tr><td><code>wsPeakConnections</code></td><td>整数</td><td>当天同时连接数峰值</td></tr>
+</table>
+<p><code>today</code> 另有 <code>wsConnectionsNow</code>（整数，现在的连接数）。</p>
+
+<h2 id="ws">8. WebSocket</h2>
+<h3>8.1 连接</h3>
+<p>先用签名的 REST 换一张连接票据（5 分钟有效、只能用一次，浏览器里不用放 Secret），再连 WebSocket：</p>
+<p><code>POST /v1/ws-ticket</code>（请求体为空）→</p>
+<table data-fields="ticket">
+  <tr><th>字段</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>ticket</code></td><td>字符串</td><td>票据</td></tr>
+  <tr><td><code>expiresAt</code></td><td>整数（毫秒）</td><td>过期时间</td></tr>
+  <tr><td><code>path</code></td><td>字符串</td><td>连接路径 <code>/v1/ws?ticket=…</code>（把 https 换成 wss）</td></tr>
+</table>
+<p>握手被拒：票据无效或 Key 已停用 → 401；对外服务还没有开放 → 403；已有"连接数限额"那么多条连接 → 429（已有的连接不受影响）。</p>
+<p>连接被服务器关闭时的关闭码：<code>4401</code> Key 已停用或已轮换（停用后 5 秒内）；<code>4403</code> 对外服务已关闭。其他情况（网络中断、服务器重启）请 1 秒起每次翻倍、最长 60 秒地重连，<b>重连后重新换票据、重新订阅</b>。</p>
+
+<h3>8.2 你发的消息</h3>
+<pre>{"op": "subscribe", "symbols": ["EURUSD", "XAUUSD"], "epoch": "上次 hello 的 epoch（可选）", "since": {"EURUSD": 1234}}
+{"op": "watchBars", "keys": ["XAUUSD|15m"]}
+{"op": "resync", "symbols": {"EURUSD": 1234}}</pre>
+<ul>
+  <li><code>subscribe</code>：<b>整份替换</b>要的品种（退订 = 发一份更小的列表，空列表 = 全部退订）。超过每条连接的品种数 → 回 <code>error SUBSCRIBE_LIMIT</code>，这次不生效、已订阅的照常推；拿不到的品种回 <code>error SYMBOL_NOT_AVAILABLE</code>（带 <code>symbols</code>），其余照常订阅。带上次的 <code>epoch</code> 和每个品种最后收到的 <code>seq</code>，服务器从下一条开始补齐，补不上就发快照。</li>
+  <li><code>watchBars</code>：整份替换要推 K 线变化的"品种|周期"（品种要先订阅）。</li>
+  <li><code>resync</code>：发现某个品种的 <code>seq</code> 跳号时要求补齐（值写最后连续收到的序号，-1 = 直接要快照）。</li>
+</ul>
+
+<h3>8.3 服务器发的消息</h3>
+<table data-fields="ws.hello">
+  <tr><th>hello（连上后的第一条）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"hello"</td></tr>
+  <tr><td><code>epoch</code></td><td>字符串</td><td>报价服务这次启动的编号；变了说明重启过，序号重新从 1 开始，丢掉旧序号</td></tr>
+  <tr><td><code>serverTime</code></td><td>整数（毫秒）</td><td>服务器时间</td></tr>
+</table>
+<table data-fields="ws.subscribed">
+  <tr><th>subscribed（订阅生效）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"subscribed"</td></tr>
+  <tr><td><code>symbols</code></td><td>数组</td><td>现在订阅着的品种</td></tr>
+</table>
+<table data-fields="ws.quote">
+  <tr><th>quote（报价）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"quote"</td></tr>
+  <tr><td><code>symbol</code></td><td>字符串</td><td>品种代码</td></tr>
+  <tr><td><code>seq</code></td><td>整数</td><td>这个品种的序号，同一个 epoch 里只增不减；暂时不能对外提供的报价会跳过，所以可能跳号</td></tr>
+  <tr><td><code>bid</code></td><td>字符串（数字）</td><td>买价；休市、暂无报价时没有</td></tr>
+  <tr><td><code>ask</code></td><td>字符串（数字）</td><td>卖价；休市、暂无报价时没有</td></tr>
+  <tr><td><code>time</code></td><td>整数（毫秒）</td><td>报价时间</td></tr>
+  <tr><td><code>status</code></td><td>字符串</td><td>见第 3 节</td></tr>
+  <tr><td><code>snapshot</code></td><td>布尔</td><td>只在快照时出现（true）：以这条为新的起点</td></tr>
+</table>
+<table data-fields="ws.bar">
+  <tr><th>bar（K 线变化）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"bar"</td></tr>
+  <tr><td><code>symbol</code></td><td>字符串</td><td>品种代码</td></tr>
+  <tr><td><code>tf</code></td><td>字符串</td><td>周期</td></tr>
+  <tr><td><code>time</code></td><td>整数（秒）</td><td>这根 K 线的开始时间</td></tr>
+  <tr><td><code>open</code></td><td>字符串（数字）</td><td>开盘价</td></tr>
+  <tr><td><code>high</code></td><td>字符串（数字）</td><td>最高价</td></tr>
+  <tr><td><code>low</code></td><td>字符串（数字）</td><td>最低价</td></tr>
+  <tr><td><code>close</code></td><td>字符串（数字）</td><td>最新价</td></tr>
+</table>
+<table data-fields="ws.heartbeat">
+  <tr><th>heartbeat（每秒一条）</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"heartbeat"</td></tr>
+  <tr><td><code>serverTime</code></td><td>整数（毫秒）</td><td>服务器时间；超过 10 秒没收到任何消息请断开重连</td></tr>
+</table>
+<table data-fields="ws.error">
+  <tr><th>error</th><th>类型</th><th>说明</th></tr>
+  <tr><td><code>type</code></td><td>字符串</td><td>"error"</td></tr>
+  <tr><td><code>code</code></td><td>字符串</td><td>BAD_MESSAGE、SUBSCRIBE_LIMIT、SYMBOL_NOT_AVAILABLE</td></tr>
+  <tr><td><code>message</code></td><td>字符串</td><td>中文说明</td></tr>
+  <tr><td><code>symbols</code></td><td>数组</td><td>只在 SYMBOL_NOT_AVAILABLE 时出现：拿不到的品种</td></tr>
+</table>
+<pre>// 浏览器 / Node 22 示例：先在你的服务器上用签名换票据，再把 path 交给前端
+const [, t] = await call('POST', '/v1/ws-ticket');
+const ws = new WebSocket(base.replace(/^http/, 'ws') + t.path);
+ws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.type === 'hello') ws.send(JSON.stringify({ op: 'subscribe', symbols: ['EURUSD', 'XAUUSD'] }));
+  if (m.type === 'quote') console.log(m.symbol, m.status, m.bid, m.ask);
+};</pre>
+<p class="muted">本页示例在测试环境能跑通（价格是示例行情）。对外正式开放前只在测试环境能打开本页。</p>
+</main>
+</body>
+</html>
