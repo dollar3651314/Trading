@@ -1,0 +1,11 @@
+# 每 30 秒查一次可用内存（Amos 11/17 选 B：2G 上单独模式硬跑，余量约 7%，C75 例外）
+[Unit]
+Description=Trading 测试环境内存守护（每 30 秒）
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

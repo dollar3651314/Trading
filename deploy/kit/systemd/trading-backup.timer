@@ -1,0 +1,10 @@
+# 每天 UTC 19:30（北京时间 03:30）备份：避开 UTC 22:00 隔夜费结算、20:10 K 线清理
+[Unit]
+Description=Trading 测试环境备份（每天）
+
+[Timer]
+OnCalendar=*-*-* 19:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

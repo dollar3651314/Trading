@@ -2,6 +2,7 @@ package app.trading.common.web;
 
 import app.trading.common.health.AlertCheck;
 import app.trading.common.health.HealthCheck;
+import app.trading.common.health.TestAdminFlag;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  *       不能让部署脚本把新版本判为失败而回滚（部署脚本只看 {@code status} 和 {@code version}）。没有配置的项不出现。
  *       <b>只给后台域名和服务器本机</b>（{@link #showAlerts}）：客户端域名、官网的 {@code /api/health} 不返回这两个字段（不对外暴露配了哪些链、行情是否正常）。</li>
  * </ul>
+ * {@code testAdmin}（做法 07）：只在测试环境（有 {@code env}）返回，测试管理员开着是 true（{@link TestAdminFlag}）。
  * 这些值都是部署配置写死的普通文字或 UP / DOWN，不含任何密钥、内部地址或错误详情。
  */
 @RestController
@@ -42,6 +44,7 @@ public class HealthController {
   private final String envLabel;
   private final List<HealthCheck> checks;
   private final List<AlertCheck> alerts;
+  private TestAdminFlag testAdmin;
 
   @Autowired
   public HealthController(JdbcTemplate jdbc, RedisConnectionFactory redis, @Value("${trading.version}") String version,
@@ -56,6 +59,12 @@ public class HealthController {
 
   public HealthController(JdbcTemplate jdbc, RedisConnectionFactory redis, String version, String envLabel, List<HealthCheck> checks) {
     this(jdbc, redis, version, envLabel, checks, List.of());
+  }
+
+  /** 测试管理员开没开（做法 07）；只在测试环境（有 env）时返回 */
+  @Autowired(required = false)
+  void setTestAdmin(TestAdminFlag testAdmin) {
+    this.testAdmin = testAdmin;
   }
 
   /** Nginx 只在后台域名的 /api/health 上设这个头（值 1），别的域名、别的路径一律清空（deploy/nginx/proxy.inc），客户端伪造不了 */
@@ -97,7 +106,10 @@ public class HealthController {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("status", "UP");
     body.put("version", version);
-    if (!envLabel.isEmpty()) body.put("env", envLabel);
+    if (!envLabel.isEmpty()) {
+      body.put("env", envLabel);
+      body.put("testAdmin", testAdmin != null && testAdmin.testAdminOn());
+    }
     body.put("db", db ? "UP" : "DOWN");
     body.put("redis", cache ? "UP" : "DOWN");
     for (HealthCheck c : checks) {
