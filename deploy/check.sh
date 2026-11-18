@@ -131,6 +131,9 @@ cat > "$tmp/fakebin/docker" << 'FAKE'
 case "$1" in
   events) exit "${FAKE_EVENTS_RC:-1}" ;;
   compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac; exit 0 ;;
+  # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
+  ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; esac; exit 0 ;;
+  rm) exit 0 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -140,4 +143,27 @@ for rc in 1 124; do
   check "watch（docker events 退出码 $rc）：照样走完、记下问题、走到发邮件" bash -c 'tr_out=$("$@" 2>&1) || { echo "$tr_out"; exit 1; }; grep -q "Docker 没回应" "$0/state/watch" && grep -q "trading-app 没响应或不健康" "$0/state/watch" && grep -q "Trading 告警" "$0/logs/trading.log"' "$tmp/tr" env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_EVENTS_RC="$rc" bash deploy/kit/trading watch
   check "mem（docker events 退出码 $rc）：照样打出被杀记录\"未知\"和后面的 MySQL 计数" bash -c 'out=$("$@" 2>&1) || exit 1; grep -q "按内存超限杀掉：未知" <<< "$out" && grep -q "Uptime" <<< "$out"' _ env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_EVENTS_RC="$rc" bash deploy/kit/trading mem
 done
+
+echo "== trading on / off：独立模式（默认）不碰 TopUP，轮流模式才调 topup stop / start（11/18 TopUP 测试环境搬走）"
+# 假的 topup 命令：把收到的子命令记下来
+cat > "$tmp/fakebin/topup" << 'FAKE'
+#!/usr/bin/env bash
+echo "$1" >> "${FAKE_TOPUP_LOG:?}"
+exit 0
+FAKE
+chmod +x "$tmp/fakebin/topup"; echo IMAGE_TAG=0000000000000000000000000000000000000000 > "$tmp/tr/state/image.env"
+tr_mode() { # tr_mode <独立|轮流> <TopUP 容器在跑：空或 1> <on|off> → 输出 + 最后一行"topup 调用：…"
+  if [ "$1" = 轮流 ]; then echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env"; else : > "$tmp/tr/.env"; fi
+  : > "$tmp/topup-calls"
+  env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 TR_TOPUP_BIN="$tmp/fakebin/topup" FAKE_TOPUP_LOG="$tmp/topup-calls" FAKE_TOPUP_RUNNING="$2" \
+    bash deploy/kit/trading "$3" 2>&1
+  echo "退出码：$?"
+  echo "topup 调用：$(tr '\n' ' ' < "$tmp/topup-calls")"
+}
+export -f tr_mode; export tmp
+check "独立模式 off：不启动 TopUP（旧的 topup 命令还在也不调），正常结束" bash -c 'o=$(tr_mode 独立 "" off); grep -q "退出码：0" <<< "$o" && grep -q "topup 调用： *$" <<< "$o" && grep -q "独立模式" <<< "$o"'
+check "轮流模式 off：最后调 topup start" bash -c 'o=$(tr_mode 轮流 "" off); grep -q "退出码：0" <<< "$o" && grep -q "topup 调用：start" <<< "$o"'
+check "独立模式 on、TopUP 的容器还在跑：不调 topup stop、不启动 Trading" bash -c 'o=$(tr_mode 独立 1 on); ! grep -q "退出码：0" <<< "$o" && grep -q "topup 调用： *$" <<< "$o" && grep -q "TopUP 的容器还在跑" <<< "$o"'
+check "轮流模式 on、TopUP 在跑：先调 topup stop" bash -c 'o=$(tr_mode 轮流 1 on); grep -q "topup 调用：stop" <<< "$o"'
+check "模式开关只认 true / false" bash -c '! env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 bash deploy/kit/trading set TR_SHARE_WITH_TOPUP yes > /dev/null 2>&1 && env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 bash deploy/kit/trading set TR_SHARE_WITH_TOPUP false > /dev/null 2>&1 && grep -q "^TR_SHARE_WITH_TOPUP=false$" "$tmp/tr/.env"'
 exit $fail
