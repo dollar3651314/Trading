@@ -2,6 +2,8 @@
  * 钱包提供方（第 1 批，原型 P7、需求 02 第五节）：各家提供方的接口状态、最后一次成功、回调、可用余额（TopUP 在用；Cobo、Fireblocks"未接入"）；
  * 三条充值网络的开关（全平台设置，关掉的客户看不到，已发地址照常入账）；切换提供方（两步：先看影响，再填原因确认）；操作记录。
  * 网络开关、切换都是高危操作：原因必填、写审计（TY-3）。余额告警线 TY-6 先不设（Amos 没给数字）。
+ * 接口状态不用点"重新检查连接"：后端每 30 秒自动查一次（PaymentMonitor），页面打开时显示最近结果。
+ * 在用的提供方没接入（服务器上地址和 Key 没配全）时，标红"在用 · 未接入"并在顶部提示（测试环境验收 T-5；以前只显示"在用"和给其他家的占位说明）。
  */
 import { useCallback } from 'react';
 import { Alert, App, Button, Empty, Skeleton, Switch } from 'antd';
@@ -51,6 +53,7 @@ export function ProviderPage() {
 
   const cur = data.providers.find((p) => p.current);
   const down = cur && cur.connected && !cur.up;
+  const curMissing = cur && !cur.connected;
 
   const toggle = (network: string, open: boolean) =>
     hr.ask({
@@ -88,6 +91,7 @@ export function ProviderPage() {
   return (
     <>
       <PageHeader title={t('provider.title')} sub={t('provider.sub')} />
+      {curMissing ? <Alert type="error" showIcon message={t('provider.currentMissingTitle', { name: cur.name })} description={t('provider.currentMissingDesc')} /> : null}
       {down ? (
         <Alert
           type="error"
@@ -106,7 +110,9 @@ export function ProviderPage() {
           <div key={p.code} className={`card pcard${p.current ? ' cur' : ''}${!p.connected ? ' off' : ''}${p.current && p.connected && !p.up ? ' bad' : ''}`}>
             <h3>
               {p.name}{' '}
-              {p.current ? <Pill tone="info">{t('provider.current')}</Pill> : p.connected ? <Pill tone="warn">{t('provider.connected')}</Pill> : <Pill tone="muted">{t('provider.notConnected')}</Pill>}
+              {p.current ? (
+                <Pill tone={p.connected ? 'info' : 'danger'}>{p.connected ? t('provider.current') : t('provider.currentMissing')}</Pill>
+              ) : p.connected ? <Pill tone="warn">{t('provider.connected')}</Pill> : <Pill tone="muted">{t('provider.notConnected')}</Pill>}
             </h3>
             {p.connected ? (
               <dl className="kv">
@@ -125,6 +131,8 @@ export function ProviderPage() {
                 <dt>{t('provider.byChain')}</dt>
                 <dd className="muted">{t('provider.byChainTbd')}</dd>
               </dl>
+            ) : p.current ? (
+              <p className="text-danger">{t('provider.currentMissingDesc')}</p>
             ) : (
               <p className="muted">{t('provider.placeholder')}</p>
             )}

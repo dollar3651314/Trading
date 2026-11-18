@@ -35,6 +35,8 @@ const state = {
   ] as QuoteClient[],
   keys: [] as QuoteKey[],
   licenses: [] as QuoteLicenseRow[],
+  // 授权检查：和后端默认一致，所有环境默认关（Amos 2026-11-17）
+  enforced: false,
 };
 
 function key(keyId: string, clientId: number, kind: QuoteKey['kind'], extra: Partial<QuoteKey> = {}): QuoteKey {
@@ -202,7 +204,7 @@ export function getQuoteLicenses(): Promise<QuoteLicenses> {
   const data = (): QuoteLicenses => {
     const tradable = new Set(state.licenses.filter((l) => l.trading.granted && l.trading.state !== 'expired').map((l) => l.symbol));
     const all = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'XAGUSD', 'US30', 'NAS100', 'BTCUSD', 'ETHUSD', 'AAPL'];
-    return { gate: { ...state.gate }, enforced: true, today: TODAY, items: state.licenses, notTradable: all.filter((s) => !tradable.has(s)) };
+    return { gate: { ...state.gate }, enforced: state.enforced, today: TODAY, items: state.licenses, notTradable: all.filter((s) => !tradable.has(s)) };
   };
   return respond(data, { empty: () => ({ ...data(), items: [], notTradable: ['全部品种'] }) });
 }
@@ -240,6 +242,11 @@ export function setQuoteGate(open: boolean, amosApproved: boolean, reason: strin
 }
 
 /** 原型演示：把授权登记换成"假设谈下来后"（示例）的几条，含一条快到期、一条已到期 */
+/** 测试用：切换授权检查开关（后端由 FX_QUOTE_LICENSE_ENFORCE 决定） */
+export function setQuoteLicenseEnforcedForTest(on: boolean): void {
+  state.enforced = on;
+}
+
 export function seedQuoteLicensesForDemo(): void {
   state.licenses = [
     { feed: 'alltick', symbol: 'XAUUSD', trading: grant(true, '2026-01-05', '2026-11-01'), display: grant(true, '2026-01-05', '2026-11-01'), resale: grant(true, '2026-01-05', '2026-11-01'), note: '（示例）' },
