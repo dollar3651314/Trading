@@ -426,6 +426,8 @@ jobs:
     timeout-minutes: 20
     env:
       STAGING_URL: ${{ secrets.STAGING_URL }}
+      # TopUP 测试环境地址（可选）：配了才能认出"服务器在 TopUP 模式"并跳过冒烟，没配就和以前一样失败（e2e/staging-smoke.sh 开头）
+      SMOKE_TOPUP_URL: ${{ secrets.STAGING_TOPUP_URL }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
         with:
