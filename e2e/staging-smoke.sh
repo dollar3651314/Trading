@@ -7,7 +7,7 @@
 # 测试服务器和 TopUP 轮流用（TD4-20 = B，trading on / off）：服务器在 TopUP 模式时 Trading 没在服务，冒烟必然失败。这时**跳过**（退出码 0，
 # 打 GitHub 警告），但只在能证明"现在是 TopUP 在用这台机器"时跳过，免得把真坏了的 Trading 藏起来：
 #   ① Trading 的健康检查拿不到 Trading 自己的回应（没有 "version" 字段：连不上、证书不对、返回的不是 Trading）；并且
-#   ② TopUP 测试环境的健康检查 <SMOKE_TOPUP_URL>/api/health/ 返回 200 且是 TopUP 的格式（有 "ok" 字段）。；并且
+#   ② TopUP 测试环境的健康检查 <SMOKE_TOPUP_URL>/api/health/ 返回 200 且是 TopUP 的格式（有 "ok" 字段）；并且
 #   ③ 两个域名解析到同一个 IP（同一台机器）。11/18 起 TopUP 测试环境搬到了别的机器（服务器是独立模式），这条不满足就从不跳过，
 #      免得 STAGING_TOPUP_URL 指向外面一直在线的 TopUP 时，把 Trading 真的挂了误当成"TopUP 模式"跳过。
 # 两边共用这台机器的 80、443，同一时间只有一家的 Nginx 能占着：TopUP 能正常回应，就说明 Trading 的 Nginx 没在跑，是轮换不是故障。
@@ -29,7 +29,7 @@ req() { curl -s --retry 2 --retry-connrefused --max-time 15 "$@"; }
 code() { req -o /dev/null -w '%{http_code}' "$@"; }
 field() { sed -n "s/.*\"$1\":\"\\([^\"]*\\)\".*/\\1/p" <<< "$2" | head -1; }
 TOPUP=${SMOKE_TOPUP_URL:-}; TOPUP=${TOPUP%/}
-# 现在是 TopUP 在用这台机器（见开头的 ① ②）
+# 现在是 TopUP 在用这台机器（见开头的 ① ② ③）
 # 域名的第一个 IPv4 地址（解析不了就空）
 host_ip() { local h=${1#*://}; h=${h%%/*}; h=${h%%:*}; getent ahostsv4 "$h" 2> /dev/null | awk 'NR == 1 { print $1 }'; }
 topup_mode() {
