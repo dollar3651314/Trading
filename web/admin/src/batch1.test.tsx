@@ -8,11 +8,15 @@ import { WithdrawalsPage } from './pages/funds/WithdrawalsPage';
 import { DepositsPage } from './pages/funds/DepositsPage';
 import { ReconPage } from './pages/funds/ReconPage';
 import { ProviderPage } from './pages/funds/ProviderPage';
+import { setCurrentProviderConnectedForTest } from './mocks/handlers';
 import { listWithdrawals, requeryWithdrawal, approveWithdrawal } from './api';
 import { PERMISSIONS } from './config/permissions';
 import { MENU } from './config/menu';
 
-afterEach(() => setScenario('normal'));
+afterEach(() => {
+  setScenario('normal');
+  setCurrentProviderConnectedForTest(true);
+});
 
 describe('出金审核：两道审（P4）', () => {
   it('列表的"未知"提示在第一屏，点"去重新查询"选中那一笔，详情里有"重新查询"和灰的"退款"', async () => {
@@ -72,6 +76,15 @@ describe('对账（P6）', () => {
 });
 
 describe('钱包提供方（P7）', () => {
+  it('在用的提供方没接入（地址和 Key 没配全）：卡片标红"在用 · 未接入"、顶部提示，不显示给其他家的占位说明（T-5）', async () => {
+    setCurrentProviderConnectedForTest(false);
+    renderAs(<ProviderPage />);
+    expect(await screen.findByText('在用 · 未接入')).toBeInTheDocument();
+    expect(screen.getByText('在用的钱包提供方 TopUP 没有接入')).toBeInTheDocument();
+    expect(screen.getAllByText(/FX_TOPUP_BASE_URL、FX_TOPUP_API_KEY、FX_TOPUP_API_SECRET 缺一个就算未接入/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('留位置，Amos 开账号后另立一版接入。')).toHaveLength(2);
+  });
+
   it('TopUP 在用、Cobo 和 Fireblocks 未接入；关网络要填原因并勾选确认，写进操作记录', async () => {
     renderAs(<ProviderPage />);
     expect(await screen.findByText('在用')).toBeInTheDocument();

@@ -3,6 +3,8 @@
  * - 闸 1 对外开放总开关：默认关；只有超管能改；打开要写原因、勾"Amos 已同意打开"（L3，TY-3 都留），写审计；
  * - 闸 2 报价商 × 品种三项授权（交易用途 / 登录后展示 / 转售）：有没有、授权日期、到期日、备注，不存合同原文和价格；
  *   30 天内到期标橙（已发提醒邮件），已到期标红（按没授权处理）。
+ * - 授权检查（FX_QUOTE_LICENSE_ENFORCE）所有环境默认关（Amos 2026-11-17）：后端返回的 enforced 为 false 时，顶部、闸 2 说明、到期提醒、
+ *   底部提示都改说"检查已关闭、登记只做记录"（测试环境验收 T-5）；只有打开时才说"只显示、不开仓 / 外部 Key 拿不到"。
  */
 import { Fragment, useCallback, useState } from 'react';
 import { Alert, Button, Checkbox, Empty, Form, Input, Modal, Select, Skeleton, Table } from 'antd';
@@ -78,7 +80,7 @@ export function QuoteLicensePage() {
           </div>
         ) : w === 'expired' ? (
           <div>
-            <Pill tone="danger">{t('quote.expiredAsNone')}</Pill>
+            <Pill tone="danger">{t(data.enforced ? 'quote.expiredAsNone' : 'quote.expiredRecordOnly')}</Pill>
           </div>
         ) : null}
       </>
@@ -150,7 +152,7 @@ export function QuoteLicensePage() {
         <section className={`card q-hero${worst(first) === 'expired' ? ' err' : ''}`} aria-label={t('quote.expiryHeroAria')}>
           <div className="t">
             <b>{t('quote.expiryHero', { n: exp.length, feed: feedName(first.feed), symbol: first.symbol })}</b>
-            <span>{t('quote.expiryHeroDesc')}</span>
+            <span>{t(data.enforced ? 'quote.expiryHeroDesc' : 'quote.expiryHeroDescOff')}</span>
           </div>
           <PermButton perm="quote_license:edit" type="primary" size="large" onClick={() => edit(first)}>
             {t('quote.renew')}
@@ -161,7 +163,7 @@ export function QuoteLicensePage() {
         <section className="card q-hero" aria-label={t('quote.noLicenseTitle')}>
           <div className="t">
             <b>{t('quote.noLicenseTitle')}</b>
-            <span>{t('quote.noLicenseDesc')}</span>
+            <span>{t(data.enforced ? 'quote.noLicenseDesc' : 'quote.noLicenseDescOff')}</span>
           </div>
           <PermButton perm="quote_license:edit" type="primary" size="large" onClick={() => edit()}>
             {t('quote.firstLicense')}
@@ -184,12 +186,13 @@ export function QuoteLicensePage() {
       </section>
       <section className="card">
         <div className="q-card-head">
-          <h3>{t('quote.gate2')}</h3>
+          <h3>{t(data.enforced ? 'quote.gate2' : 'quote.gate2Off')}</h3>
+          <Pill tone={data.enforced ? 'warn' : 'muted'}>{t(data.enforced ? 'quote.checkOn' : 'quote.checkOff')}</Pill>
           <PermButton perm="quote_license:edit" type="primary" onClick={() => edit()}>
             {t('quote.newLicense')}
           </PermButton>
         </div>
-        <p className="muted small">{t('quote.licenseHint')}</p>
+        <p className="muted small">{t(data.enforced ? 'quote.licenseHint' : 'quote.licenseHintOff')}</p>
         <Table
           size="small"
           rowKey={(r: QuoteLicenseRow) => `${r.feed}|${r.symbol}`}
@@ -220,10 +223,10 @@ export function QuoteLicensePage() {
         />
         <Alert
           className="q-mt"
-          type="warning"
+          type={data.enforced ? 'warning' : 'info'}
           showIcon
-          message={t('quote.notTradableTitle')}
-          description={`${data.notTradable.length ? data.notTradable.join('、') : t('quote.none')}${data.enforced ? '' : t('quote.notEnforced')}`}
+          message={t(data.enforced ? 'quote.notTradableTitle' : 'quote.notTradableTitleOff')}
+          description={data.notTradable.length ? data.notTradable.join('、') : t('quote.none')}
         />
       </section>
       <GateModal open={gateOpen} on={data.gate.open} isSuper={isSuper} onClose={() => setGateOpen(false)} onDone={reload} />
