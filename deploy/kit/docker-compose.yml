@@ -12,6 +12,12 @@
 #   NMT 以外的 malloc 约 20～30；JVM 几个区的上限合计 196，加上不受这些上限管的部分约 70，最多可到约 266，264 不够。
 #   mysql 320 → 272：anon 160 + 缓冲池填满约 10 + 备份时的 mysqldump 约 25 + 内存临时表最多 32 ≈ 227，留约 45（文件缓存可回收，不算）。
 #   quote-app 264 → 312：最多约 266，留约 46。trading-app 348 不动（anon 278，堆还没用满，最多约 304 + 70，靠 GC 回收，留约 70）。
+#   11/18 第二次（各容器跑了 44 分钟，上限都不变）：quote-app 峰值 312/312、触顶 23 次、没被杀，anon 243；trading-app anon 297（不再涨）。
+#   开发机 NMT（实际执行）：quote-app 启动后 C2 编译用的临时内存（Arena Chunk）峰值 34 MB，用完还给 glibc，glibc 不还给系统，
+#   所以 anon 停在高位、再加文件缓存就顶到上限。两个 JVM 都加 -XX:TrimNativeHeapInterval=5000（每 5 秒把 glibc 空着的内存还给系统，
+#   JDK 25 正式参数）：同样跑 4 分钟，quote-app anon 232 → 206、trading-app 264 → 234，CPU 看不出差别；C2 照用，性能不变。
+#   只用 C1（-XX:TieredStopAtLevel=1）能到 193，但启动和运行多耗约 20% CPU，2 核机器上不用。
+#   redis 16：上限常被 dump.rdb 的文件缓存顶满（触顶几万次），程序内存只有 2，内核回收文件缓存就行、不会被杀，不加。
 #   为什么改：测试服务器 setup 第 ⑤ 步备份时 mysql 用到 208/224（mysqldump 跑在 mysql 容器里，也算进它的上限），顶到上限又不能用交换分区，
 #   内核反复回收页面（系统态 CPU 92.7%、负载 48），卡了 20 多分钟后 mysqldump 断连。同一时刻 trading-app 286/380、quote-app 121/264、web 11、redis 8。
 #   trading-app 余量最大（服务器和开发机实测都约 287），降 32 给 mysql；quote-app 开发机并发实测约 243，不降。
@@ -87,8 +93,8 @@ services:
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
       # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 348（开发机实测并发后约 287，测试服务器跑 30 分钟约 286）
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
-      # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
+      # 连接池（MySQL 最多 18 个连接：trading 12 + quote 3 + 备份 1 + 健康检查 1 + 余量 1）
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
       FX_COOKIE_SECURE: "true"
       FX_ENV_LABEL: test
@@ -152,8 +158,8 @@ services:
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
       # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，加上符号表、线程栈（256K × 约 60）、GC、JIT、malloc 约 70，容器 312
-      # （11/18 服务器启动 5 分钟 anon 247，原来 264 贴着上限；开发机 NMT 实测见开头）
-      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # （11/18 服务器启动 5 分钟 anon 247，原来 264 贴着上限；开发机 NMT 实测见开头）。TrimNativeHeapInterval：把 C2 编译用完的临时内存还给系统（见开头）
+      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
       FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
       FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
       FX_QUOTE_KEY_ENC_KEY: ${FX_QUOTE_KEY_ENC_KEY:?缺少 FX_QUOTE_KEY_ENC_KEY}
@@ -242,7 +248,8 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
-    # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）；只放计数和票据，maxmemory 8 MB，容器 16 MB
+    # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）；只放计数和票据，maxmemory 8 MB，容器 16 MB。
+    # 16 MB 常被 dump.rdb 的文件缓存顶满（trading mem 里"触到上限"几万次），程序内存只有约 2 MB：内核回收文件缓存即可，不会被杀，无害
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 8mb --maxmemory-policy noeviction --save 300 10"]
     environment:
       REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
