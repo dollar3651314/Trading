@@ -4,10 +4,13 @@
 #                              一次性安装（bootstrap.sh 调用，可重复运行，不问问题、不涉及密钥）：停 TopUP → 装软件、生成内部密码和 Key、申请证书、启动、打开定时器、打印摘要
 #   sudo trading setup         中文向导（隐藏输入，要终端）：① 邮件（同机有 TopUP 就沿用它的 MAIL_FROM、MAIL_TO，问是否沿用它的 Resend Key；只读不改）并发测试邮件 ② 后台第一个超管的初始密码 ③ 验收令牌（测试管理员）
 #                              ④ TopUP Key / Secret（可跳过，联调时填）⑤ 备份（恢复演练不在这里做，在 trading off 时做）；最后打印摘要
-#   sudo trading on / off      和 TopUP 轮流用这台 2 核 2G（部署方案 07 页，TD4-20 = B）：
-#                              on  = 调 TopUP 自己的 topup stop → 确认 80/443 空出来 → 可用内存 ≥ 1,000 MB（TR_MIN_MEM_MB）才启动 Trading（不够就恢复 TopUP）
-#                              off = 拿自动更新的锁 → 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 恢复演练（Trading 全停了、TopUP 还没启动，内存够）→ 调 TopUP 自己的 topup start
-#                                    一般 2–5 分钟，最坏约 25 分钟；在"远程连接"的终端里运行（用"云助手"时超时设 ≥ 30 分钟）；中途断了会自己收尾：没停完就恢复 Trading，停完了就启动 TopUP
+#   sudo trading on / off      启动 / 停止 Trading。两种模式，看 .env 的 TR_SHARE_WITH_TOPUP（sudo trading set TR_SHARE_WITH_TOPUP true|false）：
+#                              独立（默认，没写也是）：这台机器只跑 Trading（Amos 11/18：TopUP 测试环境已搬走，Trading 上生产后再搬回来）。
+#                                on  = 确认 80/443 空着、可用内存 ≥ 1,000 MB（TR_MIN_MEM_MB）才启动 Trading；**不碰 TopUP**（有 TopUP 的容器在跑就不启动，不替它停）
+#                                off = 拿自动更新的锁 → 停 Trading 定时器 → 停应用 → 备份 → 停 MySQL、Redis、Nginx → 恢复演练；**不启动 TopUP**
+#                              和 TopUP 轮流（TR_SHARE_WITH_TOPUP=true，部署方案 07 页 TD4-20 = B，TopUP 搬回来以后再打开）：
+#                                on  = 先调 TopUP 自己的 topup stop，其余同上（不够就恢复 TopUP）；off = 同上，最后调 TopUP 自己的 topup start
+#                                    一般 2–5 分钟，最坏约 25 分钟；在"远程连接"的终端里运行（用"云助手"时超时设 ≥ 30 分钟）；中途断了会自己收尾：没停完就恢复 Trading，停完了（轮流模式）就启动 TopUP
 #   sudo trading keys [topup|mail]   中文向导：逐项问、Key / Secret / 邮件密码隐藏输入，写进 .env 后自动生效（要在"远程连接"的终端里运行）
 #   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
 #   sudo trading set-key <变量名>    隐藏输入改一个密钥（只认清单里的名字，要终端）
@@ -143,6 +146,10 @@ compose() { "${COMPOSE[@]}" "$@"; }
 # 开发机演练（TR_OFFLINE_TEST）没有 systemd
 sysctl_() { [ -n "${TR_OFFLINE_TEST:-}" ] && return 0; systemctl "$@"; }
 topup_running() { [ -n "$(docker ps -q --filter label=com.docker.compose.project=topup 2>/dev/null || true)" ]; }
+# 和 TopUP 轮流用这台机器吗：只有 .env 里明确写 TR_SHARE_WITH_TOPUP=true 才算；没写、写 false 或别的值都是"独立"，
+# on / off 一律不碰 TopUP（11/18 TopUP 测试环境已搬走，旧的 /usr/local/bin/topup 还在也不会被 trading off 拉起来）
+share_topup() { [ "$(envget TR_SHARE_WITH_TOPUP)" = true ]; }
+mode_name() { if share_topup; then echo "和 TopUP 轮流（TR_SHARE_WITH_TOPUP=true）"; else echo "独立（不碰 TopUP）"; fi; }
 port_busy() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q . ; }
 current_tag() { sed -n 's/^IMAGE_TAG=//p' "$STATE/image.env" 2>/dev/null || true; }
 revision() { docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$1" 2>/dev/null || true; }
@@ -317,7 +324,7 @@ cmd_install() {
   INSTALL_HINT=1
   say "== Trading 测试环境第一次部署（可以重复运行；每步 ✓ / ✗，最后打印摘要，不显示任何密钥）"
 
-  say "== 1/9 停 TopUP、检查系统和内存（这台 2 核 2G 和 TopUP 轮流用）"
+  say "== 1/9 检查系统、80/443 和内存（轮流模式 TR_SHARE_WITH_TOPUP=true 时先停 TopUP；默认独立，不碰 TopUP）"
   . /etc/os-release
   [ "${VERSION_ID:-}" = 24.04 ] && ok "Ubuntu 24.04" || bad "本脚本按 Ubuntu 24.04 写，这台是 ${PRETTY_NAME:-未知}（继续，出错截图）"
   stop_topup_and_check_mem || exit 1
@@ -528,7 +535,12 @@ KEY_ALLOWED="FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLT
 
 cmd_set() {
   need_root
-  [ $# -eq 2 ] || die "用法：sudo trading set <变量名> <值>；能改的：$SET_ALLOWED（密钥用 set-key）"
+  # 模式开关只影响下一次 on / off，不重启容器（apply 会在 Trading 停着时把它拉起来）
+  if [ "${1:-}" = TR_SHARE_WITH_TOPUP ] && [ $# -eq 2 ]; then
+    case "$2" in true | false) ;; *) die "TR_SHARE_WITH_TOPUP 只能是 true（和 TopUP 轮流用这台机器）或 false（独立，不碰 TopUP）" ;; esac
+    envset TR_SHARE_WITH_TOPUP "$2"; ok "模式：$(mode_name)（下一次 sudo trading on / off 起生效）"; log "模式改成 $2"; return 0
+  fi
+  [ $# -eq 2 ] || die "用法：sudo trading set <变量名> <值>；能改的：$SET_ALLOWED TR_SHARE_WITH_TOPUP（密钥用 set-key）"
   [[ " $SET_ALLOWED " == *" $1 "* ]] || die "$1 不在可改清单里：$SET_ALLOWED（密钥用 sudo trading set-key）"
   envset "$1" "$2"; ok "$1 已更新"
   apply
@@ -599,6 +611,7 @@ cmd_status() {
   local tag body
   tag=$(current_tag)
   say "版本：${tag:-还没部署}（上一个：$(cat "$STATE/previous" 2>/dev/null || echo 无)）"
+  say "模式：$(mode_name)"
   [ -s "$STATE/skip" ] && say "  ⚠ 跳过的版本：$(cat "$STATE/skip")（修好后 sudo trading retry）"
   [ -f "$STATE/paused" ] && say "  ⚠ 自动更新已暂停到：$(cat "$STATE/paused")（手动回滚后；下一次合并时恢复）"
   [ -f "$STATE/memguard-stopped" ] && say "  ⚠ 内存守护在 $(cat "$STATE/memguard-stopped") 停了 Trading（可用内存不够）；查清原因后 sudo trading on"
@@ -935,12 +948,16 @@ cmd_test_mail() { need_root; send_mail "测试邮件" "这是 Trading 测试环�
 # 每 5 分钟检查，只在状态变化时发邮件（恢复时再发一封）
 cmd_watch() {
   need_root
-  # Trading 停着（trading off，或者 TopUP 启动时按约定停了 trading-deploy 定时器）：不检查、不告警，顺手把自己也停了
-  if [ -z "${TR_OFFLINE_TEST:-}" ] && ! systemctl is-active --quiet trading-deploy.timer; then
+  local problems=()
+  # 轮流模式：Trading 停着（trading off，或者 TopUP 启动时按约定停了 trading-deploy 定时器）：不检查、不告警，顺手把自己也停了。
+  # 独立模式没有 TopUP 来停它，定时器停着就是不正常（trading off 会连 watch 一起停，不会走到这里）：照常检查，并记一条问题
+  if ! share_topup && [ -z "${TR_OFFLINE_TEST:-}" ] && ! systemctl is-active --quiet trading-deploy.timer; then
+    problems+=("自动更新定时器 trading-deploy 停着（独立模式下不该停；sudo trading on 会打开）")
+  elif [ -z "${TR_OFFLINE_TEST:-}" ] && ! systemctl is-active --quiet trading-deploy.timer; then
     systemctl disable --now trading-watch.timer > /dev/null 2>&1 || true
     log "trading-deploy 定时器停着（Trading 轮到 TopUP 用机器），检查暂停"; return 0
   fi
-  local problems=() body avail disk last exp_s now
+  local body avail disk last exp_s now
   body=$(health)
   [ "$(health_field status "$body")" = UP ] || problems+=("trading-app 没响应或不健康")
   quote_healthy || problems+=("quote-app 不健康")
@@ -1006,12 +1023,22 @@ cmd_memguard() {
 
 # 停 TopUP（调它自己的 topup stop，按它的顺序：停定时器 → 停应用 → 备份 → 停数据库），确认 80/443 空出来、可用内存够
 stop_topup_and_check_mem() {
+  if ! share_topup; then
+    # 独立模式：不调 topup stop。TopUP 的容器要是还在跑，说明还没搬干净，不替它停、也不启动 Trading
+    if topup_running; then bad "独立模式（不碰 TopUP），但这台机器上 TopUP 的容器还在跑：Trading 不启动。要轮流用就先 sudo trading set TR_SHARE_WITH_TOPUP true"; return 1; fi
+    check_ports_mem; return
+  fi
   if topup_running; then
     [ -x "$TOPUP_BIN" ] || { bad "TopUP 的容器在跑，但找不到 $TOPUP_BIN"; return 1; }
     say "  停 TopUP（topup stop，数据保留；约 1～2 分钟）"
     "$TOPUP_BIN" stop > /dev/null 2>&1 7>&- 8>&- 9>&- || { bad "topup stop 没成功（看 sudo topup status），Trading 不启动"; return 1; }
   fi
   topup_running && { bad "TopUP 的容器还在跑，Trading 不启动"; return 1; }
+  check_ports_mem
+}
+
+# 80/443 空着（或者就是 Trading 自己的 Nginx）、可用内存够；不够时轮流模式恢复 TopUP（独立模式 restart_topup 什么也不做）
+check_ports_mem() {
   local p
   for p in 80 443; do
     if port_busy "$p" && ! docker ps --format '{{.Names}}' | grep -q '^trading-trading-web-1$'; then bad "$p 端口还被别的程序占着，Trading 不启动"; restart_topup; return 1; fi
@@ -1019,16 +1046,18 @@ stop_topup_and_check_mem() {
   local avail
   avail=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
   if [ -z "$(docker ps -q --filter label=com.docker.compose.project=trading 2>/dev/null || true)" ] && [ "$avail" -lt "$MIN_MEM_MB" ]; then
-    bad "可用内存 ${avail} MB，少于 ${MIN_MEM_MB} MB（差 $((MIN_MEM_MB - avail)) MB），Trading 不启动；已恢复 TopUP"
+    bad "可用内存 ${avail} MB，少于 ${MIN_MEM_MB} MB（差 $((MIN_MEM_MB - avail)) MB），Trading 不启动$(share_topup && echo "；已恢复 TopUP")"
     restart_topup; return 1
   fi
-  ok "TopUP 已停、80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"
+  if share_topup; then ok "TopUP 已停、80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"; else ok "80/443 空着、可用内存 ${avail} MB（要 ≥ ${MIN_MEM_MB} MB）"; fi
 }
 
 # 启动 TopUP。topup start 忽略 HUP、INT（窗口断了、Ctrl-C 都不会把它打断在半路；被忽略的信号它改不回来）；
 # 成功后写标记文件 state/topup-started.<进程号>，退出收尾看这个文件决定要不要再启动一次。
 # 不把锁的文件描述符带给 TopUP（它起的进程要是一直在，锁就一直放不掉）
 restart_topup() {
+  # 独立模式一律不启动 TopUP（旧的 topup 命令还在也不碰）
+  share_topup || return 0
   [ -x "$TOPUP_BIN" ] || return 0
   local mark="$STATE/topup-started.$$"
   rm -f "$mark"
@@ -1043,7 +1072,7 @@ restart_topup() {
 cmd_on() {
   need_root
   [ -f "$ENVF" ] && [ -n "$(current_tag)" ] || die "还没部署过，先运行 sudo trading install …"
-  say "== 切到 Trading（TopUP 停下）"
+  if share_topup; then say "== 切到 Trading（TopUP 停下）"; else say "== 启动 Trading（独立模式，不碰 TopUP）"; fi
   # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删，免得占着内存
   docker rm -f trading-restore-drill > /dev/null 2>&1 || true
   stop_topup_and_check_mem || exit 1
@@ -1065,7 +1094,7 @@ off_restore_trading() {
 # 正常 2–5 分钟。要在"远程连接"的终端里运行；用"云助手 → 执行命令"时超时要设 ≥ 30 分钟。中途窗口断了也会按上面的规则收尾（on_exit）
 cmd_off() {
   need_root
-  say "== 切回 TopUP（Trading 停下，数据保留；一般 2–5 分钟）"
+  if share_topup; then say "== 切回 TopUP（Trading 停下，数据保留；一般 2–5 分钟）"; else say "== 停 Trading（独立模式：备份、恢复演练，不启动 TopUP；数据保留，一般 2–5 分钟）"; fi
   # 以前的进程留下的启动标记（进程号可能被重用）先删
   rm -f "$STATE"/topup-started.*
   # 上次演练被 kill -9 打断时可能留下的临时库（320 MB），先删
@@ -1090,16 +1119,17 @@ cmd_off() {
     ok "应用已停"
     if BACKUP_LOCK_WAIT=120 cmd_backup before-off > /dev/null; then ok "备份完成"; else bad "备份失败：Trading 按原样恢复，TopUP 不启动"; exit 1; fi
     compose stop > /dev/null 2>&1 || true
-    # 从这里起 Trading 全停了：不管后面演练成败、被 Ctrl-C、窗口断了还是 kill，退出时都启动 TopUP（on_exit）
-    OFF_RESTORE_TRADING=""; OFF_START_TOPUP=1
+    # 从这里起 Trading 全停了：轮流模式下不管后面演练成败、被 Ctrl-C、窗口断了还是 kill，退出时都启动 TopUP（on_exit）；独立模式不启动
+    OFF_RESTORE_TRADING=""; if share_topup; then OFF_START_TOPUP=1; fi
     ok "MySQL、Redis 已停"
     # 恢复演练放在这里：Trading 全停了、TopUP 还没启动，2 核 2G 的内存够起临时数据库；只用刚才成功的那份备份（备份失败上面已经退出）
-    say "  恢复演练（用刚做的备份，约 1–3 分钟；不通过也照样切回 TopUP）"
+    say "  恢复演练（用刚做的备份，约 1–3 分钟$(share_topup && echo "；不通过也照样切回 TopUP")）"
     if cmd_restore_drill; then ok "恢复演练通过"; else bad "恢复演练没通过（备份文件还在；看 sudo trading status 和 $LOGF，截图给主会话）"; fi
   else
     ok "Trading 本来就停着"
   fi
-  log "trading off"
+  log "trading off（$(mode_name)）"
+  if ! share_topup; then ok "Trading 已全停（独立模式，没有启动 TopUP）"; return 0; fi
   # 启动成功才清掉"要启动 TopUP"的标记：没成功（或启动中被打断）时退出收尾会再启动一次
   if restart_topup; then OFF_START_TOPUP=""; else OFF_TOPUP_FIRST_FAILED=1; say "  退出前再试一次 topup start"; fi
 }
