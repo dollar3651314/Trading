@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 部署工具包的静态检查（第 4 批）：CI 的 deploy-check job 运行，本机也可以运行：bash deploy/check.sh
 #   1. shellcheck（服务器脚本）  2. docker compose config（用 .env.example 的变量名填一次性假值）
-#   3. 同版本 nginx 镜像里 nginx -t（四个假域名、临时自签证书）  4. compose 约束：除 mysql 外每个容器 mem_limit = memswap_limit（mysql 正好多 128 MB 交换分区）、只有 web 映射公网端口、
+#   3. 同版本 nginx 镜像里 nginx -t（四个假域名、临时自签证书）  4. compose 约束：每个容器 mem_limit = memswap_limit（都不用交换分区）、MySQL 内存参数、只有 web 映射公网端口、
 #      trading-app 只绑 127.0.0.1、quote-app 不映射端口、内存合计 964 MB、测试环境开发者文档能看、不让搜索引擎收录
 #   5. 真的起一个 Nginx（报价服务用桩代替）按域名发请求：/docs/ 转到报价服务、/internal 不转、/robots.txt 和 X-Robots-Tag（测试环境验收 T-1、T-2）
 # 不需要任何密钥；假值只在临时目录里，跑完删掉。
@@ -25,8 +25,12 @@ cfg() { docker compose --project-name trading --project-directory deploy/kit -f 
 check "compose 能解析" cfg -q
 cfg --format json > "$tmp/compose.json"
 jqc() { jq -e "$1" "$tmp/compose.json" > /dev/null; }
-check "除 mysql 外每个容器 mem_limit = memswap_limit（不用交换分区）" jqc '[.services | to_entries[] | select(.key != "mysql") | .value | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
-check "mysql 内存 320 MB、交换分区正好 128 MB（memswap_limit 448）" jqc '(.services.mysql.mem_limit | tonumber) == (320 * 1024 * 1024) and ((.services.mysql.memswap_limit | tonumber) - (.services.mysql.mem_limit | tonumber)) == (128 * 1024 * 1024)'
+check "每个容器 mem_limit = memswap_limit（都不用交换分区；11/18 服务器 vm.swappiness=0，mysql 的 128 MB 交换额度用不上）" jqc '[.services[] | (.mem_limit == .memswap_limit and .mem_limit != null)] | all'
+check "mysql 内存 320 MB、memswap_limit 正好 320 MB" jqc '(.services.mysql.mem_limit | tonumber) == (320 * 1024 * 1024) and (.services.mysql.memswap_limit | tonumber) == (320 * 1024 * 1024)'
+check "mysql 内存参数（连接数 18、临时表 32M、表缓存 256×1、表定义 400、线程缓存 4、日志缓冲 4M、键缓冲 1M、不反查主机名）" jqc '.services.mysql.command as $c | ["--max-connections=18","--innodb-log-buffer-size=4M","--key-buffer-size=1M","--table-open-cache=256","--table-open-cache-instances=1","--table-definition-cache=400","--thread-cache-size=4","--temptable-max-ram=32M","--skip-name-resolve","--host-cache-size=0","--performance-schema=OFF"] | all(. as $f | $c | index($f))'
+check "MySQL 连接数够两个连接池 + 备份 + 健康检查（max-connections ≥ TR_DB_POOL_APP + TR_DB_POOL_QUOTE + 2）" jqc '((.services.mysql.command[] | select(startswith("--max-connections=")) | ltrimstr("--max-connections=") | tonumber) >= ((.services["trading-app"].environment.FX_DB_POOL_SIZE | tonumber) + (.services["quote-app"].environment.FX_QUOTE_DB_POOL_SIZE | tonumber) + 2))'
+check "trading 脚本里每处 docker compose exec -T 都把标准输入接到 /dev/null（T-7：套了 timeout 时在终端里会被 SIGTTIN 停住）" bash -c 'awk '\''/exec -T/ && !/^[[:space:]]*#/ { s = ""; for (i = 0; i < 9; i++) { s = s $0; if ($0 ~ /< \/dev\/null/) break; if ((getline) <= 0) break } if (s !~ /< \/dev\/null/) { print "  没有 < /dev/null：" NR; bad = 1 } } END { exit bad }'\'' deploy/kit/trading'
+
 check "默认内存上限合计 964 MB（+ 容器运行开销约 36 = 启动门槛 1,000；Amos 批准的 C75 例外，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (964 * 1024 * 1024)'
 check "启动门槛默认 1,000 MB、恢复演练临时库默认 320 MB" bash -c 'grep -q "^MIN_MEM_MB=\${TR_MIN_MEM_MB:-1000}$" deploy/kit/trading && grep -q "^DRILL_MEM_MB=\${TR_DRILL_MEM_MB:-320}$" deploy/kit/trading'
 check "备份导出超时（默认 300 秒）明显小于自动更新服务的 15 分钟" bash -c 'grep -q "^DUMP_TIMEOUT=\${TR_DUMP_TIMEOUT:-300}$" deploy/kit/trading && grep -q "^TimeoutStartSec=15min$" deploy/kit/systemd/trading-deploy.service'
