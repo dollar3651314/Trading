@@ -154,6 +154,31 @@ class QuoteRouterTest {
   }
 
   @Test
+  void 一模一样的报价1秒内只传一次_价格变了立即传_换了报价源也传() {
+    QuoteRouter r = both();
+    // 币安 bookTicker 在挂单数量变了时也推送、价格不变；取整后相同的也算一样
+    r.onQuote("alltick", "EURUSD", d("1.12500"), d("1.12510"), null);
+    r.onQuote("alltick", "EURUSD", d("1.12500"), d("1.12510"), null);
+    r.onQuote("alltick", "EURUSD", d("1.1250049"), d("1.1250999"), null);
+    assertThat(submitted()).as("1 秒内一样的只传第一条").hasSize(1);
+    clock.advance(Duration.ofMillis(999));
+    r.onQuote("alltick", "EURUSD", d("1.12500"), d("1.12510"), null);
+    assertThat(submitted()).hasSize(1);
+    clock.advance(Duration.ofMillis(1));
+    r.onQuote("alltick", "EURUSD", d("1.12500"), d("1.12510"), null);
+    assertThat(submitted()).as("满 1 秒再传一次（过期判断不受影响）").hasSize(2);
+    r.onQuote("alltick", "EURUSD", d("1.12501"), d("1.12510"), null);
+    r.onQuote("alltick", "EURUSD", d("1.12501"), d("1.12511"), null);
+    assertThat(submitted()).as("买价、卖价任一变了立即传").hasSize(4);
+    // 主源断 11 秒切到备源：备源价格和刚才一样也要传（换了报价源）
+    clock.advance(Duration.ofSeconds(11));
+    clearInvocations(processor);
+    r.onQuote("itick", "EURUSD$GB", d("1.12501"), d("1.12511"), null);
+    assertThat(r.current("EURUSD").orElseThrow().feed()).isEqualTo("itick");
+    assertThat(submitted()).hasSize(1);
+  }
+
+  @Test
   void 主源10秒没报价切到备源_恢复30秒后切回() {
     QuoteRouter r = both();
     r.onQuote("alltick", "EURUSD", d("1.12500"), d("1.12510"), null);
