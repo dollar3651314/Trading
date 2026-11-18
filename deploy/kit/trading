@@ -12,6 +12,8 @@
 #   sudo trading set <变量名> <值>   改一个不是密钥的设置（只认清单里的名字）
 #   sudo trading set-key <变量名>    隐藏输入改一个密钥（只认清单里的名字，要终端）
 #   sudo trading status              当前版本、容器、健康检查、定时器、磁盘、内存、备份、证书（不显示任何值）
+#   sudo trading mem                 每个容器的内存：当前、峰值（容器启动以来）、上限、anon（程序）/ file（文件缓存）/ shmem / slab、交换分区（MiB），
+#                                    再加 MySQL 的连接数、打开的表、临时表等计数和关键参数（只读，不显示任何密钥）
 #   sudo trading update              看 staging 有没有新版本，有就备份 → 换 → 健康检查，不通过自动换回（定时器每分钟运行）
 #   sudo trading retry               清掉"跳过的版本"，下一分钟重试
 #   sudo trading rollback [提交号]   换回上一个（或指定）版本，并暂停自动更新到当前 staging 版本
@@ -38,7 +40,7 @@ LOGF="$TR_DIR/logs/trading.log"
 MIN_MEM_MB=${TR_MIN_MEM_MB:-1000}
 # 内存守护：可用内存低于这个数（MB）就只停 Trading（不碰 TopUP）
 MEMGUARD_MB=${TR_MEMGUARD_MB:-80}
-# 恢复演练用的临时 MySQL 上限（MB）；和正式库同样设置（缓冲池 32 MB、内存 320、多 128 MB 交换分区），实测空闲约 172 MB，导入时更多
+# 恢复演练用的临时 MySQL 上限（MB）；和正式库同样设置（缓冲池 32 MB、内存 320、不用交换分区），实测空闲约 172 MB，导入时更多
 DRILL_MEM_MB=${TR_DRILL_MEM_MB:-320}
 # 备份时 mysqldump 最多等几秒（测试库导出正常几秒钟；卡住就算失败，不无限等）。要明显小于 trading-deploy.service 的 15 分钟，免得 systemd 先杀
 DUMP_TIMEOUT=${TR_DUMP_TIMEOUT:-300}
@@ -98,6 +100,8 @@ on_exit() {
 trap on_exit EXIT
 # 管道断了（例如 trading off | tee 的 tee 被关掉）也走同一套清理；子进程不继承这个 trap，管道里的命令照常
 trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP; trap 'exit 141' PIPE
+# docker compose exec 一律把标准输入接到 /dev/null（或文件）：它默认转发标准输入，外面套了 timeout 时（timeout 自成后台进程组）
+# 在终端里一读就被 SIGTTIN 停住，直到超时被杀（T-7）。deploy/check.sh 检查每处 exec -T 都有这个重定向
 # 后台跑一个要等很久的命令（导出、导入、等锁）再 wait：这样 Ctrl-C、关窗口、kill 来了 trap 立刻执行（前台命令要等它结束才执行；
 # GNU timeout 还会自成进程组，终端的 Ctrl-C 到不了它）。on_exit 会杀掉它。标准输入显式传下去（后台命令默认读 /dev/null）
 run_bg() {
@@ -171,20 +175,14 @@ log_once() {
   printf '%s' "$2" > "$STATE/warned-$1" 2> /dev/null || true
   log "$2" > /dev/null
 }
-# .env 里改了 MySQL 内存时：TR_MEMSWAP_MYSQL（内存 + 交换分区）不能小于 TR_MEM_MYSQL，否则 MySQL 容器起不来，这里先用中文说清楚
+# MySQL 不再用交换分区（11/18：服务器 vm.swappiness=0、cgroup v2，容器触到上限时内核不换出程序内存，128 MB 交换额度用不上；
+# 这个设置全机共用、TopUP 也在用，不改）。以前的 TR_MEMSWAP_MYSQL 已经不读，.env 里还有就提醒一次可以删掉
 check_mysql_swap() {
-  local m s mb sb msg
-  m=$(envget TR_MEM_MYSQL); m=${m:-320m}; s=$(envget TR_MEMSWAP_MYSQL); s=${s:-448m}
-  if ! mb=$(mem_bytes "$m") || ! sb=$(mem_bytes "$s"); then
-    # 认不出来的写法不拦（交给 docker compose 自己判断），只提醒一次
-    log_once memswap ".env 里 TR_MEM_MYSQL=$m、TR_MEMSWAP_MYSQL=$s 的写法认不出来（应该像 320m、448m），没检查两者大小"
-    return 0
+  if [ -n "$(envget TR_MEMSWAP_MYSQL)" ]; then
+    log_once memswap ".env 里的 TR_MEMSWAP_MYSQL 已经不用了（MySQL 的交换额度改成和内存一样），可以删掉这一行"
+  else
+    rm -f "$STATE/warned-memswap"
   fi
-  if [ "$sb" -lt "$mb" ]; then
-    msg=".env 里 TR_MEMSWAP_MYSQL（$s，内存 + 交换分区）小于 TR_MEM_MYSQL（$m），MySQL 起不来：把 TR_MEMSWAP_MYSQL 改成 TR_MEM_MYSQL + 128m（不想用交换分区就写成和 TR_MEM_MYSQL 一样）"
-    log_once memswap "$msg"; die "$msg"
-  fi
-  rm -f "$STATE/warned-memswap"
 }
 
 # 等新版本：trading-app 健康检查 status=UP、version=提交号，quote-app 健康（最多 3 分钟）
@@ -623,6 +621,27 @@ cmd_status() {
   say "Amos 填的（只说是否）：${filled[*]}"
 }
 
+# 每个容器的内存（cgroup v2）：按容器进程号找 cgroup 目录（/proc/<pid>/cgroup 的 0:: 行），不依赖容器 ID 的长短和 cgroup 驱动；
+# 峰值从容器这次启动算起。anon = 程序自己的内存（到上限会被杀），file = 文件缓存（内核随时能回收）。只读
+cmd_mem() {
+  local c pid st cg
+  m_() { local v; v=$(cat "$cg/$1" 2> /dev/null) || { echo 无; return; }; [ "$v" = max ] && echo 不限 || echo $((v / 1048576)); }
+  s_() { awk -v k="$1" '$1 == k { print int($2 / 1048576) }' "$cg/memory.stat" 2> /dev/null; }
+  say "各容器内存（MiB；峰值从容器启动时间算起；anon = 程序内存，file = 文件缓存，可回收）"
+  for c in $(docker ps -a --filter label=com.docker.compose.project=trading --format '{{.Names}}' | sort); do
+    pid=$(docker inspect -f '{{.State.Pid}}' "$c" 2> /dev/null || echo 0)
+    st=$(docker inspect -f '{{.State.StartedAt}}' "$c" 2> /dev/null | cut -c1-19)
+    if [ "${pid:-0}" = 0 ]; then say "  $c：没在运行"; continue; fi
+    cg=/sys/fs/cgroup$(awk -F: '$1 == "0" { print $3 }' "/proc/$pid/cgroup" 2> /dev/null)
+    say "  $c（启动 $st UTC）：当前 $(m_ memory.current)  峰值 $(m_ memory.peak)  上限 $(m_ memory.max) | anon $(s_ anon)  file $(s_ file)  shmem $(s_ shmem)  slab $(s_ slab) | 交换 $(m_ memory.swap.current)"
+  done
+  [ -n "$(compose ps -q --status running mysql 2> /dev/null)" ] || { say "MySQL 没在运行，不查连接数"; return 0; }
+  say "MySQL 计数和参数（只读）："
+  # 密码只在容器里由环境变量交给客户端，不出现在命令行和输出里；最多等 20 秒
+  timeout 20 "${COMPOSE[@]}" exec -T mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot -N -e "SHOW GLOBAL STATUS WHERE Variable_name IN (\"Uptime\",\"Threads_connected\",\"Max_used_connections\",\"Threads_cached\",\"Open_tables\",\"Opened_tables\",\"Open_table_definitions\",\"Created_tmp_tables\",\"Created_tmp_disk_tables\"); SHOW GLOBAL VARIABLES WHERE Variable_name IN (\"max_connections\",\"innodb_buffer_pool_size\",\"table_open_cache\",\"table_definition_cache\",\"thread_cache_size\",\"temptable_max_ram\",\"temptable_max_mmap\",\"log_bin\",\"innodb_flush_method\");"' 2> /dev/null < /dev/null \
+    | awk '{ printf "  %-26s %s\n", $1, $2 }' || say "  查不到（MySQL 20 秒没回应）"
+}
+
 cmd_update() {
   need_root
   exec 9> "$STATE/update.lock"
@@ -720,7 +739,7 @@ kill_container_dumps() {
     for p in /proc/[0-9]*; do live "$p" && kill -9 "${p#/proc/}" 2>/dev/null; done
     sleep 1; n=0
     for p in /proc/[0-9]*; do live "$p" && n=$((n + 1)); done
-    echo "$n"' 2> /dev/null) || n=""
+    echo "$n"' 2> /dev/null < /dev/null) || n=""
   case "$n" in
     0) echo "mysql 容器里没有还在跑的 mysqldump" ;;
     "") echo "进不了 mysql 容器查 mysqldump（30 秒没反应），需要人工看：sudo docker top trading-mysql-1" ;;
@@ -769,8 +788,10 @@ backup_once() {
   if ! dump_complete "$tmp/mysql.sql"; then
     rm -rf "$tmp"; backup_fail "mysqldump 的导出不完整（缺 trading 或 quote 库，或没有结尾的 Dump completed）"; return 1
   fi
-  # Redis 只放限流计数和登录票据，丢了不影响数据：快照没做成只提醒，包里放上一次的快照（Redis 每 5 分钟自己存一次）
-  if ! timeout -k 5 60 "${COMPOSE[@]}" exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE | grep -q OK'; then
+  # Redis 只放限流计数和登录票据，丢了不影响数据：快照没做成只提醒，包里放上一次的快照（Redis 每 5 分钟自己存一次）。
+  # 标准输入必须是 /dev/null（T-7，11/18 第一次 trading off）：在终端里运行时，timeout 把命令放进自己的后台进程组，
+  # docker compose exec 默认转发标准输入，一读终端就收到 SIGTTIN 停住，60 秒后被杀；SAVE 本身不到 1 秒
+  if ! timeout -k 5 60 "${COMPOSE[@]}" exec -T redis sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli SAVE | grep -q OK' < /dev/null; then
     log "备份提醒：Redis 快照没做成，包里是 Redis 上一次自己存的快照" > /dev/null
     say "  ⚠ Redis 快照没做成，包里是上一次的快照（只有限流计数和登录票据，不影响数据）" >&2
   fi
@@ -839,7 +860,7 @@ cmd_restore_drill() {
   fi
   say "  起临时数据库并导入（约 1–3 分钟；最多等 $((DRILL_READY_TIMEOUT + DRILL_IMPORT_TIMEOUT)) 秒）"
   CLEAN_CONTAINERS+=(trading-restore-drill)
-  if ! cid=$(docker run -d --name trading-restore-drill --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes --memory "${DRILL_MEM_MB}m" --memory-swap "$((DRILL_MEM_MB + 128))m" mysql:8.4 --innodb-buffer-pool-size=32M --performance-schema=OFF --max-connections=5); then
+  if ! cid=$(docker run -d --name trading-restore-drill --network none -e MYSQL_ALLOW_EMPTY_PASSWORD=yes --memory "${DRILL_MEM_MB}m" --memory-swap "${DRILL_MEM_MB}m" mysql:8.4 --innodb-buffer-pool-size=32M --performance-schema=OFF --max-connections=5 --temptable-max-ram=32M); then
     drill_cleanup "$tmp" "$stopped"; bad "临时数据库没起来（docker run 失败）"; drill_result "失败：临时数据库没起来"; return 1
   fi
   # 官方镜像初始化时先起一个不监听端口的临时进程，等到正式进程（port: 3306）就绪再导入（日志先存进变量再找，避免管道提前关闭）
@@ -1069,6 +1090,7 @@ main() {
     set) cmd_set "$@" ;;
     set-key) cmd_set_key "$@" ;;
     status) need_root; cmd_status ;;
+    mem) need_root; cmd_mem ;;
     update) cmd_update ;;
     retry) cmd_retry ;;
     rollback) cmd_rollback "$@" ;;
