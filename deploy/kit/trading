@@ -121,7 +121,8 @@ log() { mkdir -p "$TR_DIR/logs"; printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ
 ok() { say "  ✓ $*"; }
 bad() { say "  ✗ $*"; }
 die() { say "✗ $*" >&2; exit 1; }
-need_root() { [ "$(id -u)" = 0 ] || die "请用 root 运行（sudo trading …）"; }
+# 开发机演练和 deploy/check.sh 的演练（TR_OFFLINE_TEST）用普通用户跑，不要求 root
+need_root() { [ -n "${TR_OFFLINE_TEST:-}" ] || [ "$(id -u)" = 0 ] || die "请用 root 运行（sudo trading …）"; }
 need_tty() { [ -t 0 ] && [ -t 1 ] || die "这个命令要输入或显示密钥，必须在终端里运行：阿里云控制台 → 这台服务器 → 远程连接（不是\"云助手 → 执行命令\"，那里没有终端，输出还会被保存）"; }
 
 # .env 读写。值从环境变量 TR_V 传给 awk（不出现在命令行参数里，ps 看不到）
@@ -625,11 +626,15 @@ cmd_status() {
 # 每个容器的内存（cgroup v2）：按容器进程号找 cgroup 目录（/proc/<pid>/cgroup 的 0:: 行），不依赖容器 ID 的长短和 cgroup 驱动；
 # 峰值从容器这次启动算起。anon = 程序自己的内存（到上限会被杀），file = 文件缓存（内核随时能回收）。只读
 # 24 小时内被内核按内存超限杀掉的容器（docker 的 oom 事件；容器被杀后自动重启会换新的 cgroup，memory.events 清零，所以另外看事件）。
-# 输出"quote-app 2 次、mysql 1 次"，没有就空。事件在 Docker 守护进程内存里，守护进程重启后就没了
+# 输出"quote-app 2 次、mysql 1 次"，没有就空。事件在 Docker 守护进程内存里，守护进程重启后就没了。
+# Docker 守护进程停了或卡住（退出码非 0、15 秒超时）时输出"未知"、返回 0：脚本开着 set -e、pipefail，
+# 不能因为查不到事件让 watch 在 Trading 全挂的时候连告警都发不出去（#19 审查 🔴）
 oom_24h() {
-  timeout 15 docker events --since 24h --until "$(date +%s)" --filter type=container --filter event=oom \
-    --filter label=com.docker.compose.project=trading --format '{{.Actor.Attributes.name}}' 2> /dev/null < /dev/null \
-    | sed 's/^trading-//; s/-[0-9]*$//' | sort | uniq -c | awk '{ printf "%s%s %d 次", (NR > 1 ? "、" : ""), $2, $1 }'
+  local ev
+  ev=$(timeout 15 docker events --since 24h --until "$(date +%s)" --filter type=container --filter event=oom \
+    --filter label=com.docker.compose.project=trading --format '{{.Actor.Attributes.name}}' 2> /dev/null < /dev/null) || { echo 未知; return 0; }
+  [ -n "$ev" ] || return 0
+  printf '%s\n' "$ev" | sed 's/^trading-//; s/-[0-9]*$//' | sort | uniq -c | awk '{ printf "%s%s %d 次", (NR > 1 ? "、" : ""), $2, $1 }'
 }
 
 cmd_mem() {
@@ -646,8 +651,8 @@ cmd_mem() {
     say "  $c（启动 $st UTC）：当前 $(m_ memory.current)  峰值 $(m_ memory.peak)  上限 $(m_ memory.max) | anon $(s_ anon)  file $(s_ file)  shmem $(s_ shmem)  slab $(s_ slab) | 交换 $(m_ memory.swap.current)"
     say "      这次启动以来：触到上限 $(e_ max) 次、内存不够 $(e_ oom) 次、被内核杀进程 $(e_ oom_kill) 次 | 自动重启共 $(docker inspect -f '{{.RestartCount}}' "$c" 2> /dev/null) 次"
   done
-  oom=$(oom_24h)
-  say "24 小时内被内核按内存超限杀掉：${oom:-没有}"
+  oom=$(oom_24h || echo 未知)
+  say "24 小时内被内核按内存超限杀掉：${oom:-没有}$([ "$oom" = 未知 ] && echo "（Docker 15 秒没回应，查不到）")"
   [ -n "$(compose ps -q --status running mysql 2> /dev/null)" ] || { say "MySQL 没在运行，不查连接数"; return 0; }
   say "MySQL 计数和参数（只读）："
   # 密码只在容器里由环境变量交给客户端，不出现在命令行和输出里；最多等 20 秒
@@ -947,9 +952,13 @@ cmd_watch() {
   exp_s=$(date -d "$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/trading/fullchain.pem 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)
   [ $((exp_s - now)) -lt $((14 * 86400)) ] && problems+=("证书 14 天内到期或读不到")
   local c restarts oom
-  oom=$(oom_24h)
+  oom=$(oom_24h || echo 未知)
   # 次数写进告警内容：再被杀一次内容就变，会再发一封；24 小时后没有新的就自动算恢复
-  [ -n "$oom" ] && problems+=("24 小时内容器内存超限被内核杀掉：$oom（看 sudo trading mem）")
+  if [ "$oom" = 未知 ]; then
+    problems+=("Docker 没回应，查不到容器有没有被内核按内存超限杀掉")
+  elif [ -n "$oom" ]; then
+    problems+=("24 小时内容器内存超限被内核杀掉：$oom（看 sudo trading mem）")
+  fi
   for c in trading-app quote-app trading-web mysql redis; do
     restarts=$(docker inspect --format '{{.RestartCount}}' "trading-$c-1" 2>/dev/null || echo 0)
     [ "${restarts:-0}" -ge 3 ] && problems+=("$c 反复重启（$restarts 次）")

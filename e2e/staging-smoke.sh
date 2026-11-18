@@ -11,6 +11,7 @@
 # 两边共用这台机器的 80、443，同一时间只有一家的 Nginx 能占着：TopUP 能正常回应，就说明 Trading 的 Nginx 没在跑，是轮换不是故障。
 # Trading 在跑却坏了（应用 502、应用挂了）时 TopUP 的域名连不上（Trading 的 Nginx 不认它，直接断开握手），不会跳过。
 # 没配 SMOKE_TOPUP_URL（仓库密钥 STAGING_TOPUP_URL）就从不跳过，和以前一样失败。
+# 跳过的提交在测试环境还没验过：sudo trading on 之后在 GitHub Actions 里重跑 staging-smoke，或者等下一次合并到 staging 时自动跑。
 set -uo pipefail
 BASE=${1:-}; WANT=${2:-}
 [ -n "$BASE" ] && [ -n "$WANT" ] || { echo "用法：bash e2e/staging-smoke.sh <客户端地址> <完整提交号或 ->"; exit 2; }
@@ -36,9 +37,9 @@ topup_mode() {
   [ "$status" = 200 ] && grep -q '"ok":' <<< "$body"
 }
 skip_topup() {
-  echo "::warning::测试服务器现在是 TopUP 模式（Trading 没在服务、TopUP 正常回应），跳过冒烟检查。Trading 切回来（sudo trading on）后会自动更新到最新版本，再手动重跑这个 job"
+  echo "::warning::测试服务器现在是 TopUP 模式（Trading 没在服务、TopUP 正常回应），跳过冒烟检查。这个提交在测试环境还没验过：Trading 切回来（sudo trading on，会自动更新到最新版本）后，在 GitHub Actions 里重跑这个 staging-smoke job；或者等下一次合并到 staging 时自动跑"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    echo "冒烟检查跳过：测试服务器在 TopUP 模式（不是 Trading 故障：TopUP 的健康检查正常、Trading 的健康检查拿不到 Trading 自己的回应）" >> "$GITHUB_STEP_SUMMARY"
+    echo "冒烟检查跳过：测试服务器在 TopUP 模式（不是 Trading 故障：TopUP 的健康检查正常、Trading 的健康检查拿不到 Trading 自己的回应）。sudo trading on 之后重跑这个 job，或者等下一次合并到 staging 时自动跑" >> "$GITHUB_STEP_SUMMARY"
   fi
   exit 0
 }

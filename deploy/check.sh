@@ -3,6 +3,7 @@
 #   1. shellcheck（服务器脚本）  2. docker compose config（用 .env.example 的变量名填一次性假值）
 #   3. 同版本 nginx 镜像里 nginx -t（四个假域名、临时自签证书）  4. compose 约束：每个容器 mem_limit = memswap_limit（都不用交换分区）、MySQL 内存参数、只有 web 映射公网端口、
 #      trading-app 只绑 127.0.0.1、quote-app 不映射端口、内存合计 964 MB、测试环境开发者文档能看、不让搜索引擎收录
+#   6. 用假的 docker（events 失败）跑 trading watch、mem：Docker 没回应时也要走完（不被 set -e 中途打断）、watch 照样走到发邮件
 #   5. 真的起一个 Nginx（报价服务用桩代替）按域名发请求：/docs/ 转到报价服务、/internal 不转、/robots.txt 和 X-Robots-Tag（测试环境验收 T-1、T-2）
 # 不需要任何密钥；假值只在临时目录里，跑完删掉。
 set -euo pipefail
@@ -120,4 +121,22 @@ if web -e FX_NGINX_NOINDEX=false; then
 else
   check "Nginx 能起来（FX_NGINX_NOINDEX=false）" false
 fi
+
+echo "== trading watch / mem：Docker 没回应时不中途退出（#19 审查 🔴）"
+# 假的 docker：events 按 FAKE_EVENTS_RC 失败（1 = 守护进程停了，124 = 超时）；compose ps 说 mysql 在跑、compose exec 回两行计数；其他一律失败
+mkdir -p "$tmp/fakebin" "$tmp/tr/state" "$tmp/tr/logs"
+cat > "$tmp/fakebin/docker" << 'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  events) exit "${FAKE_EVENTS_RC:-1}" ;;
+  compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac; exit 0 ;;
+  *) exit 1 ;;
+esac
+FAKE
+chmod +x "$tmp/fakebin/docker"; : > "$tmp/tr/.env"; : > "$tmp/tr/state/image.env"
+for rc in 1 124; do
+  rm -f "$tmp/tr/state/watch" "$tmp/tr/logs/trading.log"
+  check "watch（docker events 退出码 $rc）：照样走完、记下问题、走到发邮件" bash -c 'tr_out=$("$@" 2>&1) || { echo "$tr_out"; exit 1; }; grep -q "Docker 没回应" "$0/state/watch" && grep -q "trading-app 没响应或不健康" "$0/state/watch" && grep -q "Trading 告警" "$0/logs/trading.log"' "$tmp/tr" env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_EVENTS_RC="$rc" bash deploy/kit/trading watch
+  check "mem（docker events 退出码 $rc）：照样打出被杀记录\"未知\"和后面的 MySQL 计数" bash -c 'out=$("$@" 2>&1) || exit 1; grep -q "按内存超限杀掉：未知" <<< "$out" && grep -q "Uptime" <<< "$out"' _ env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_EVENTS_RC="$rc" bash deploy/kit/trading mem
+done
 exit $fail
