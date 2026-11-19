@@ -281,6 +281,20 @@ check_mysql_swap() {
   fi
 }
 
+# 第一次部署的标记 state/first-pending（cmd_update）：现在 image.env 记的版本已经健康运行（status=UP、version 是它）就删掉。
+# 第一次部署健康检查没过、之后经 on、retry 或应用自己变健康时，不删的话上线后重跑 install 会被当成首次部署（跳过更新前备份、不自动换回）。
+# watch、on、rollback 调用；参数是已经取到的健康检查返回（没有就现取）
+clear_first_pending() {
+  [ -f "$STATE/first-pending" ] || return 0
+  local body=${1:-} rev
+  [ -n "$body" ] || body=$(health)
+  rev=$(current_rev)
+  if [ -n "$rev" ] && [ "$(health_field status "$body")" = UP ] && [ "$(health_field version "$body")" = "$rev" ]; then
+    rm -f "$STATE/first-pending"; log "第一次部署的版本 $rev 已经健康运行，去掉首次部署标记" > /dev/null
+  fi
+  return 0
+}
+
 # 等新版本：trading-app 健康检查 status=UP、version=提交号，quote-app 健康（最多 3 分钟；TR_HEALTH_WAIT_S，演练和 deploy/check.sh 用）
 wait_healthy() {
   local want=$1 body _
@@ -1090,7 +1104,7 @@ cmd_rollback() {
   log "手动回滚：$cur → $target（数据库不回退；要回退数据由运维分步指导用备份恢复）"
   pull "$REG/trading-app:$TRACK" && revision "$REG/trading-app:$TRACK" > "$STATE/paused"
   switch_to "$(img_tag "$target")" > /dev/null 2>&1 || true
-  if wait_healthy "$target"; then echo "$cur" > "$STATE/previous"; log "回滚成功：$target"; else log "回滚后 $target 没有通过健康检查，需要人工处理"; exit 1; fi
+  if wait_healthy "$target"; then echo "$cur" > "$STATE/previous"; clear_first_pending; log "回滚成功：$target"; else log "回滚后 $target 没有通过健康检查，需要人工处理"; exit 1; fi
 }
 
 # mysqldump 的导出是否完整：两个库都在（--databases 会写 USE `库名`;）、最后一行是 "-- Dump completed"（mysqldump 出错中断时没有这一行）
@@ -1535,6 +1549,7 @@ cmd_watch() {
   fi
   local body avail disk free last exp_s now prev_run
   body=$(health)
+  clear_first_pending "$body"
   [ "$(health_field status "$body")" = UP ] || problems+=("trading-app 没响应或不健康")
   quote_healthy || problems+=("quote-app 不健康")
   [ -s "$STATE/skip" ] && problems+=("有版本被跳过：$(cut -c1-12 "$STATE/skip")")
@@ -1679,7 +1694,7 @@ cmd_on() {
   stop_topup_and_check_mem || exit 1
   guard_env
   compose up -d > /dev/null 2>&1
-  if wait_healthy "$(current_rev)"; then ok "Trading 已启动，健康检查通过"; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
+  if wait_healthy "$(current_rev)"; then ok "Trading 已启动，健康检查通过"; clear_first_pending; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
   # 停过（trading off、内存守护）再启动：检查的间隔从这次重新算，第一次检查不报"可能休眠"（审查 #27 🟡）
   rm -f "$STATE/watch-last-run"
   sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开（含内存守护）"

@@ -138,7 +138,9 @@ case "$1" in
   events) exit "${FAKE_EVENTS_RC:-1}" ;;
   compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac; exit 0 ;;
   # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
-  ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; esac; exit 0 ;;
+  ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; *project=trading*) [ -z "${FAKE_TRADING_RUNNING:-}" ] || echo fake-trading-id ;; esac; exit 0 ;;
+  # 报价服务容器的健康状态（wait_healthy 用）：FAKE_QUOTE_HEALTHY=1 时 healthy
+  inspect) [ -n "${FAKE_QUOTE_HEALTHY:-}" ] && echo healthy; exit 0 ;;
   rm) exit 0 ;;
   # Trading 的 Docker 网络的子网（真实 IP 重叠检查用）：FAKE_SUBNETS
   network) echo "${FAKE_SUBNETS:-}"; exit 0 ;;
@@ -286,4 +288,34 @@ check "重跑安装（TR_FIRST）、这台已经部署成功过：不清 paused�
 check "重跑安装（TR_FIRST）、第一次部署没起来（first-pending）：不跳过上次失败的版本、不做更新前备份" bash -c 'prod_env; echo IMAGE_TAG=prod-$(printf "c%.0s" {1..40}) > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; printf "c%.0s" {1..40} > "$tmp/tr/state/skip"; o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 无" <<< "$o" && ! grep -q "没有备份加密密钥" <<< "$o" && [ ! -e "$tmp/tr/state/skip" ]'
 check "生产：TR_REAL_IP_FROM 和 Trading 实际的 Docker 子网（docker network inspect）重叠也拒绝，不重叠照常" bash -c 'prod_env; ! tr_run FAKE_SUBNETS="10.99.0.0/16 192.168.5.0/24" bash deploy/kit/trading set TR_REAL_IP_FROM 10.99.3.0/24 > /dev/null && ! grep -q "^TR_REAL_IP_FROM=" "$tmp/tr/.env" && tr_run FAKE_SUBNETS="10.99.0.0/16" bash deploy/kit/trading set TR_REAL_IP_FROM 10.98.0.0/16 > /dev/null && grep -q "^TR_REAL_IP_FROM=10.98.0.0/16$" "$tmp/tr/.env"'
 check "生产：两次检查隔了 15 分钟以上报\"可能休眠\"；trading on（停过再启动）之后第一次检查不误报" bash -c 'prod_env; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; grep -q "休眠" "$tmp/tr/state/watch" || exit 1; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; tr_run TR_MIN_MEM_MB=1 bash deploy/kit/trading on > /dev/null; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; ! grep -q "休眠" "$tmp/tr/state/watch"'
+# 首次部署标记（state/first-pending）：版本健康运行后由 watch、on、rollback 删掉。健康检查用一个本机小服务假扮（127.0.0.1:18080 回 status、version）
+fp_health() { # fp_health <version>：起假的健康检查，打印进程号
+  python3 -c 'import http.server,sys
+v=sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+  def do_GET(s):
+    b=("{\"status\":\"UP\",\"version\":\"%s\"}" % v).encode(); s.send_response(200); s.end_headers(); s.wfile.write(b)
+  def log_message(s,*a): pass
+http.server.HTTPServer(("127.0.0.1",18080),H).serve_forever()' "$1" > /dev/null 2>&1 &
+  echo $!
+}
+export -f fp_health
+fp_case() { # fp_case <watch|on|rollback> <健康检查报的版本> → 标记还在输出"在"，删了输出"无"
+  local a b pid
+  a=$(printf "a%.0s" {1..40}); b=$(printf "b%.0s" {1..40})
+  prod_env ""; echo "IMAGE_TAG=prod-$a" > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; echo "$b" > "$tmp/tr/state/previous"
+  pid=$(fp_health "$2"); sleep 0.5
+  case "$1" in
+    watch) tr_run bash deploy/kit/trading watch > /dev/null ;;
+    on) tr_run TR_MIN_MEM_MB=1 FAKE_TRADING_RUNNING=1 FAKE_QUOTE_HEALTHY=1 bash deploy/kit/trading on > /dev/null ;;
+    rollback) tr_run FAKE_QUOTE_HEALTHY=1 bash deploy/kit/trading rollback > /dev/null ;;
+  esac
+  kill "$pid" 2> /dev/null; wait "$pid" 2> /dev/null
+  if [ -f "$tmp/tr/state/first-pending" ]; then echo 在; else echo 无; fi
+}
+export -f fp_case
+check "首次部署标记：watch 看到当前版本健康运行就删" bash -c '[ "$(fp_case watch "$(printf "a%.0s" {1..40})")" = 无 ]'
+check "首次部署标记：watch 看到的版本不是 image.env 当前版本，不删" bash -c '[ "$(fp_case watch "$(printf "c%.0s" {1..40})")" = 在 ]'
+check "首次部署标记：on 启动后当前版本健康就删" bash -c '[ "$(fp_case on "$(printf "a%.0s" {1..40})")" = 无 ]'
+check "首次部署标记：rollback 回到上一个版本、健康就删" bash -c '[ "$(fp_case rollback "$(printf "b%.0s" {1..40})")" = 无 ]'
 exit $fail
