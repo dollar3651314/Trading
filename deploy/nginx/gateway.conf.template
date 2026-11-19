@@ -1,0 +1,206 @@
+# 生产站点：平台网关模式（生产方案 v1 02 页，07 页 R-2）。测试环境照旧用 site.conf.template（域名 + 证书），这个文件只给生产。
+# 生产的 docker-compose.production.yml 设 NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-gateway，容器启动时用环境变量替换后放进 conf.d/。
+#
+# 虚拟机没有公网 IP：访客 → InstaBox 平台网关（HTTPS、HTTP/2 在网关做）→ 普通 HTTP 转到这台机器的端口。所以这里：
+#   - 不听 80、443，不要证书、不装 certbot；每个端口一个 server，按端口分站点（网关转过来的 Host 是什么没有实测，不按 server_name 分）：
+#       8082 客户端、8083 后台、8084 官网、8085 报价对外（先不在平台上发布；compose 默认只绑 127.0.0.1）
+#   - 转给应用的 Host 固定成该端口的平台主机名（.env 的 APP_DOMAIN 等，trading install 时填），X-Forwarded-Proto 固定 https（proxy.inc 的 $tr_host、$tr_proto）：
+#     应用的同源检查（CrossSiteGuard）、Secure Cookie 都按 https 和这个主机名
+#   - HSTS 1 年，不加 includeSubDomains、不申请 preload（instabox.tech 不是我们的域名）
+#   - 搜索引擎：只有官网 8084 看 FX_NGINX_NOINDEX（生产 false = 可以收录），客户端、后台、报价写死不收录
+#   - 真实 IP（照 TopUP 的 realip.conf）：默认关。.env 的 TR_REAL_IP_FROM（网关地址段）+ TR_REAL_IP_HEADER（X-Forwarded-For 或 X-Real-IP）两项都填了才开，
+#     由容器启动脚本 /docker-entrypoint.d/19-trading-gateway.envsh 生成 /etc/nginx/trading/realip.conf。关的时候所有访客在应用看来是同一个地址，
+#     按 IP 的限流就是全站的额度，所以启动脚本把下面的限流阈值放宽成"只防整站被打满"
+#   - 访问日志记网关的地址和访客带来的 X-Forwarded-For、X-Real-IP 两个头（首次部署实测网关用哪个头带访客 IP：sudo docker logs trading-trading-web-1）
+# 各端口转发什么、其余 404 和测试环境一样（site.conf.template 开头），路径里有分号一律 400。
+
+include /etc/nginx/trading/realip.conf;
+
+# 跳转（/docs → /docs/、后台 / → /admin/）只写路径：Nginx 自己拼的完整地址会是 http://…:端口，访客那边是网关的 https 地址
+absolute_redirect off;
+
+log_format tr_gw '$realip_remote_addr client=$remote_addr xff="$http_x_forwarded_for" xri="$http_x_real_ip" [$time_local] $server_port "$host" "$request" '
+                 '$status $body_bytes_sent $request_time "$http_user_agent" $request_id';
+
+# 搜索引擎收录：只有官网（8084）看 FX_NGINX_NOINDEX（只有 false 才收录），其他端口一律不收录
+map "${FX_NGINX_NOINDEX}" $tr_site_robots_tag {
+  default "noindex, nofollow";
+  "false" "";
+}
+map $server_port $tr_robots_tag {
+  default "noindex, nofollow";
+  8084 $tr_site_robots_tag;
+}
+# 网关已经做了 TLS：告诉应用"原来是 https"（proxy.inc）；HSTS 1 年（security.inc）
+map $server_port $tr_proto {
+  default https;
+}
+map $server_port $tr_hsts {
+  default "max-age=31536000";
+}
+
+limit_req_zone $binary_remote_addr zone=tr_api:10m rate=${FX_NGINX_API_RATE};
+limit_req_zone $binary_remote_addr zone=tr_ws:10m rate=${FX_NGINX_WS_RATE};
+limit_req_zone $binary_remote_addr zone=tr_quote:10m rate=${FX_NGINX_QUOTE_RATE};
+limit_conn_zone $binary_remote_addr zone=tr_api_conn:10m;
+limit_conn_zone $binary_remote_addr zone=tr_ws_conn:10m;
+limit_conn_zone $binary_remote_addr zone=tr_quote_conn:10m;
+limit_req_status 429;
+limit_conn_status 429;
+limit_req_log_level warn;
+limit_conn_log_level warn;
+
+# 8082 客户端：前端；/api/**、/api/ws/ → trading-app。/api/admin/**、/api/e2e/**、/actuator 一律 404
+server {
+  listen 8082 default_server;
+  server_name _;
+  set $tr_host "${APP_DOMAIN}";
+  access_log /var/log/nginx/access.log tr_gw;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
+
+  root /usr/share/nginx/client;
+
+  if ($request_uri ~ ";") { return 400; }
+  location ~* "^/api/(admin|e2e)(/|$)" { return 404; }
+  location ~* "^/(api/)?actuator" { return 404; }
+
+  location /api/ws/ {
+    limit_req zone=tr_ws burst=${FX_NGINX_WS_BURST} nodelay;
+    limit_conn tr_ws_conn ${FX_NGINX_WS_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 1h;
+  }
+  location /api/ {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 120s;
+  }
+
+  location ~ ^/assets/[^/]+\.[A-Za-z0-9]+$ {
+    expires 30d;
+    try_files $uri =404;
+  }
+  location ~ ^/(index\.html|sw\.js|push-sw\.js|registerSW\.js|manifest\.webmanifest)$ {
+    expires -1;
+  }
+  location / {
+    expires -1;
+    try_files $uri /index.html;
+  }
+}
+
+# 8083 后台：/admin/；/api/admin/**、/api/health → trading-app（只有这里的健康检查带业务告警）。其他 /api/** 404
+server {
+  listen 8083 default_server;
+  server_name _;
+  set $tr_host "${ADMIN_DOMAIN}";
+  access_log /var/log/nginx/access.log tr_gw;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
+
+  root /usr/share/nginx;
+
+  if ($request_uri ~ ";") { return 400; }
+  location = / {
+    return 302 /admin/;
+  }
+  location /api/admin/ {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 120s;
+  }
+  location = /api/health {
+    include /etc/nginx/snippets/proxy.inc;
+    set $fx_health_alerts 1;
+  }
+  location /api/ { return 404; }
+  location /admin/assets/ {
+    expires 30d;
+  }
+  location /admin/ {
+    expires -1;
+    try_files $uri $uri/ /admin/index.html;
+  }
+  location / {
+    return 404;
+  }
+}
+
+# 8084 官网：静态页面 + /api/public/quotes、/api/health。页面里的客户端地址占位符换成 8082 的平台地址
+server {
+  listen 8084 default_server;
+  server_name _;
+  set $tr_host "${WWW_DOMAIN}";
+  access_log /var/log/nginx/access.log tr_gw;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
+
+  root /usr/share/nginx/site;
+
+  if ($request_uri ~ ";") { return 400; }
+  location = /api/public/quotes {
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
+  }
+  location = /api/health {
+    include /etc/nginx/snippets/proxy.inc;
+  }
+  location /api/ { return 404; }
+  location ~* "^/actuator" { return 404; }
+
+  location ~ ^/assets/[^/]+\.[A-Za-z0-9]+$ {
+    expires 30d;
+    try_files $uri =404;
+  }
+  location / {
+    expires -1;
+    sub_filter_once on;
+    sub_filter '__TR_CLIENT_URL__' 'https://${APP_DOMAIN}';
+    try_files $uri /index.html;
+  }
+}
+
+# 8085 报价对外：只转 /v1/**、/docs/ 到报价服务；/internal/** 和其他一切 404。先不在平台上发布（对外开放总开关关、没有转售授权）
+server {
+  listen 8085 default_server;
+  server_name _;
+  set $tr_host "${QUOTE_DOMAIN}";
+  access_log /var/log/nginx/access.log tr_gw;
+  include /etc/nginx/snippets/security.inc;
+  include /etc/nginx/snippets/rate-limited.inc;
+  include /etc/nginx/snippets/robots.inc;
+
+  if ($request_uri ~ ";") { return 400; }
+  location ~* "^/+(%2f)*internal" { return 404; }
+
+  location = /v1/ws {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    limit_conn tr_quote_conn ${FX_NGINX_QUOTE_CONN};
+    include /etc/nginx/snippets/proxy-quote.inc;
+    proxy_read_timeout 1h;
+  }
+  location /v1/ {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    limit_conn tr_quote_conn ${FX_NGINX_QUOTE_CONN};
+    include /etc/nginx/snippets/proxy-quote.inc;
+    proxy_read_timeout 30s;
+  }
+  location = /docs {
+    return 301 /docs/;
+  }
+  location = /docs/ {
+    limit_req zone=tr_quote burst=${FX_NGINX_QUOTE_BURST} nodelay;
+    include /etc/nginx/snippets/proxy-quote.inc;
+  }
+  location / {
+    return 404;
+  }
+}

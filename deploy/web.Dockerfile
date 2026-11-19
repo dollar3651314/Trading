@@ -2,7 +2,7 @@
 # 先构建三个前端（真实接口模式，不设 VITE_API_MODE），再在仓库根目录构建：
 #   npm ci --prefix web/client && npm run build --prefix web/client   （admin、site 同样）
 #   docker build -f deploy/web.Dockerfile --build-arg FX_VERSION=<完整提交号> -t trading-web:<提交号> .
-# 四个子域名（客户端、后台、官网、报价对外）在容器启动时由 .env 替换进 Nginx 配置；官网里的客户端地址占位符 __TR_CLIENT_URL__ 由 Nginx 换成 https://${APP_DOMAIN}。
+# 四个子域名（客户端、后台、官网、报价对外；生产是四个端口的平台主机名）在容器启动时由 .env 替换进 Nginx 配置；官网里的客户端地址占位符 __TR_CLIENT_URL__ 由 Nginx 换成 https://${APP_DOMAIN}。
 # /trading-kit 是服务器端工具包（deploy/kit），服务器每次更新时从这里同步到 /opt/trading（trading update）。
 FROM nginx:1.27-bookworm
 ARG FX_VERSION=dev
@@ -23,6 +23,10 @@ ENV FX_NGINX_NOINDEX=true
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/nginx/site.conf.template /etc/nginx/templates/site.conf.template
+# 生产平台网关模式（生产方案 v1 07 页 R-2）：模板在另一个目录，生产 compose 设 NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-gateway 才用它；
+# 启动脚本只在 TR_NGINX_MODE=gateway 时生成真实 IP 设置、放宽限流（测试环境什么都不做）
+COPY deploy/nginx/gateway.conf.template /etc/nginx/templates-gateway/gateway.conf.template
+COPY --chmod=755 deploy/nginx/trading-gateway.envsh /docker-entrypoint.d/19-trading-gateway.envsh
 COPY deploy/nginx/proxy.inc deploy/nginx/proxy-quote.inc deploy/nginx/security.inc deploy/nginx/rate-limited.inc deploy/nginx/robots.inc /etc/nginx/snippets/
 COPY web/client/dist /usr/share/nginx/client
 COPY web/admin/dist /usr/share/nginx/admin

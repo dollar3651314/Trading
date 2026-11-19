@@ -26,6 +26,17 @@ map $host $tr_robots_tag {
   "${WWW_DOMAIN}" $tr_site_robots_tag;
 }
 
+# 转给应用的 Host、X-Forwarded-Proto（proxy.inc）和 HSTS（security.inc）：测试环境按请求原样、HSTS 1 天（生产平台网关模式见 gateway.conf.template）
+map $host $tr_host {
+  default $host;
+}
+map $scheme $tr_proto {
+  default $scheme;
+}
+map $host $tr_hsts {
+  default "max-age=86400";
+}
+
 limit_req_zone $binary_remote_addr zone=tr_api:10m rate=${FX_NGINX_API_RATE};
 limit_req_zone $binary_remote_addr zone=tr_ws:10m rate=${FX_NGINX_WS_RATE};
 limit_req_zone $binary_remote_addr zone=tr_quote:10m rate=${FX_NGINX_QUOTE_RATE};

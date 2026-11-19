@@ -3,10 +3,11 @@
 set $tr_app http://trading-app:8080;
 proxy_pass $tr_app;
 proxy_http_version 1.1;
-proxy_set_header Host $host;
+# Host、X-Forwarded-Proto：测试环境（site.conf.template）= $host、$scheme；生产平台网关模式（gateway.conf.template）固定成该端口的平台主机名和 https
+proxy_set_header Host $tr_host;
 proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Proto $tr_proto;
 proxy_set_header X-Forwarded-Host "";
 # 追踪号：每个请求 Nginx 生成一个 $request_id，覆盖客户端自己带的 X-Request-Id
 proxy_set_header X-Request-Id $request_id;
