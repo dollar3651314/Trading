@@ -5,7 +5,6 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { fetchPublicQuotes } from '../api/quotes';
-import { DEFAULT_SYMBOLS } from '../config';
 import { initialRows, nextRows, POLL_MS, unavailableRows, UNAVAILABLE_AFTER_MS, type Row } from '../lib/quotes';
 
 export interface QuotesState {
@@ -14,10 +13,12 @@ export interface QuotesState {
   sample: boolean;
   /** 第 3 批：生产不显示价格，只列品种名和"登录后查看实时行情" */
   pricesHidden: boolean;
+  /** 第一次取到行情之前为 true：不先摆一份写死的品种占位（生产只开加密货币，写死外汇、黄金会一闪而过，生产方案 v1 07 页 R-1），显示"加载中" */
+  loading: boolean;
 }
 
 export function useQuotes(): QuotesState {
-  const [state, setState] = useState<QuotesState>(() => ({ rows: initialRows(DEFAULT_SYMBOLS), sample: false, pricesHidden: false }));
+  const [state, setState] = useState<QuotesState>(() => ({ rows: initialRows([]), sample: false, pricesHidden: false, loading: true }));
   const lastOk = useRef(Date.now());
 
   useEffect(() => {
@@ -33,9 +34,9 @@ export function useQuotes(): QuotesState {
         const data = await fetchPublicQuotes();
         if (stopped) return;
         lastOk.current = Date.now();
-        setState((s) => ({ rows: nextRows(s.rows, data), sample: data.sample, pricesHidden: data.pricesHidden === true }));
+        setState((s) => ({ rows: nextRows(s.rows, data), sample: data.sample, pricesHidden: data.pricesHidden === true, loading: false }));
       } catch {
-        if (!stopped && Date.now() - lastOk.current >= UNAVAILABLE_AFTER_MS) setState((s) => ({ ...s, rows: unavailableRows(s.rows) }));
+        if (!stopped && Date.now() - lastOk.current >= UNAVAILABLE_AFTER_MS) setState((s) => ({ ...s, rows: unavailableRows(s.rows), loading: false }));
       } finally {
         inFlight = false;
         if (!stopped) schedule();

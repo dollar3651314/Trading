@@ -16,11 +16,15 @@ describe('法律页样板（AC2-08、F2-6）', () => {
     expect(CJK.test(text(LEGAL[p].en))).toBe(false);
   });
 
-  it.each(LEGAL_PAGES)('%s：不写牌照、监管、公司主体，这些位置写"待提供"', (p) => {
+  // Amos 11/19「公司信息、联系邮箱、牌照等 都不写」（生产方案 v1 07 页 R-6）：连"待提供"的占位和联系邮箱也不出现
+  it.each(LEGAL_PAGES)('%s：不写牌照、监管、公司主体、联系邮箱，也没有"待提供"的占位', (p) => {
     const zh = text(LEGAL[p]['zh-CN']);
     const en = text(LEGAL[p].en);
-    expect(zh).toContain('待提供');
-    expect(en).toMatch(/to be provided|to be determined/);
+    expect(zh).not.toContain('待提供');
+    expect(en).not.toMatch(/to be provided/i);
+    expect(zh + en).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.]+/);
+    expect(zh).not.toMatch(/运营主体|牌照|监管与/);
+    expect(en).not.toMatch(/operating entity|licen[cs]e/i);
     expect(zh).not.toMatch(/监管机构|持有.{0,6}牌照|牌照号|有限公司/);
     expect(en).not.toMatch(/regulated by|licensed by|licen[cs]e number/i);
     expect(en).not.toMatch(/ Ltd\b| Limited\b| Inc\./);

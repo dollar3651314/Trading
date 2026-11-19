@@ -84,9 +84,12 @@ function HiddenRow({ row }: { row: Row }) {
 
 export function QuoteBoard({ desktop }: { desktop: boolean }) {
   const { t, lang } = useI18n();
-  const { rows, sample, pricesHidden } = useQuotes();
+  const { rows, sample, pricesHidden, loading } = useQuotes();
   const [cat, setCat] = useState<Category>('hot');
-  const shown = cat === 'hot' ? rows : rows.filter((r) => SYMBOL_META[r.symbol]?.category === cat);
+  // 只显示有品种的分类标签（生产只开加密货币时只有"热门"和"加密货币"，生产方案 v1 07 页 R-1）；选中的分类没有品种了就回到"热门"
+  const tabs = CATEGORIES.filter((c) => c === 'hot' || rows.some((r) => SYMBOL_META[r.symbol]?.category === c));
+  const current: Category = tabs.includes(cat) ? cat : 'hot';
+  const shown = current === 'hot' ? rows : rows.filter((r) => SYMBOL_META[r.symbol]?.category === current);
   return (
     <div className="card board" data-testid="quote-board">
       <div className="board-head">
@@ -101,8 +104,8 @@ export function QuoteBoard({ desktop }: { desktop: boolean }) {
         )}
       </div>
       <div className="tabs" role="tablist" aria-label={t('board.tabsLabel')}>
-        {CATEGORIES.map((c) => (
-          <button key={c} type="button" role="tab" aria-selected={cat === c} onClick={() => setCat(c)}>
+        {tabs.map((c) => (
+          <button key={c} type="button" role="tab" aria-selected={current === c} onClick={() => setCat(c)}>
             {t(`cat.${c}`)}
           </button>
         ))}
@@ -116,7 +119,9 @@ export function QuoteBoard({ desktop }: { desktop: boolean }) {
         </div>
       )}
       <div role="tabpanel">
-        {shown.length === 0 ? (
+        {loading && rows.length === 0 ? (
+          <div className="q-empty" data-testid="board-loading">{t('board.loading')}</div>
+        ) : shown.length === 0 ? (
           <div className="q-empty">{t('board.empty')}</div>
         ) : pricesHidden ? (
           shown.map((r) => <HiddenRow key={r.symbol} row={r} />)

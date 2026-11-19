@@ -7,7 +7,7 @@
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Quote, SymbolInfo } from '../api/types';
-import { CATEGORIES, useChange, useSymbolFilter, type Category, type SymbolFilter } from '../hooks/useSymbolFilter';
+import { useChange, useSymbolFilter, type Category, type SymbolFilter } from '../hooks/useSymbolFilter';
 import { quoteDirection, useQuotes } from '../hooks/useQuotes';
 import { formatPercent, formatPrice } from '../lib/format';
 import { symbolName } from '../lib/symbol';
@@ -40,7 +40,7 @@ export function CatTabs({ f, pills }: { f: SymbolFilter; pills?: boolean }) {
   const { t } = useTranslation();
   return (
     <div className={`cats${pills ? ' pills' : ''}`} role="tablist" aria-label={t('market.categories')}>
-      {CATEGORIES.map((c) => (
+      {f.cats.map((c) => (
         <button key={c} type="button" role="tab" aria-selected={f.cat === c} className={f.cat === c ? 'on' : ''} onClick={() => f.setCat(c)}>
           {c === 'fav' && <Icon name="star" size={13} strokeWidth={2.2} />}
           {c === 'fav' ? t('market.favorites') : t(`market.cat.${c}`)}

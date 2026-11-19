@@ -337,6 +337,7 @@
     "minutes": "{{count}} min",
     "name": "Setting",
     "newValue": "New value",
+    "paymentBalanceHint": "An alert email is sent when Trading's available USDT balance at the wallet provider (TopUP) falls below this value (not repeated within 30 minutes), and another when it recovers; 0 = no alert.",
     "sub": "Only settings that are actually in effect",
     "title": "System config",
     "updatedAt": "Updated",
@@ -347,6 +348,7 @@
     "deposit": "Deposits",
     "hotWallet": "Hot wallet balance alerts",
     "notify": "Notifications",
+    "payment": "Wallet provider balance alert",
     "security": "Security",
     "withdraw": "Withdrawals"
   },
@@ -366,6 +368,7 @@
     "login_lockMinutes": "Lock duration",
     "login_lockThreshold": "Failed sign-ins before lock",
     "notify_marginCallThrottleMinutes": "Margin call throttle",
+    "payment_balance_minUsdt": "Wallet provider available balance alert threshold (USDT)",
     "whitelist_effectiveHours": "Whitelist waiting period",
     "whitelist_maxAddresses": "Max whitelist addresses",
     "withdraw_coolingHours": "Cooling-off period",

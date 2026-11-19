@@ -331,4 +331,50 @@ class PaymentDepositFlowTest extends PaymentTestSupport {
       assertThat(b.checkedAt()).isNotNull();
     });
   }
+
+  /** 生产方案 v1 07 页 R-5：后台"系统配置"的钱包提供方可用余额告警下限（payment.balance.minUsdt，0 = 不告警），代替以前写死的 0 */
+  @Test
+  void 余额告警_低于后台设的下限出现告警项_恢复后正常_0或查不到余额时不检查_R5() throws Exception {
+    var config = ctx.getBean(app.trading.common.config.SystemConfig.class);
+    var hot = ctx.getBean(PaymentHotWallet.class);
+    String key = app.trading.common.config.ConfigKey.PAYMENT_BALANCE_MIN_USDT.key;
+    assertThat(jdbc.queryForObject("SELECT value FROM common_config WHERE config_key = ?", String.class, key)).as("迁移 V34 的初始值 0 = 不告警").isEqualTo("0");
+    try {
+      FAKE.available = new BigDecimal("4999.99");
+      payments.check();
+      config.refresh();
+      assertThat(hot.evaluate()).as("下限 0：不检查").isEmpty();
+      assertThat(hot.hotBalances()).singleElement().satisfies(b -> {
+        assertThat(b.threshold()).isEqualByComparingTo("0");
+        assertThat(b.low()).isFalse();
+      });
+
+      jdbc.update("UPDATE common_config SET value = '5000' WHERE config_key = ?", key);
+      config.refresh();
+      assertThat(hot.evaluate()).singleElement().satisfies(i -> {
+        assertThat(i.name()).isEqualTo("wallet.balance");
+        assertThat(i.ok()).as("4,999.99 < 5,000").isFalse();
+        assertThat(i.detail()).contains("4999.99").contains("5000");
+      });
+      assertThat(hot.hotBalances()).singleElement().satisfies(b -> {
+        assertThat(b.threshold()).isEqualByComparingTo("5000");
+        assertThat(b.low()).isTrue();
+      });
+      // 健康检查（后台域名、服务器本机）的 alerts 里也有，trading status 看得到
+      assertThat(mvc.perform(get("/api/health").header("X-Fx-Health-Alerts", "1")).andReturn().getResponse().getContentAsString())
+          .contains("\"wallet.balance\":\"DOWN\"");
+
+      FAKE.available = new BigDecimal("5000");
+      payments.check();
+      assertThat(hot.evaluate()).singleElement().satisfies(i -> assertThat(i.ok()).as("等于下限算正常").isTrue());
+      assertThat(hot.hotBalances()).singleElement().satisfies(b -> assertThat(b.low()).isFalse());
+
+      jdbc.update("UPDATE common_config SET value = 'abc' WHERE config_key = ?", key);
+      config.refresh();
+      assertThat(hot.evaluate()).as("值读不出来按 0（不告警）").isEmpty();
+    } finally {
+      jdbc.update("UPDATE common_config SET value = '0' WHERE config_key = ?", key);
+      config.refresh();
+    }
+  }
 }

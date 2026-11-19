@@ -744,6 +744,8 @@ export const systemConfigs: SystemConfig[] = [
   { key: 'adjust.singleLimit', value: '5000', unit: 'usdt', group: 'adjust', updatedAt: '2026-10-01 10:00:00' },
   { key: 'adjust.dailyLimit', value: '20000', unit: 'usdt', group: 'adjust', updatedAt: '2026-10-01 10:00:00' },
   { key: 'notify.marginCallThrottleMinutes', value: '30', unit: 'minutes', group: 'notify', updatedAt: '2026-10-01 10:00:00' },
+  // 钱包提供方可用余额告警下限（迁移 V34，生产方案 v1 07 页 R-5）：0 = 不告警；生产初始 5,000
+  { key: 'payment.balance.minUsdt', value: '0', unit: 'usdt', group: 'payment', updatedAt: null },
   // 热钱包余额告警下限（迁移 V25）：默认 0 = 不告警（负责人 2026-10-17）
   { key: hotWalletMinKey('ERC20', false), value: '0', unit: 'usdt', group: 'hotWallet', updatedAt: null },
   { key: hotWalletMinKey('BSC', false), value: '0', unit: 'usdt', group: 'hotWallet', updatedAt: null },

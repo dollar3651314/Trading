@@ -110,8 +110,7 @@
     "s3t": "Cooling-off period and manual review",
     "s3d": "Every withdrawal starts with a cooling-off period (you can cancel during it) and is then reviewed by a person; large withdrawals are also held for a while after approval.",
     "s4t": "Identity verification",
-    "s4d": "Withdrawals require identity verification (KYC), so a stolen login alone cannot move your funds out.",
-    "license": "Regulatory and licence information: to be provided"
+    "s4d": "Withdrawals require identity verification (KYC), so a stolen login alone cannot move your funds out."
   },
   "faq": {
     "title": "FAQ",
@@ -138,8 +137,6 @@
     "terms": "Terms of Service",
     "privacy": "Privacy Policy",
     "risk": "Risk Disclosure",
-    "contact": "Contact us: {email}",
-    "company": "Company information: to be provided",
     "copyright": "© Trading"
   },
   "legal": {

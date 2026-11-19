@@ -105,6 +105,23 @@ public class SystemConfig {
   }
 
   /**
+   * 系统自己写一项配置（没有管理员，updated_by 为空；生产初始化 admin.ops.ProductionInit 用）。值已经由调用方校验过；返回原来的值
+   */
+  @Transactional
+  public String setBySystem(ConfigKey k, String value, LocalDateTime now) {
+    ConfigMapper.Row old = mapper.lock(k.key);
+    mapper.upsert(k.key, value, null, now);
+    loadedAt = Long.MIN_VALUE;
+    return old == null ? null : old.value;
+  }
+
+  /** 库里有没有这一项（不走缓存；只做一次的初始化标记用） */
+  @Transactional(readOnly = true)
+  public boolean exists(ConfigKey k) {
+    return mapper.all().stream().anyMatch(r -> r.configKey.equals(k.key));
+  }
+
+  /**
    * 带版本号的一组配置一次保存（提现自动审批规则）：锁住版本号这一行，版本不是 {@code expectedVersion} 时抛 {@code CONFIG_CHANGED}（防止两个人同时改、互相覆盖）；
    * 只写值有变化的键，有变化时版本号 +1。值已经由调用方校验过。
    *

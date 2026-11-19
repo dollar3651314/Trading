@@ -2,7 +2,8 @@
  * 服务条款、隐私政策、风险披露的样板正文（v2 需求 4.3、第 10 节 F2-6）。
  * - PM 参照同类平台这类文件的通常结构，为 Trading 原创撰写，没有照抄任何竞品原文；页面顶部标"需法务审核"。
  * - 只写系统真实做到的（USDT 充提、三条链、最小充值、KYC、白名单、冷静期、人工审核、逐仓、强平、通知渠道、不用第三方统计）；
- *   不写牌照、监管、公司主体，这些位置写"待提供"。
+ *   不写牌照、监管、公司主体、联系邮箱（Amos 11/19「公司信息、联系邮箱、牌照等 都不写」，生产方案 v1 07 页 R-6）：原来写"待提供"的句子、
+ *   只有邮箱一句的"联系我们"整节都删掉了，只删不补；要补什么文案由产品定。
  * - 中英文的章节数必须一致，英文里不能有中文（legal.test.ts 检查）。数字（2 小时、24 小时、3,000 USDT 等）和
  *   《v1-需求说明书》4.4 一致，后台改了参数时要同步改这里。
  */
@@ -27,7 +28,6 @@ const termsZh: LegalDoc = {
   title: '服务条款',
   intro: [
     '本服务条款（以下简称"本条款"）适用于你对 Trading 网站、客户端及相关服务（以下统称"本服务"）的使用。注册账户或使用本服务，即表示你已阅读、理解并同意本条款；如果不同意，请不要注册或使用本服务。',
-    '本服务的运营主体、注册地、适用法律和争议解决方式：待提供。',
   ],
   sections: [
     {
@@ -133,10 +133,6 @@ const termsZh: LegalDoc = {
         '我们可能修改本条款。修改后的条款会在本页面公布并注明更新日期；重要修改会通过站内信或邮件通知你。修改生效后你继续使用本服务，即视为接受修改后的条款。',
       ],
     },
-    {
-      h: '14. 联系我们',
-      p: ['对本条款有任何问题，请发邮件到 info@example.com。'],
-    },
   ],
 };
 
@@ -144,7 +140,6 @@ const termsEn: LegalDoc = {
   title: 'Terms of Service',
   intro: [
     'These Terms of Service ("Terms") apply to your use of the Trading website, client application and related services (together, the "Service"). By creating an account or using the Service you confirm that you have read, understood and agreed to these Terms. If you do not agree, do not sign up for or use the Service.',
-    'Operating entity, place of registration, governing law and dispute resolution: to be provided.',
   ],
   sections: [
     {
@@ -250,10 +245,6 @@ const termsEn: LegalDoc = {
         'We may change these Terms. The updated Terms will be posted on this page with a new date, and we will tell you about significant changes by in-app message or email. If you keep using the Service after the changes take effect, you accept the updated Terms.',
       ],
     },
-    {
-      h: '14. Contact us',
-      p: ['If you have any questions about these Terms, email us at info@example.com.'],
-    },
   ],
 };
 
@@ -261,7 +252,6 @@ const privacyZh: LegalDoc = {
   title: '隐私政策',
   intro: [
     '本隐私政策说明 Trading（以下简称"我们"）在你使用网站、客户端和相关服务时，收集哪些个人信息、为什么收集、怎样使用和保护，以及你享有的权利。',
-    '个人信息的处理者（运营主体）、联系地址和信息存放地点：待提供。',
   ],
   sections: [
     {
@@ -316,7 +306,6 @@ const privacyZh: LegalDoc = {
       h: '7. 你的权利',
       p: [
         '你可以在客户端查看你的个人资料，修改密码、语言和通知设置。',
-        '你可以发邮件到 info@example.com，要求查阅、更正、删除你的个人信息或注销账户。我们会在核实身份后处理；依法需要保留的信息除外。',
       ],
     },
     {
@@ -327,10 +316,6 @@ const privacyZh: LegalDoc = {
       h: '9. 政策更新',
       p: ['我们可能更新本政策。更新后的政策会在本页面公布并注明更新日期；重要变化会通过站内信或邮件通知你。'],
     },
-    {
-      h: '10. 联系我们',
-      p: ['对本政策或你的个人信息有任何问题，请发邮件到 info@example.com。'],
-    },
   ],
 };
 
@@ -338,7 +323,6 @@ const privacyEn: LegalDoc = {
   title: 'Privacy Policy',
   intro: [
     'This Privacy Policy explains what personal information Trading ("we") collects when you use our website, client application and related services, why we collect it, how we use and protect it, and what rights you have.',
-    'Data controller (operating entity), contact address and where the data is stored: to be provided.',
   ],
   sections: [
     {
@@ -393,7 +377,6 @@ const privacyEn: LegalDoc = {
       h: '7. Your rights',
       p: [
         'In the client you can view your profile and change your password, language and notification settings.',
-        'You can email info@example.com to ask to access, correct or delete your personal information or to close your account. We will act on your request after verifying your identity, except for information we must keep by law.',
       ],
     },
     {
@@ -403,10 +386,6 @@ const privacyEn: LegalDoc = {
     {
       h: '9. Changes to this policy',
       p: ['We may update this policy. The updated policy will be posted on this page with a new date, and we will tell you about significant changes by in-app message or email.'],
-    },
-    {
-      h: '10. Contact us',
-      p: ['If you have any questions about this policy or your personal information, email us at info@example.com.'],
     },
   ],
 };
@@ -483,7 +462,7 @@ const riskZh: LegalDoc = {
     },
     {
       h: '11. 法律和监管',
-      p: ['差价合约在部分国家或地区受到限制或被禁止，你有责任确认在你所在地使用本服务是合法的。监管与牌照信息：待提供。'],
+      p: ['差价合约在部分国家或地区受到限制或被禁止，你有责任确认在你所在地使用本服务是合法的。'],
     },
   ],
 };
@@ -560,7 +539,7 @@ const riskEn: LegalDoc = {
     },
     {
       h: '11. Legal and regulatory',
-      p: ['CFDs are restricted or prohibited in some countries and regions. You are responsible for making sure that using the Service is lawful where you live. Regulatory and licence information: to be provided.'],
+      p: ['CFDs are restricted or prohibited in some countries and regions. You are responsible for making sure that using the Service is lawful where you live.'],
     },
   ],
 };

@@ -298,11 +298,16 @@ export default function Trade() {
     if (qSide === 'buy' || qSide === 'sell') setSideReq((r) => ({ side: qSide, n: r.n + 1 }));
   }, [qSide, param]);
 
-  if (!param) return <Navigate to={`/trade/${readLocal(LAST_KEY) ?? 'XAUUSD'}`} replace />;
+  // 默认品种：上次看的（还启用着的话），否则列表里第一个启用的（生产只开加密货币时外汇、黄金都停用了，不能写死，生产方案 v1 07 页 R-1）；
+  // 列表还没到或是空的，往下走显示加载中 / 暂无可交易品种
+  const last = readLocal(LAST_KEY);
+  const first = list[0]?.code;
+  if (!param && last && map[last]) return <Navigate to={`/trade/${last}`} replace />;
+  if (!param && first) return <Navigate to={`/trade/${first}`} replace />;
   if (error && !list.length) return <div className="page"><ErrorState error={error} onRetry={reload} /></div>;
   if (loading && !list.length) return <div className="page"><Loading rows={6} /></div>;
   if (!list.length) return <div className="page"><EmptyState title={t('market.emptyAll')} /></div>;
-  if (!s) return <div className="page"><EmptyState title={t('trade.symbolNotFound', { code: param })} action={<button type="button" className="btn btn-primary" onClick={() => navigate('/trade/XAUUSD')}>XAUUSD</button>} /></div>;
+  if (!s) return <div className="page"><EmptyState title={t('trade.symbolNotFound', { code: param })} action={first ? <button type="button" className="btn btn-primary" onClick={() => navigate(`/trade/${first}`)}>{first}</button> : undefined} /></div>;
 
   const changeTf = (x: ChartPeriod) => {
     setTf(x);

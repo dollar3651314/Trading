@@ -4,7 +4,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { fetchEnvLabel } from '../api/envLabel';
 import { Link } from '../app/router';
-import { clientLink, CONTACT_EMAIL } from '../config';
+import { clientLink } from '../config';
 import { useI18n, type Lang } from '../i18n';
 import { Icon } from './Icon';
 import { readTheme, applyTheme, type SiteTheme } from '../lib/theme';
@@ -241,17 +241,11 @@ export function Footer() {
           <Link to="terms">{t('footer.terms')}</Link>
           <Link to="privacy">{t('footer.privacy')}</Link>
           <Link to="risk">{t('footer.risk')}</Link>
-          <a href={`mailto:${CONTACT_EMAIL}`} data-testid="contact">
-            {t('footer.contact', { email: CONTACT_EMAIL })}
-          </a>
         </div>
         <p className="risk-full" data-testid="footer-risk">
           {t('risk.full')}
         </p>
         <div className="meta">
-          <span className="tbd">
-            {t('footer.company')} · {t('safe.license')}
-          </span>
           <span>{t('footer.copyright')}</span>
         </div>
       </div>

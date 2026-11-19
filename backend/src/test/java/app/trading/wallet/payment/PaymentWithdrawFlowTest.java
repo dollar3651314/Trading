@@ -118,6 +118,39 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     assertThat(createdFor(id)).isEqualTo(1);
   }
 
+  /** 生产方案 v1 05 页第 3 节、07 页 R-4：服务器恢复数据后暂停交付款（payment.payout.paused），人工核对后 trading start-payout 再开 */
+  @Test
+  void 恢复数据后暂停交付款_停在已审核待放款不退款_有告警项_打开后照常交TopUP() throws Exception {
+    var config = ctx.getBean(app.trading.common.config.SystemConfig.class);
+    String key = app.trading.common.config.ConfigKey.PAYMENT_PAYOUT_PAUSED.key;
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    // 服务器的 trading restore 直接写库（应用 5 秒内读到；这里清缓存）
+    jdbc.update("INSERT INTO common_config (config_key, value) VALUES (?, 'true') ON DUPLICATE KEY UPDATE value = 'true'", key);
+    config.refresh();
+    try {
+      withdraws.approve(id, 7);
+      assertThat(status(id)).as("不交 TopUP，停在已审核待放款").isEqualTo("APPROVED");
+      assertThat(createdFor(id)).isZero();
+      assertThat(frozen(uid)).as("不退款").isEqualByComparingTo("100");
+      assertThat(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/health")).andReturn().getResponse().getContentAsString())
+          .contains("\"payout.paused\":\"DOWN\"");
+      WithdrawTestHooks.advance(withdraws);
+      assertThat(createdFor(id)).as("定时任务也不交").isZero();
+
+      jdbc.update("UPDATE common_config SET value = 'false' WHERE config_key = ?", key);
+      config.refresh();
+      WithdrawTestHooks.advance(withdraws);
+      assertThat(status(id)).isEqualTo("BROADCASTING");
+      assertThat(createdFor(id)).isEqualTo(1);
+      assertThat(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/health")).andReturn().getResponse().getContentAsString())
+          .doesNotContain("payout.paused");
+    } finally {
+      jdbc.update("DELETE FROM common_config WHERE config_key = ?", key);
+      config.refresh();
+    }
+  }
+
   @Test
   void 大额_延迟期结束后1分钟内交TopUP_AC_W4() throws Exception {
     long uid = user("5000", true);

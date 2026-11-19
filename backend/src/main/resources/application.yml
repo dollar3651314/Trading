@@ -89,7 +89,9 @@ trading:
     # 两家数据商的条款都禁止未授权的公开展示，拿到书面展示授权以后才能改成 live（内部文档 第 6 节）
     public-quotes:
       source: ${FX_PUBLIC_QUOTES_SOURCE:simulated}
-      symbols: [XAUUSD, XAGUSD, EURUSD, GBPUSD, USDJPY, USDCNH, NAS100, XTIUSD, BTCUSD, ETHUSD]
+      # 生产只开加密货币（生产方案 v1 07 页 R-1）：生产 docker-compose 用 FX_PUBLIC_QUOTES_SYMBOLS 换成 10 个加密货币（逗号分隔）；
+      # 停用的品种不管在不在这里都不返回（品种表只认启用的）
+      symbols: ${FX_PUBLIC_QUOTES_SYMBOLS:XAUUSD,XAGUSD,EURUSD,GBPUSD,USDJPY,USDCNH,NAS100,XTIUSD,BTCUSD,ETHUSD}
       cache-ttl: 1s
   trading:
     # 单个用户的持仓上限（USD 名义价值，含挂单），沿用原型的 3,000,000；S16 改为后台可配置
@@ -196,6 +198,13 @@ trading:
     # 第一个超级管理员（G1）：系统里还没有管理员时启动会用它建；密码只由 负责人 填，建好后可以删掉这两个变量
     init-username: ${FX_ADMIN_INIT_USERNAME:}
     init-password: ${FX_ADMIN_INIT_PASSWORD:}
+  # 生产第一次启动时的初始化（生产方案 v1 07 页 R-1、R-5，admin.ops.ProductionInit）：各只做一次，做完记标记，以后以后台为准。
+  # 只有生产的 docker-compose 设这两个变量；没设什么都不做
+  init:
+    # 只保留这些分类的品种（逗号分隔：fx / metal / index / energy / crypto / stock），其余停用；生产写 crypto（Amos 11/19「只开加密」）
+    enabled-categories: ${FX_INIT_ENABLED_CATEGORIES:}
+    # 钱包提供方可用余额告警下限（USDT，系统配置 payment.balance.minUsdt）；生产写 5000（Amos 11/19）
+    balance-min-usdt: ${FX_INIT_BALANCE_MIN_USDT:}
   # 对象存储（证件照片）。现在是本地目录，正式环境在 S20 换成对象存储服务
   storage:
     local-dir: ${FX_STORAGE_DIR:./data/storage}
