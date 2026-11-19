@@ -15,8 +15,9 @@
 #   staging-smoke：等测试服务器换成这个提交后跑冒烟检查（e2e/staging-smoke.sh）；地址在仓库密钥 STAGING_URL，没配就跳过
 # 生产（生产方案 v1 05 页、07 页 R-7，照 TopUP ci.yml 的 image-production / promote-production / production-smoke）：
 #   image-production：合并到 main 且 ci-ok 通过后，构建三个镜像、gitleaks 扫，只推 prod-<提交号>，输出三个镜像摘要；不碰 staging、production 标签
-#   promote-production：GitHub 环境 production（Required reviewers = Amos、只允许 main；智能体不批准，C157）批准后才运行；
-#          先检查环境密钥 PRODUCTION_PROMOTE_GUARD（没有就失败），再按摘要把三个镜像的 production 标签指过去（不重新构建）；生产服务器每分钟自己拉
+#   approve-production：GitHub 环境 production（Required reviewers = Amos、只允许 main；智能体不批准，C157）批准后才运行，只检查环境密钥
+#          PRODUCTION_PROMOTE_GUARD 和摘要；新的合并进来时取消还在等批准的旧的
+#   promote-production：批准后按摘要把三个镜像的 production 标签指过去（不重新构建，正在移的不会被取消）；生产服务器每分钟自己拉
 #   production-smoke：等生产换成这个提交，只读冒烟（e2e/production-smoke.sh）；地址在仓库密钥 PRODUCTION_URL、PRODUCTION_ADMIN_URL（可选 PRODUCTION_SITE_URL），没配就跳过
 # PR 上按改动路径决定跑哪些 job（changes），没跑的显示"跳过"，ci-ok 把"跳过"当作通过；push 和手动运行时全部都跑。
 name: ci
@@ -33,7 +34,7 @@ concurrency:
   # PR：同一分支新推送时取消旧运行。push / 手动：不取消正在跑的（包括正在推镜像的），排队中的只保留最新一个——
   # 修"连续合并互相取消"：以前 staging 上后一次合并会取消前一次，加了推镜像后前一次发布会被打断（测试环境方案缺口 G3，已核对）。
   # main 上的 push 每次运行自成一组（不互相排队）：不然后一次合并要等前一次的 promote-production 被批准或拒绝才能开始；
-  # "只批最新的"由 promote-production 自己的 concurrency 做（新的进来就取消还在等批准的旧的，生产方案 05 页第 1 节）
+  # "只批最新的"由 approve-production 自己的 concurrency 做（新的进来就取消还在等批准的旧的，生产方案 05 页第 1 节）
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.head_ref) || (github.event_name == 'push' && github.ref == 'refs/heads/main') && format('main-{0}', github.run_id) || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
@@ -571,28 +572,28 @@ jobs:
           docker logout ghcr.io
           echo "还没有上生产：等 Amos 在 GitHub 批准 promote-production" >> "$GITHUB_STEP_SUMMARY"
 
-  # 上生产：GitHub 环境 production（Required reviewers = Amos、只允许 main）批准后才运行；智能体不批准（C157）。不重新构建：
-  # 按摘要把三个镜像的 production 标签指过去（trading-app 最后移：服务器看到它变时另外两个都已就绪）。生产服务器每分钟自己拉，起不来自动换回。
-  # concurrency：main 上又合并了新的，新的这次走到这里时取消还在等批准的旧的（只批最新的，生产方案 05 页第 1 节）。
-  # 注意：如果旧的那次已经批准、正在移动标签（几秒钟）时新的走到这里，它也会被取消；那种情况重新批准新的一次即可
-  promote-production:
+  # 上生产分两个 job（审查 #28 🟡：取消只针对还在等批准的运行，已经批准、正在移标签的不取消）：
+  #   approve-production：GitHub 环境 production（Required reviewers = Amos、只允许 main）批准后才运行；智能体不批准（C157）。只做检查
+  #     （环境密钥 PRODUCTION_PROMOTE_GUARD 在不在、三个摘要格式对不对），不碰镜像。concurrency 取消进行中的：main 上又合并了新的，
+  #     新的这次走到这里时，旧的还在等批准就被取消（只批最新的，生产方案 05 页第 1 节）；旧的已经批准过，这个 job 早就结束了，取消不到它
+  #   promote-production：approve-production 通过后才运行，按摘要把三个镜像的 production 标签指过去（不重新构建；trading-app 最后移：
+  #     服务器看到它变时另外两个都已就绪）。concurrency 不取消进行中的：正在移标签的一定做完，后面批准的排队接着移
+  approve-production:
     needs: [image-production]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: production
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: read
-      packages: write
     concurrency:
-      group: promote-production
+      group: approve-production
       cancel-in-progress: true
     steps:
       # PRODUCTION_PROMOTE_GUARD 只放在 GitHub 环境 production 的环境密钥里（值随便，不打印）：环境没建好时 GitHub 会自动建一个
-      # 没有保护、没有这个密钥的同名环境，这里读不到就失败，不会不经批准就上生产
-      - name: 把三个镜像的 production 标签指到刚推的镜像（按摘要，不重新构建）
+      # 没有保护、没有这个密钥的同名环境，这里读不到就失败，后面的 promote-production 不会运行，不会不经批准就上生产
+      - name: 检查环境密钥和镜像摘要（不碰镜像）
         env:
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PRODUCTION_PROMOTE_GUARD: ${{ secrets.PRODUCTION_PROMOTE_GUARD }}
           DIGEST_APP: ${{ needs.image-production.outputs.digest_app }}
           DIGEST_QUOTE: ${{ needs.image-production.outputs.digest_quote }}
@@ -601,6 +602,30 @@ jobs:
           [ -n "$PRODUCTION_PROMOTE_GUARD" ] || { echo "::error::GitHub 环境 production 里没有环境密钥 PRODUCTION_PROMOTE_GUARD（环境没建好？），不上生产"; exit 1; }
           for d in "$DIGEST_APP" "$DIGEST_QUOTE" "$DIGEST_WEB"; do
             [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::镜像摘要格式不对（要 sha256:[0-9a-f]{64}），不上生产"; exit 1; }
+          done
+          echo "Amos 已批准提交 $GITHUB_SHA 上生产" >> "$GITHUB_STEP_SUMMARY"
+
+  promote-production:
+    needs: [image-production, approve-production]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: promote-production
+      cancel-in-progress: false
+    steps:
+      - name: 把三个镜像的 production 标签指到刚推的镜像（按摘要，不重新构建）
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST_APP: ${{ needs.image-production.outputs.digest_app }}
+          DIGEST_QUOTE: ${{ needs.image-production.outputs.digest_quote }}
+          DIGEST_WEB: ${{ needs.image-production.outputs.digest_web }}
+        run: |
+          for d in "$DIGEST_APP" "$DIGEST_QUOTE" "$DIGEST_WEB"; do
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::镜像摘要格式不对，不上生产"; exit 1; }
           done
           reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
           echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin

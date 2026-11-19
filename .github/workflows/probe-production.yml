@@ -2,6 +2,8 @@
 # 整台虚拟机宕机、休眠没唤醒、平台网关出问题时这次运行失败，GitHub 给仓库管理员发失败通知邮件（公开仓库免费）。
 # 只读：一个 GET，不登录。地址在仓库密钥 PRODUCTION_ADMIN_URL（日志里自动遮盖），没配就打警告、算成功（还没装生产时不报错）。
 # 定时运行只在默认分支（main）上生效；也可以在 Actions 页面手动运行。
+# 注意：公开仓库 60 天没有任何活动（提交、PR 等）时，GitHub 会自动停用定时任务（会先发邮件提醒），之后探测就不再跑、也不会报失败。
+# 恢复：GitHub → Trading 仓库 → Actions → 左侧 probe-production → 点"Enable workflow"（启用后立刻可以点"Run workflow"手动跑一次确认）。
 name: probe-production
 on:
   schedule:
