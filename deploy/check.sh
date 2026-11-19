@@ -20,7 +20,7 @@ fail=0
 check() { local d=$1; shift; if "$@"; then echo "  ✓ $d"; else echo "  ✗ $d"; fail=1; fi; }
 
 echo "== shellcheck"
-check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/backup.sh deploy/kit/mysql-init/*.sh deploy/check.sh deploy/drill-production.sh e2e/staging-smoke.sh
+check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/backup.sh deploy/kit/mysql-init/*.sh deploy/check.sh deploy/drill-production.sh e2e/staging-smoke.sh e2e/production-smoke.sh
 check "网关模式的 Nginx 启动脚本（sh）没有 shellcheck 警告" shellcheck -S warning -s sh deploy/nginx/trading-gateway.envsh
 
 echo "== docker compose config"

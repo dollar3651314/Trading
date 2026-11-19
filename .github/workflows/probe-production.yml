@@ -1,0 +1,37 @@
+# 生产外部可用性探测（生产方案 v1 01 页 P-6、05 页第 5 节、07 页 R-8）：GitHub Actions 每 30 分钟从外面访问一次生产后台的健康检查，
+# 整台虚拟机宕机、休眠没唤醒、平台网关出问题时这次运行失败，GitHub 给仓库管理员发失败通知邮件（公开仓库免费）。
+# 只读：一个 GET，不登录。地址在仓库密钥 PRODUCTION_ADMIN_URL（日志里自动遮盖），没配就打警告、算成功（还没装生产时不报错）。
+# 定时运行只在默认分支（main）上生效；也可以在 Actions 页面手动运行。
+# 注意：公开仓库 60 天没有任何活动（提交、PR 等）时，GitHub 会自动停用定时任务（会先发邮件提醒），之后探测就不再跑、也不会报失败。
+# 恢复：GitHub → Trading 仓库 → Actions → 左侧 probe-production → 点"Enable workflow"（启用后立刻可以点"Run workflow"手动跑一次确认）。
+name: probe-production
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: probe-production
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PRODUCTION_ADMIN_URL: ${{ secrets.PRODUCTION_ADMIN_URL }}
+    steps:
+      - name: 访问生产后台的健康检查（status=UP 才算通过；不输出地址和返回内容）
+        run: |
+          if [ -z "$PRODUCTION_ADMIN_URL" ]; then echo "::warning::仓库密钥 PRODUCTION_ADMIN_URL 还没有配置，跳过"; exit 0; fi
+          for i in 1 2 3; do
+            body=$(curl -s --max-time 20 "${PRODUCTION_ADMIN_URL%/}/api/health" || true)
+            if grep -q '"status":"UP"' <<< "$body" && grep -q '"version":"[0-9a-f]\{40\}"' <<< "$body"; then
+              echo "生产健康检查通过（第 $i 次）"
+              grep -q '"alert":"ALERT"' <<< "$body" && echo "::warning::有业务告警（详情看告警邮件或 sudo trading status；这里不输出是哪一项）"
+              exit 0
+            fi
+            echo "第 $i 次没通过，30 秒后再试"; sleep 30
+          done
+          echo "::error::生产健康检查 3 次都没通过（应用没响应、不是 UP，或者虚拟机宕机 / 休眠）：看 sudo trading status，截图给主会话"
+          exit 1
