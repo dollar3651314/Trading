@@ -63,6 +63,8 @@ jobs:
               - 'web/site/**'
             backend:
               - 'pom.xml'
+              - '.mvn/**'
+              - 'scripts/ci-mvn.sh'
               - 'backend/**'
               - 'quote-app/**'
               - 'quote-protocol/**'
@@ -184,9 +186,17 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - name: 单元测试、集成测试和模块边界检查
-        run: mvn -B -ntp verify
+        run: bash scripts/ci-mvn.sh -B -ntp verify
 
   # 端到端（Playwright）：真实接口模式构建的三个前端 + 后端（profile e2e，外部依赖用替身）+ MySQL、Redis 容器。
   # 主流程：注册 → 充值（链替身）→ 下单 → 止盈止损 → 平仓 → 提现，后台审核；官网用例。失败时上传 trace、截图、录像和两个进程的日志。
@@ -227,7 +237,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
         with:
           node-version: 22
@@ -244,7 +262,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
       - name: 构建后端
-        run: mvn -B -ntp package -DskipTests
+        run: bash scripts/ci-mvn.sh -B -ntp package -DskipTests
       - name: 构建客户端（真实接口模式）
         working-directory: web/client
         run: npm ci --no-audit --no-fund && npm run build
@@ -361,7 +379,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
         with:
           node-version: 22
@@ -371,7 +397,7 @@ jobs:
             web/admin/package-lock.json
             web/site/package-lock.json
       - name: 打包 trading-app、quote-app（测试已在 backend、e2e job 跑过）
-        run: mvn -B -ntp package -DskipTests
+        run: bash scripts/ci-mvn.sh -B -ntp package -DskipTests
       - name: 构建三个前端（真实接口模式，不设 VITE_API_MODE）
         run: |
           for app in client admin site; do
