@@ -1,5 +1,5 @@
-# 安全相关的响应头。测试环境 HSTS 只设 1 天，生产再加长。
-add_header Strict-Transport-Security "max-age=86400" always;
+# 安全相关的响应头。HSTS 的值 $tr_hsts：测试环境（site.conf.template）1 天；生产平台网关模式（gateway.conf.template）1 年、不加 includeSubDomains（平台的域名不是我们的）
+add_header Strict-Transport-Security $tr_hsts always;
 add_header X-Content-Type-Options nosniff always;
 add_header X-Frame-Options DENY always;
 add_header Referrer-Policy strict-origin-when-cross-origin always;

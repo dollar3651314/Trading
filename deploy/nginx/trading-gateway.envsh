@@ -1,0 +1,47 @@
+#!/bin/sh
+# shellcheck shell=sh
+# 生产平台网关模式的启动脚本（生产方案 v1 07 页 R-2）：web.Dockerfile 放到 /docker-entrypoint.d/19-trading-gateway.envsh，
+# 官方 nginx 镜像的入口在替换模板（20-envsubst-on-templates.sh）之前 source 它，所以这里 export 的限流阈值会进模板。
+# 只在 TR_NGINX_MODE=gateway（生产 docker-compose.production.yml 设）时做事；测试环境什么都不做。
+#
+# 真实 IP（照 TopUP deploy/kit/topup.sh 的 realip.conf，默认关）：TR_REAL_IP_HEADER（X-Forwarded-For 或 X-Real-IP）和
+# TR_REAL_IP_FROM（网关地址段，逗号分隔）两项都填了、并且地址段看起来合法才开；完整的检查在 trading set 里（不能和 Docker 的 172.17～172.31 重叠）。
+#   开：set_real_ip_from + real_ip_header + real_ip_recursive，只认从网关地址段来的这个请求头；限流按访客 IP（web.Dockerfile 的默认阈值）
+#   关：不信任任何请求头，所有访客在应用看来是同一个地址；按 IP 的额度等于全站的额度，限流放宽成只防整站被打满
+[ "${TR_NGINX_MODE:-}" = gateway ] || return 0 2> /dev/null || exit 0
+
+tr_conf=/etc/nginx/trading/realip.conf
+mkdir -p /etc/nginx/trading
+tr_on=""
+case "${TR_REAL_IP_HEADER:-off}" in
+  X-Forwarded-For | X-Real-IP) [ -n "${TR_REAL_IP_FROM:-}" ] && tr_on=1 ;;
+esac
+if [ -n "$tr_on" ]; then
+  for tr_a in $(printf '%s' "$TR_REAL_IP_FROM" | tr ',' ' '); do
+    case "$tr_a" in
+      *[!0-9A-Fa-f.:/]* | "") tr_on="" ;;
+      172.1[7-9].* | 172.2[0-9].* | 172.3[01].*) tr_on="" ;;
+      */*) case "${tr_a#*/}" in [0-9] | 1[0-5]) tr_on="" ;; esac ;;
+    esac
+  done
+  [ -n "$tr_on" ] || echo "19-trading-gateway: TR_REAL_IP_FROM 不合法（不能和 Docker 的 172.17～172.31 重叠、IPv4 前缀至少 /16），真实 IP 按关处理" >&2
+fi
+{
+  echo "# 由 19-trading-gateway.envsh 按 TR_REAL_IP_HEADER、TR_REAL_IP_FROM 生成（改用 sudo trading set）"
+  if [ -n "$tr_on" ]; then
+    for tr_a in $(printf '%s' "$TR_REAL_IP_FROM" | tr ',' ' '); do echo "set_real_ip_from $tr_a;"; done
+    echo "real_ip_header $TR_REAL_IP_HEADER;"
+    echo "real_ip_recursive on;"
+  else
+    echo "# 真实 IP：关（不信任任何请求头；应用看到的访客 IP 都是平台网关的地址），限流放宽成全站额度"
+  fi
+} > "$tr_conf"
+if [ -z "$tr_on" ]; then
+  export FX_NGINX_API_RATE=200r/s FX_NGINX_API_BURST=400 FX_NGINX_API_CONN=512
+  export FX_NGINX_WS_RATE=50r/s FX_NGINX_WS_BURST=200 FX_NGINX_WS_CONN=2000
+  export FX_NGINX_QUOTE_RATE=200r/s FX_NGINX_QUOTE_BURST=400 FX_NGINX_QUOTE_CONN=200
+  echo "19-trading-gateway: 真实 IP 关，限流按全站额度" >&2
+else
+  echo "19-trading-gateway: 真实 IP 开（$TR_REAL_IP_HEADER）" >&2
+fi
+unset tr_conf tr_on tr_a

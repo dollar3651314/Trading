@@ -5,22 +5,28 @@
 #      trading-app 只绑 127.0.0.1、quote-app 不映射端口、内存合计 964 MB、测试环境开发者文档能看、不让搜索引擎收录
 #   6. 用假的 docker（events 失败）跑 trading watch、mem：Docker 没回应时也要走完（不被 set -e 中途打断）、watch 照样走到发邮件
 #   5. 真的起一个 Nginx（报价服务用桩代替）按域名发请求：/docs/ 转到报价服务、/internal 不转、/robots.txt 和 X-Robots-Tag（测试环境验收 T-1、T-2）
+#   7. 生产（生产方案 v1 07 页 R-2、R-3、R-4）：叠加 docker-compose.production.yml 后的约束（端口、内存合计 2,432、live、不收录只放开官网……）；
+#      平台网关模式的 Nginx（gateway.conf.template）真的起来按端口发请求（Host、X-Forwarded-Proto 固定、HSTS 1 年、真实 IP 开关）；
+#      trading 命令生产模式的规矩（从不调 topup、拒绝测试管理员、环境不能改、停着时 set 只保存……）
 # 不需要任何密钥；假值只在临时目录里，跑完删掉。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.27-bookworm}
 tmp=$(mktemp -d)
 net=trading-check-$$
-cleanup() { docker rm -f "$net-web" "$net-quote" > /dev/null 2>&1 || true; docker network rm "$net" > /dev/null 2>&1 || true; rm -rf "$tmp"; }
+cleanup() { docker rm -f "$net-web" "$net-quote" "$net-gw" "$net-app" > /dev/null 2>&1 || true; docker network rm "$net" > /dev/null 2>&1 || true; rm -rf "$tmp"; }
 trap cleanup EXIT
 fail=0
 check() { local d=$1; shift; if "$@"; then echo "  ✓ $d"; else echo "  ✗ $d"; fail=1; fi; }
 
 echo "== shellcheck"
-check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/backup.sh deploy/kit/mysql-init/*.sh deploy/check.sh e2e/staging-smoke.sh
+check "服务器脚本没有 shellcheck 警告" shellcheck -S warning deploy/kit/trading deploy/kit/bootstrap.sh deploy/kit/backup.sh deploy/kit/mysql-init/*.sh deploy/check.sh deploy/drill-production.sh e2e/staging-smoke.sh
+check "网关模式的 Nginx 启动脚本（sh）没有 shellcheck 警告" shellcheck -S warning -s sh deploy/nginx/trading-gateway.envsh
 
 echo "== docker compose config"
 sed -E 's/^([A-Z0-9_]+)=$/\1=check-only-not-a-secret/' deploy/kit/.env.example > "$tmp/.env"
+# 不是密钥、有格式要求的几项留空（和服务器上没填时一样）
+sed -i -E 's/^(TR_ENV|TR_QUOTE_BIND|TR_REAL_IP_FROM|TR_REAL_IP_HEADER|TR_SHARE_WITH_TOPUP)=.*/\1=/' "$tmp/.env"
 echo "IMAGE_TAG=0000000000000000000000000000000000000000" > "$tmp/image.env"
 cfg() { docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml --env-file "$tmp/.env" --env-file "$tmp/image.env" config "$@"; }
 check "compose 能解析" cfg -q
@@ -30,7 +36,7 @@ check "每个容器 mem_limit = memswap_limit（都不用交换分区；11/18 �
 check "mysql 内存 272 MB、memswap_limit 正好 272 MB（11/18 从 320 降，给 quote-app）" jqc '(.services.mysql.mem_limit | tonumber) == (272 * 1024 * 1024) and (.services.mysql.memswap_limit | tonumber) == (272 * 1024 * 1024)'
 check "mysql 内存参数（连接数 18、临时表 32M、表缓存 256×1、表定义 400、线程缓存 4、日志缓冲 4M、键缓冲 1M、不反查主机名）" jqc '.services.mysql.command as $c | ["--max-connections=18","--innodb-log-buffer-size=4M","--key-buffer-size=1M","--table-open-cache=256","--table-open-cache-instances=1","--table-definition-cache=400","--thread-cache-size=4","--temptable-max-ram=32M","--skip-name-resolve","--host-cache-size=0","--performance-schema=OFF"] | all(. as $f | $c | index($f))'
 check "MySQL 连接数够两个连接池 + 备份 + 健康检查（max-connections ≥ TR_DB_POOL_APP + TR_DB_POOL_QUOTE + 2）" jqc '((.services.mysql.command[] | select(startswith("--max-connections=")) | ltrimstr("--max-connections=") | tonumber) >= ((.services["trading-app"].environment.FX_DB_POOL_SIZE | tonumber) + (.services["quote-app"].environment.FX_QUOTE_DB_POOL_SIZE | tonumber) + 2))'
-check "trading 脚本里每处 docker compose exec -T 都把标准输入接到 /dev/null（T-7：套了 timeout 时在终端里会被 SIGTTIN 停住）" bash -c 'awk '\''/exec -T/ && !/^[[:space:]]*#/ { s = ""; for (i = 0; i < 9; i++) { s = s $0; if ($0 ~ /< \/dev\/null/) break; if ((getline) <= 0) break } if (s !~ /< \/dev\/null/) { print "  没有 < /dev/null：" NR; bad = 1 } } END { exit bad }'\'' deploy/kit/trading'
+check "trading 脚本里每处 docker compose exec -T 都把标准输入接到 /dev/null 或管道（T-7：套了 timeout 时在终端里会被 SIGTTIN 停住）" bash -c 'awk '\''/exec -T/ && !/^[[:space:]]*#/ && !/\| *timeout/ { s = ""; for (i = 0; i < 9; i++) { s = s $0; if ($0 ~ /< \/dev\/null/) break; if ((getline) <= 0) break } if (s !~ /< \/dev\/null/) { print "  没有 < /dev/null：" NR; bad = 1 } } END { exit bad }'\'' deploy/kit/trading'
 
 check "默认内存上限合计 964 MB（+ 容器运行开销约 36 = 启动门槛 1,000；Amos 批准的 C75 例外，见 docker-compose.yml 开头）" jqc '([.services[].mem_limit | tonumber] | add) == (964 * 1024 * 1024)'
 check "启动门槛默认 1,000 MB、恢复演练临时库默认 320 MB" bash -c 'grep -q "^MIN_MEM_MB=\${TR_MIN_MEM_MB:-1000}$" deploy/kit/trading && grep -q "^DRILL_MEM_MB=\${TR_DRILL_MEM_MB:-320}$" deploy/kit/trading'
@@ -134,6 +140,10 @@ case "$1" in
   # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
   ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; esac; exit 0 ;;
   rm) exit 0 ;;
+  # Trading 的 Docker 网络的子网（真实 IP 重叠检查用）：FAKE_SUBNETS
+  network) echo "${FAKE_SUBNETS:-}"; exit 0 ;;
+  # 镜像的版本号（trading update 用）：FAKE_REVISION
+  image) [ -n "${FAKE_REVISION:-}" ] && echo "$FAKE_REVISION"; exit 0 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -166,4 +176,114 @@ check "轮流模式 off：最后调 topup start" bash -c 'o=$(tr_mode 轮流 "" 
 check "独立模式 on、TopUP 的容器还在跑：不调 topup stop、不启动 Trading" bash -c 'o=$(tr_mode 独立 1 on); ! grep -q "退出码：0" <<< "$o" && grep -q "topup 调用： *$" <<< "$o" && grep -q "TopUP 的容器还在跑" <<< "$o"'
 check "轮流模式 on、TopUP 在跑：先调 topup stop" bash -c 'o=$(tr_mode 轮流 1 on); grep -q "topup 调用：stop" <<< "$o"'
 check "模式开关只认 true / false" bash -c '! env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 bash deploy/kit/trading set TR_SHARE_WITH_TOPUP yes > /dev/null 2>&1 && env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 bash deploy/kit/trading set TR_SHARE_WITH_TOPUP false > /dev/null 2>&1 && grep -q "^TR_SHARE_WITH_TOPUP=false$" "$tmp/tr/.env"'
+
+echo "== 生产：叠加 docker-compose.production.yml 后的约束（生产方案 v1 03、04 页，07 页 R-2、R-3、R-4）"
+cfgp() { docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml -f deploy/kit/docker-compose.production.yml --env-file "$tmp/.env" --env-file "$tmp/image.env" config "$@"; }
+check "生产 compose 能解析（!override、!reset 要 docker compose ≥ 2.24）" cfgp -q
+cfgp --format json > "$tmp/prod.json"
+jqp() { jq -e "$1" "$tmp/prod.json" > /dev/null; }
+check "生产：只有 trading-web 映射 8082、8083、8084（对外）和 127.0.0.1:8085（报价对外默认不发布），不占 80、443" jqp '[.services["trading-web"].ports[] | "\(.host_ip // "")|\(.published)"] | sort == ["127.0.0.1|8085","|8082","|8083","|8084"]'
+check "生产：trading-app 健康检查口 127.0.0.1:18080（8080 是同机 TopUP 生产的）" jqp '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"18080","protocol":"tcp"}]'
+check "生产：quote-app、mysql、redis 不映射端口" jqp '[.services["quote-app","mysql","redis"].ports] | all(. == null)'
+check "生产：不挂证书（平台网关做 HTTPS）" jqp '[.services[].volumes[]? | select(.source | startswith("/etc/letsencrypt") or startswith("/var/www/certbot"))] | length == 0'
+check "生产：每个容器 mem_limit = memswap_limit，合计 2,432 MB（1,024 + 512 + 768 + 64 + 64，生产方案 03 页）" jqp '([.services[] | (.mem_limit == .memswap_limit)] | all) and (([.services[].mem_limit | tonumber] | add) == (2432 * 1024 * 1024)) and ((.services["trading-app"].mem_limit | tonumber) == 1024 * 1048576) and ((.services["quote-app"].mem_limit | tonumber) == 512 * 1048576) and ((.services.mysql.mem_limit | tonumber) == 768 * 1048576)'
+check "生产：JVM 堆 + 元空间 + 代码缓存 + 直接内存（800、328）没超过容器上限" bash -c 'grep -q "Xmx\${TR_HEAP_APP:-512m} -XX:MaxMetaspaceSize=\${TR_META_APP:-160m} -XX:ReservedCodeCacheSize=\${TR_CODE_APP:-64m} -XX:MaxDirectMemorySize=\${TR_DIRECT_APP:-64m}" deploy/kit/docker-compose.production.yml && grep -q "Xmx\${TR_HEAP_QUOTE:-160m} -XX:MaxMetaspaceSize=\${TR_META_QUOTE:-112m} -XX:ReservedCodeCacheSize=\${TR_CODE_QUOTE:-40m} -XX:MaxDirectMemorySize=\${TR_DIRECT_QUOTE:-16m}" deploy/kit/docker-compose.production.yml'
+check "生产：CPU 上限 trading-app 2、quote-app 1、mysql 1、redis / web 各 0.5" jqp '.services["trading-app"].cpus == 2 and .services["quote-app"].cpus == 1 and .services.mysql.cpus == 1 and .services.redis.cpus == 0.5 and .services["trading-web"].cpus == 0.5'
+check "生产：不是测试环境（FX_ENV_LABEL 空、测试管理员哈希空），报价 live、开发者文档 auto、授权检查关、只开币安现货" jqp '.services["trading-app"].environment.FX_ENV_LABEL == "" and .services["trading-app"].environment.TEST_ADMIN_TOKEN_SHA256 == "" and .services["trading-app"].environment.FX_QUOTE_MARKET_SOURCE == "live" and .services["quote-app"].environment.FX_QUOTE_MARKET_SOURCE == "live" and .services["quote-app"].environment.FX_QUOTE_OPEN_DOCS == "auto" and .services["quote-app"].environment.FX_QUOTE_LICENSE_ENFORCE == "false" and .services["quote-app"].environment.FX_QUOTE_BINANCE_ENABLED == "true" and .services["quote-app"].environment.FX_QUOTE_BINANCE_FUTURES_ENABLED == "false"'
+check "生产：第一次启动只开加密货币、余额告警 5,000，官网只列 10 个加密货币、不显示价格（R-1、R-5）" jqp '.services["trading-app"].environment.FX_INIT_ENABLED_CATEGORIES == "crypto" and .services["trading-app"].environment.FX_INIT_BALANCE_MIN_USDT == "5000" and .services["trading-app"].environment.FX_PUBLIC_QUOTES_SOURCE == "simulated" and (.services["trading-app"].environment.FX_PUBLIC_QUOTES_SYMBOLS | split(",") | length == 10)'
+check "生产：Nginx 用平台网关模板、官网可以收录（只管 8084）、真实 IP 默认关" jqp '.services["trading-web"].environment.NGINX_ENVSUBST_TEMPLATE_DIR == "/etc/nginx/templates-gateway" and .services["trading-web"].environment.TR_NGINX_MODE == "gateway" and .services["trading-web"].environment.FX_NGINX_NOINDEX == "false" and .services["trading-web"].environment.TR_REAL_IP_HEADER == "off"'
+check "生产：MySQL 不写二进制日志、连接数 40 够两个连接池 + 备份 + 健康检查、缓冲池 384M" jqp '(.services.mysql.command | index("--disable-log-bin")) and (.services.mysql.command | index("--innodb-buffer-pool-size=384M")) and ((.services.mysql.command[] | select(startswith("--max-connections=")) | ltrimstr("--max-connections=") | tonumber) >= ((.services["trading-app"].environment.FX_DB_POOL_SIZE | tonumber) + (.services["quote-app"].environment.FX_QUOTE_DB_POOL_SIZE | tonumber) + 2))'
+check "生产：Redis maxmemory 32mb、写满不淘汰" jqp '(.services.redis.command | join(" ")) | test("--maxmemory 32mb --maxmemory-policy noeviction")'
+check "生产：Docker 日志每个容器 20 MB × 3" jqp '[.services[].logging | (.options["max-size"] == "20m" and .options["max-file"] == "3")] | all'
+check "生产：网络和测试环境一样（mysql、redis 只在 internal，quote-app 只在 quote 别名上监听）" jqp '(.services.mysql.networks | keys) == ["internal"] and (.services.redis.networks | keys) == ["internal"] and .services["quote-app"].environment.FX_QUOTE_BIND_ADDRESS == "quote-internal"'
+check "测试环境的 compose 没被生产的设置带歪（不叠加时仍是 80/443、FX_ENV_LABEL=test）" jqc '.services["trading-app"].environment.FX_ENV_LABEL == "test" and ([.services["trading-web"].ports[].published] | sort) == ["443","80"]'
+
+echo "== 生产：平台网关模式的 Nginx（gateway.conf.template）真的起来，按端口发请求"
+mkdir -p "$tmp/gw-templates"; cp deploy/nginx/gateway.conf.template "$tmp/gw-templates/"
+# 应用的桩：在 trading-app:8080 上，把收到的 Host、X-Forwarded-Proto、X-Real-IP、X-Forwarded-For 原样回显
+cat > "$tmp/app-stub.conf" << 'STUB'
+server { listen 8080; default_type text/plain; location / { return 200 "app host=$http_host proto=$http_x_forwarded_proto xri=$http_x_real_ip xff=$http_x_forwarded_for uri=$uri"; } }
+STUB
+docker rm -f "$net-app" > /dev/null 2>&1 || true
+docker run -d --name "$net-app" --network "$net" --network-alias trading-app -v "$tmp/app-stub.conf:/etc/nginx/conf.d/default.conf:ro" "$NGINX_IMAGE" > /dev/null
+gw() {
+  docker rm -f "$net-gw" > /dev/null 2>&1 || true
+  # 镜像里的默认值（web.Dockerfile 的 ENV）在前，生产 compose 设的在后（后面的覆盖前面的）
+  docker run -d --name "$net-gw" --network "$net" "${envs[@]}" -e APP_DOMAIN=8082-x.check.invalid -e ADMIN_DOMAIN=8083-x.check.invalid -e WWW_DOMAIN=8084-x.check.invalid -e QUOTE_DOMAIN=8085-x.check.invalid \
+    -e NGINX_ENVSUBST_TEMPLATE_DIR=/etc/nginx/templates-gateway -e TR_NGINX_MODE=gateway -e FX_NGINX_NOINDEX=false "$@" \
+    -v "$PWD/deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" -v "$tmp/gw-templates:/etc/nginx/templates-gateway:ro" -v "$tmp/snippets:/etc/nginx/snippets:ro" \
+    -v "$PWD/deploy/nginx/trading-gateway.envsh:/docker-entrypoint.d/19-trading-gateway.envsh:ro" \
+    -v "$tmp/www/client:/usr/share/nginx/client:ro" -v "$tmp/www/site:/usr/share/nginx/site:ro" -v "$tmp/www/admin:/usr/share/nginx/admin:ro" "$NGINX_IMAGE" > /dev/null
+  for _ in $(seq 1 30); do docker exec "$net-gw" curl -s -o /dev/null http://127.0.0.1:8082/ 2> /dev/null && return 0; sleep 0.5; done
+  docker logs "$net-gw" 2>&1 | tail -20; return 1
+}
+# greq 端口 路径 [curl 参数…] → 状态码、X-Robots-Tag、HSTS、正文（一行一个）
+greq() { local p=$1 path=$2; shift 2; docker exec "$net-gw" curl -s -D /tmp/h -o /tmp/b "$@" "http://127.0.0.1:$p$path" -w '%{http_code}\n' && docker exec "$net-gw" sh -c 'grep -i "^x-robots-tag:" /tmp/h | cut -d" " -f2- | tr -d "\r"; echo; grep -i "^strict-transport-security:" /tmp/h | cut -d" " -f2- | tr -d "\r"; echo; cat /tmp/b'; }
+ghas() { local want=$1 out; shift; out=$(greq "$@") && grep -qF -- "$want" <<< "$out"; }
+glacks() { local nope=$1 out; shift; out=$(greq "$@") && ! grep -qF -- "$nope" <<< "$out"; }
+export net; export -f greq
+if gw; then
+  docker exec "$net-gw" nginx -t > /dev/null 2>&1 && echo "  ✓ 网关模式 nginx -t 通过" || { echo "  ✗ 网关模式 nginx -t 没通过"; fail=1; }
+  check "8082 客户端 /api/** 转给应用：Host 固定成平台主机名、X-Forwarded-Proto 固定 https" ghas "app host=8082-x.check.invalid proto=https" 8082 /api/auth/me -H 'Host: whatever.example'
+  check "8083 后台 /api/admin/** 转给应用：Host 是后台的平台主机名" ghas "app host=8083-x.check.invalid proto=https" 8083 /api/admin/me
+  check "8084 官网 /api/public/quotes 转给应用：Host 是官网的平台主机名" ghas "app host=8084-x.check.invalid proto=https" 8084 /api/public/quotes
+  check "HSTS 1 年、不加 includeSubDomains" bash -c 'out=$(greq 8082 /) && grep -qx "max-age=31536000" <<< "$out"' 
+  check "8082 客户端上后台接口、端到端接口、actuator 404" bash -c '[ "$(greq 8082 /api/admin/me | head -1)" = 404 ] && [ "$(greq 8082 /api/e2e/code | head -1)" = 404 ] && [ "$(greq 8082 /actuator/health | head -1)" = 404 ]'
+  check "8083 后台的健康检查带业务告警头、其他 /api/** 404、/ 跳到 /admin/（只写路径）" bash -c '[ "$(greq 8083 /api/wallet/x | head -1)" = 404 ] && docker exec "$1" curl -s -D - -o /dev/null http://127.0.0.1:8083/ | grep -qi "^location: /admin/"' _ "$net-gw"
+  check "路径里有分号 400" bash -c '[ "$(docker exec "$1" curl -s -o /dev/null --path-as-is -w "%{http_code}" "http://127.0.0.1:8082/api/admin;x/me")" = 400 ]' _ "$net-gw"
+  check "8084 官网（FX_NGINX_NOINDEX=false）可以收录：/robots.txt 全部允许、不发 X-Robots-Tag" bash -c 'out=$(greq 8084 /robots.txt) && [ "$(sed -n 2p <<< "$out")" = "" ] && grep -q "Allow: /" <<< "$out"'
+  for p in 8082 8083 8085; do
+    check "$p 不收录（/robots.txt 全部禁止、带 X-Robots-Tag）" ghas "noindex, nofollow" "$p" /robots.txt
+  done
+  check "8085 报价对外：/docs/ 转到报价服务、/internal 404" bash -c 'out=$(greq 8085 /docs/) && grep -q "quote-app:/docs/" <<< "$out" && [ "$(greq 8085 /internal/open/overview | head -1)" = 404 ]'
+  check "8084 官网页面里的客户端地址换成 8082 的平台地址" bash -c 'printf "<a href=\"__TR_CLIENT_URL__/register\">x</a>" > "$1/www/site/sub.html" && greq 8084 /sub.html | grep -q "https://8082-x.check.invalid/register"' _ "$tmp"
+  check "真实 IP 关：不信任访客带的 X-Forwarded-For（应用看到的是网关的地址）" glacks "xri=1.2.3.4" 8082 /api/x -H 'X-Forwarded-For: 1.2.3.4'
+  check "真实 IP 关：限流放宽成全站额度（启动脚本改了阈值）" bash -c 'docker logs "$1" 2>&1 | grep -q "真实 IP 关，限流按全站额度"' _ "$net-gw"
+else
+  check "网关模式 Nginx 能起来" false
+fi
+gwip=$(docker network inspect "$net" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+if gw -e TR_REAL_IP_HEADER=X-Forwarded-For -e TR_REAL_IP_FROM=10.99.0.0/16; then
+  check "真实 IP 开、但网关不在 TR_REAL_IP_FROM 里：照样不信任" glacks "xri=1.2.3.4" 8082 /api/x -H 'X-Forwarded-For: 1.2.3.4'
+else
+  check "网关模式 Nginx 能起来（真实 IP 开）" false
+fi
+if gw -e TR_REAL_IP_HEADER=X-Forwarded-For -e "TR_REAL_IP_FROM=127.0.0.1"; then
+  check "真实 IP 开、网关在 TR_REAL_IP_FROM 里：用它带的 X-Forwarded-For（转给应用时覆盖成这一个）" ghas "xri=1.2.3.4 xff=1.2.3.4" 8082 /api/x -H 'X-Forwarded-For: 1.2.3.4'
+else
+  check "网关模式 Nginx 能起来（真实 IP 开、本机）" false
+fi
+if gw -e TR_REAL_IP_HEADER=X-Forwarded-For -e "TR_REAL_IP_FROM=172.18.0.0/16"; then
+  check "TR_REAL_IP_FROM 和 Docker 的 172.17～172.31 重叠：启动脚本按关处理" bash -c 'docker logs "$1" 2>&1 | grep -q "按关处理"' _ "$net-gw"
+else
+  check "网关模式 Nginx 能起来（地址段不合法）" false
+fi
+: "$gwip"
+docker rm -f "$net-gw" "$net-app" > /dev/null 2>&1 || true
+
+echo "== 生产：trading 命令的规矩（假的 docker，不需要 root、不起容器）"
+prod_env() { printf 'TR_ENV=production\n%s' "${1:-}" > "$tmp/tr/.env"; echo IMAGE_TAG=prod-0000000000000000000000000000000000000000 > "$tmp/tr/state/image.env"; }
+tr_run() { env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 TR_HEALTH_WAIT_S=2 TR_TOPUP_BIN="$tmp/fakebin/topup" FAKE_TOPUP_LOG="$tmp/topup-calls" "$@" 2>&1; }
+export -f prod_env tr_run
+check "生产 on、TopUP 的容器在跑：照常启动，不调 topup stop / start" bash -c 'prod_env; : > "$tmp/topup-calls"; o=$(tr_run FAKE_TOPUP_RUNNING=1 TR_MIN_MEM_MB=1 bash deploy/kit/trading on); grep -q "启动 Trading（生产，和 TopUP 生产共存" <<< "$o" && ! grep -q "TopUP 的容器还在跑" <<< "$o" && [ ! -s "$tmp/topup-calls" ]'
+check "生产 off：不调 topup start" bash -c 'prod_env; : > "$tmp/topup-calls"; o=$(tr_run bash deploy/kit/trading off); grep -q "Trading 已全停（生产，和 TopUP 生产共存" <<< "$o" && [ ! -s "$tmp/topup-calls" ]'
+check "生产：没有轮流模式（set TR_SHARE_WITH_TOPUP 拒绝）" bash -c 'prod_env; ! tr_run bash deploy/kit/trading set TR_SHARE_WITH_TOPUP true > /dev/null && ! grep -q TR_SHARE_WITH_TOPUP "$tmp/tr/.env"'
+check "生产：gen-test-admin 直接拒绝" bash -c 'prod_env; o=$(tr_run bash deploy/kit/trading gen-test-admin) && exit 1; grep -q "生产一律不设测试管理员" <<< "$o"'
+check "生产：.env 里有 TEST_ADMIN_TOKEN_SHA256 就拒绝启动" bash -c 'prod_env "TEST_ADMIN_TOKEN_SHA256=abc"; o=$(tr_run TR_MIN_MEM_MB=1 bash deploy/kit/trading on) && exit 1; grep -q "拒绝启动" <<< "$o"'
+check "环境装好后不能改：命令里写的 TR_ENV 和 .env 不一致就停" bash -c 'prod_env; o=$(tr_run TR_ENV=staging bash deploy/kit/trading status) && exit 1; grep -q "环境装好后不能改" <<< "$o"'
+check "生产：测试环境的 install 拒绝（要写 --production）" bash -c 'prod_env; o=$(tr_run bash deploy/kit/trading install a.example b.example c.example d.example x@example.com) && exit 1; grep -q "环境装好后不能改" <<< "$o"'
+check "生产：restore 不写 --production 拒绝、什么都没动" bash -c 'prod_env; touch "$tmp/tr/x.tar.age"; o=$(tr_run bash deploy/kit/trading restore "$tmp/tr/x.tar.age" --confirm) && exit 1; grep -q "加 --confirm --production" <<< "$o"'
+check "测试环境：restore 写 --production 拒绝" bash -c ': > "$tmp/tr/.env"; o=$(tr_run bash deploy/kit/trading restore "$tmp/tr/x.tar.age" --confirm --production) && exit 1; grep -q "不能写 --production" <<< "$o"'
+check "生产：start-payout 不写 --confirm 拒绝" bash -c 'prod_env; o=$(tr_run bash deploy/kit/trading start-payout) && exit 1; grep -q "start-payout --confirm" <<< "$o"'
+check "生产：TR_REAL_IP_FROM 和 Docker 的 172.17～172.31 重叠、前缀太短都拒绝，什么都不改" bash -c 'prod_env; for v in 172.20.0.0/16 10.0.0.0/8 abc; do tr_run bash deploy/kit/trading set TR_REAL_IP_FROM "$v" > /dev/null && exit 1; done; ! grep -q "^TR_REAL_IP_FROM=" "$tmp/tr/.env"'
+check "生产：TR_REAL_IP_HEADER 只认 off、X-Forwarded-For、X-Real-IP" bash -c 'prod_env; ! tr_run bash deploy/kit/trading set TR_REAL_IP_HEADER Forwarded > /dev/null'
+check "生产：Trading 停着时 set 真实 IP 只保存、不启动" bash -c 'prod_env; o=$(tr_run bash deploy/kit/trading set TR_REAL_IP_FROM 10.1.0.0/16) && grep -q "Trading 现在停着，不启动它" <<< "$o" && grep -q "^TR_REAL_IP_FROM=10.1.0.0/16$" "$tmp/tr/.env"'
+check "轮流模式、Trading 停着：set 只保存、不 compose up（不和 TopUP 抢 80/443）" bash -c 'echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env"; echo IMAGE_TAG=0000000000000000000000000000000000000000 > "$tmp/tr/state/image.env"; o=$(tr_run bash deploy/kit/trading set FX_ALERT_EMAILS a@example.com) && grep -q "Trading 现在停着，不启动它" <<< "$o" && grep -q "^FX_ALERT_EMAILS=a@example.com$" "$tmp/tr/.env"'
+check "backup-key 只认 age 公钥，off 去掉" bash -c 'prod_env; ! tr_run bash deploy/kit/trading backup-key nope > /dev/null && tr_run bash deploy/kit/trading backup-key "age1$(printf "q%.0s" $(seq 1 58))" > /dev/null && [ -s "$tmp/tr/state/backup-amos.pub" ] && tr_run bash deploy/kit/trading backup-key off > /dev/null && [ ! -e "$tmp/tr/state/backup-amos.pub" ]'
+check "trading.log 超过上限就轮转（.1～.5），最多 6 个文件" bash -c 'prod_env; head -c 2000 /dev/zero > "$tmp/tr/logs/trading.log"; for i in 1 2 3 4 5 6 7; do tr_run TR_LOG_MAX_BYTES=1000 bash deploy/kit/trading set TR_QUOTE_BIND 127.0.0.1 > /dev/null; head -c 2000 /dev/zero >> "$tmp/tr/logs/trading.log"; done; [ -f "$tmp/tr/logs/trading.log.5" ] && [ ! -e "$tmp/tr/logs/trading.log.6" ]'
+check "生产的每天备份时间 UTC 18:10 写在 trading 命令里（systemd 覆盖文件）" grep -q 'OnCalendar=\*-\*-\* 18:10:00 UTC' deploy/kit/trading
+check "重跑安装（TR_FIRST）、这台已经部署成功过：不清 paused、不当作没部署过（照样先做更新前备份）" bash -c 'prod_env; rm -f "$tmp/tr/state/first-pending" "$tmp/tr/state/skip"; echo IMAGE_TAG=prod-$(printf "a%.0s" {1..40}) > "$tmp/tr/state/image.env"; echo "$(printf "c%.0s" {1..40})" > "$tmp/tr/state/paused"; o=$(tr_run TR_FIRST=1 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); [ -s "$tmp/tr/state/paused" ] && ! grep -q "发现新版本" <<< "$o" && rm -f "$tmp/tr/state/paused" && o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 $(printf "a%.0s" {1..40})" <<< "$o" && grep -q "没有备份加密密钥" <<< "$o"'
+check "重跑安装（TR_FIRST）、第一次部署没起来（first-pending）：不跳过上次失败的版本、不做更新前备份" bash -c 'prod_env; echo IMAGE_TAG=prod-$(printf "c%.0s" {1..40}) > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; printf "c%.0s" {1..40} > "$tmp/tr/state/skip"; o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 无" <<< "$o" && ! grep -q "没有备份加密密钥" <<< "$o" && [ ! -e "$tmp/tr/state/skip" ]'
+check "生产：TR_REAL_IP_FROM 和 Trading 实际的 Docker 子网（docker network inspect）重叠也拒绝，不重叠照常" bash -c 'prod_env; ! tr_run FAKE_SUBNETS="10.99.0.0/16 192.168.5.0/24" bash deploy/kit/trading set TR_REAL_IP_FROM 10.99.3.0/24 > /dev/null && ! grep -q "^TR_REAL_IP_FROM=" "$tmp/tr/.env" && tr_run FAKE_SUBNETS="10.99.0.0/16" bash deploy/kit/trading set TR_REAL_IP_FROM 10.98.0.0/16 > /dev/null && grep -q "^TR_REAL_IP_FROM=10.98.0.0/16$" "$tmp/tr/.env"'
+check "生产：两次检查隔了 15 分钟以上报\"可能休眠\"；trading on（停过再启动）之后第一次检查不误报" bash -c 'prod_env; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; grep -q "休眠" "$tmp/tr/state/watch" || exit 1; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; tr_run TR_MIN_MEM_MB=1 bash deploy/kit/trading on > /dev/null; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; ! grep -q "休眠" "$tmp/tr/state/watch"'
 exit $fail
