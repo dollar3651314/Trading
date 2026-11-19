@@ -38,8 +38,6 @@ export const SYMBOL_META: Record<string, SymbolMeta> = {
   BCHUSD: { zh: '比特币现金', en: 'Bitcoin Cash', category: 'crypto' },
 };
 
-/** 默认品种顺序（第一次拿到行情之前先按这个显示占位行；和 application.yml 的默认 10 个一致） */
-export const DEFAULT_SYMBOLS = ['XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCNH', 'NAS100', 'XTIUSD', 'BTCUSD', 'ETHUSD'];
 
 /** 品种的展示名：优先用短名称，没有时用接口返回的名称 */
 export function symbolName(code: string, lang: Lang, fromApi?: { nameZh?: string; nameEn?: string }): string {

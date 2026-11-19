@@ -5,15 +5,17 @@
 import { render, screen, within } from '@testing-library/react';
 import App from './App';
 
+const hold = vi.hoisted(() => ({ pending: false }));
 const CRYPTO = vi.hoisted(() => ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BNBUSD', 'DOGEUSD', 'ADAUSD', 'LTCUSD', 'DOTUSD', 'BCHUSD']);
 
 vi.mock('./api/quotes', async (orig) => {
   const m = await orig<typeof import('./api/quotes')>();
   const items = CRYPTO.map((symbol) => ({ symbol, nameZh: `${symbol} 全称`, nameEn: symbol, bid: null, changePct: null, time: null, status: 'OPEN' as const }));
-  return { ...m, fetchPublicQuotes: () => Promise.resolve({ sample: false, pricesHidden: true, items }) };
+  return { ...m, fetchPublicQuotes: () => (hold.pending ? new Promise<never>(() => undefined) : Promise.resolve({ sample: false, pricesHidden: true, items })) };
 });
 
 beforeEach(() => {
+  hold.pending = false;
   localStorage.clear();
   window.history.replaceState(null, '', '/');
 });
@@ -27,5 +29,14 @@ describe('官网行情区：生产只开加密货币（R-1）', () => {
     expect(rows.map((r) => r.getAttribute('data-symbol'))).toEqual(CRYPTO);
     expect(within(board).getAllByRole('tab').map((t) => t.textContent)).toEqual(['热门', '加密货币']);
     expect(within(rows[7]).getByText('莱特币')).toBeInTheDocument();
+  });
+
+  it('第一次拿到行情之前显示"加载中"，不先摆一份写死的外汇、黄金占位', async () => {
+    hold.pending = true;
+    render(<App initialLang="zh-CN" />);
+    const board = await screen.findByTestId('quote-board');
+    expect(within(board).getByTestId('board-loading')).toHaveTextContent('加载中');
+    expect(within(board).queryAllByTestId('quote-row')).toHaveLength(0);
+    expect(board.textContent).not.toMatch(/XAUUSD|EURUSD/);
   });
 });
