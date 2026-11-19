@@ -298,7 +298,8 @@ public class TopUpProvider implements PaymentProvider {
       }
       case "withdrawal.updated" -> {
         PayoutView v = view(d);
-        yield Optional.of(new PayoutEvent(id, v.ref(), v.merchantRef(), v.state(), v.txHash(), v.reason()));
+        yield Optional.of(new PayoutEvent(id, v.ref(), v.merchantRef(), v.state(), v.txHash(), v.reason(), v.amount(), v.network(),
+            v.address().isBlank() ? null : v.address()));
       }
       default -> Optional.empty();
     };
