@@ -211,7 +211,13 @@ public class TopUpProvider implements PaymentProvider {
     body.put("amount", amountText(amount));
     body.put("customer_id", customerId);
     body.put("merchant_ref", merchantRef);
-    JsonNode w = ok(call("POST", "withdrawals/", null, body, idemKey)).body();
+    Reply r = call("POST", "withdrawals/", null, body, idemKey);
+    // v1.1：商户单号永久唯一，用过的返回 409 和原来那笔的付款编号（error.withdrawal_no）
+    if (r.status() == 409 && "duplicate_merchant_ref".equals(r.errorCode())) {
+      String existing = r.body().path("error").path("withdrawal_no").asString("");
+      if (!existing.isBlank()) throw new DuplicateRef(r.status(), existing);
+    }
+    JsonNode w = ok(r).body();
     return new Submitted(w.path("withdrawal_no").asString(), state(w.path("status").asString("")));
   }
 

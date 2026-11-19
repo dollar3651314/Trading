@@ -171,6 +171,72 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     assertThat(frozen(uid)).isEqualByComparingTo("100");
   }
 
+  String ledgerSum() {
+    return jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+  }
+
+  @Test
+  void 提交时商户单号已用过_原来那笔金额链地址都对得上_认领付款编号_照常完成_不多付不多记账() throws Exception {
+    // TopUP v1.1：商户单号永久唯一。场景：早先那次提交在 TopUP 建了单但返回丢了、防重键又过了期，再提时 409 duplicate_merchant_ref
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    FAKE.down = true;
+    withdraws.approve(id, 7);
+    // 交给 TopUP 的金额是扣完手续费的（看付款记录）
+    BigDecimal pay = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, id);
+    FakeTopUp.Withdrawal early = FAKE.addWithdrawal("tron", TRON, pay, String.valueOf(publicNo(id)));
+    String ledger = ledgerSum();
+    FAKE.down = false;
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).as("没有再建一笔").isEqualTo(1);
+    assertThat(api.payoutInfo(id).orElseThrow().providerRef()).as("认领了原来的付款编号").isEqualTo(early.no);
+    assertThat(api.payoutInfo(id).orElseThrow().state()).isEqualTo(PayoutState.PENDING);
+    assertThat(ledgerSum()).as("认领不记账").isEqualTo(ledger);
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    // 之后照常跟踪：回调按付款编号对上，完成
+    assertThat(deliver(FAKE.moveWithdrawal(early.no, "completed", "d".repeat(64), null))).isEqualTo(200);
+    assertThat(status(id)).isEqualTo("COMPLETED");
+    assertThat(frozen(uid)).isEqualByComparingTo("0");
+    assertThat(balance(uid)).isEqualByComparingTo("900");
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).isEqualTo(1);
+  }
+
+  @Test
+  void 提交时商户单号已用过_原来那笔对不上_记未知写明原因_不重提不退款() throws Exception {
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    FAKE.down = true;
+    withdraws.approve(id, 7);
+    // 同一个商户单号的另一笔：金额不一样
+    BigDecimal pay = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, id);
+    FakeTopUp.Withdrawal other = FAKE.addWithdrawal("tron", TRON, pay.add(BigDecimal.ONE), String.valueOf(publicNo(id)));
+    String ledger = ledgerSum();
+    FAKE.down = false;
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    PaymentApi.PayoutInfo info = api.payoutInfo(id).orElseThrow();
+    assertThat(info.state()).isEqualTo(PayoutState.UNKNOWN);
+    assertThat(info.providerRef()).as("不认领").isNull();
+    assertThat(info.reason()).contains(other.no).contains("金额不一样").contains("核对");
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).as("没有再提").isEqualTo(1);
+    assertThat(status(id)).as("不退款，等人查").isEqualTo("APPROVED");
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    assertThat(ledgerSum()).isEqualTo(ledger);
+  }
+
+  @Test
+  void 地址比较_TRON区分大小写_以太坊BSC不区分() {
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.TRC20, TRON, TRON.toLowerCase())).isFalse();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.TRC20, TRON, TRON)).isTrue();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.ERC20, ETH, ETH.toLowerCase())).isTrue();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.BSC, ETH, ETH.toUpperCase().replace("0X", "0x"))).isTrue();
+  }
+
   @Test
   void TopUP驳回或失败_冻结全部退回_客户收到通知_AC_W5() throws Exception {
     long uid = user("1000", true);

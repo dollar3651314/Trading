@@ -197,6 +197,8 @@ public class PaymentService implements PaymentApi, PaymentAdminApi {
     } catch (Unavailable e) {
       log.warn("提现 {} 交给 {} 失败（稍后用同一个防重键重提）：{}", withdrawalId, p.code(), e.getMessage());
       return new Retry(e.getMessage());
+    } catch (PaymentProvider.DuplicateRef e) {
+      return adopt(p, r, e.existingRef);
     } catch (PaymentProvider.ProviderError e) {
       if (REFUSE_CODES.contains(e.code)) {
         tx.executeWithoutResult(s -> mapper.savePayout(r.id, null, PayoutState.REJECTED.name(), null, "提供方拒收：" + e.code, now()));
@@ -214,6 +216,52 @@ public class PaymentService implements PaymentApi, PaymentAdminApi {
     });
     log.info("提现 {} 已交 {}，付款编号 {}，状态 {}", withdrawalId, p.code(), got.ref(), after);
     return after.notPaid() ? new Refused(after.name()) : new Accepted(got.ref(), after);
+  }
+
+  /**
+   * 提交时提供方说"商户单号已经用过"（TopUP v1.1，带原来那笔的付款编号）：多半是 Trading 自己早先那次提交——返回丢了、
+   * 防重键又过了 24 小时。查那笔付款，金额、链、收款地址都和这笔提现一样 → 认领它的付款编号，之后照常跟踪状态（不会再建一笔）；
+   * 对不上（或者提供方查不到）→ 记"未知"并写明原因，转人工核对，不退款、不重提。查询本身失败 → 稍后重试
+   */
+  private Submit adopt(PaymentProvider p, PaymentMapper.PayoutRow r, String existingRef) {
+    Optional<PaymentProvider.PayoutView> v;
+    try {
+      v = call(p, () -> p.payout(existingRef));
+    } catch (Unavailable | PaymentProvider.ProviderError e) {
+      log.warn("提现 {} 的商户单号在 {} 已经用过（付款编号 {}），查这笔付款失败，稍后重试：{}", r.withdrawalId, p.code(), existingRef, e.getMessage());
+      return new Retry("商户单号已用过，查原来那笔失败");
+    }
+    String why = v.isEmpty() ? "提供方查不到这笔付款" : payoutMismatch(r, v.get());
+    if (why != null) {
+      String reason = "提供方说商户单号 " + r.merchantRef + " 已经被付款 " + existingRef + " 用过，但" + why + "：不是这笔提现的付款，请到提供方后台核对";
+      tx.executeWithoutResult(s -> mapper.savePayout(r.id, null, PayoutState.UNKNOWN.name(), null, reason, now()));
+      log.error("提现 {}：{}", r.withdrawalId, reason);
+      return new Retry("商户单号冲突，转人工核对");
+    }
+    PaymentProvider.PayoutView got = v.get();
+    PayoutState after = tx.execute(s -> {
+      PaymentMapper.PayoutRow l = mapper.lockPayout(r.withdrawalId);
+      PayoutState cur = PayoutState.valueOf(l.status);
+      PayoutState next = advance(cur, got.state()) ? got.state() : cur;
+      mapper.savePayout(l.id, existingRef, next.name(), got.txHash(), null, now());
+      return next;
+    });
+    log.warn("提现 {}：商户单号在 {} 已经用过，核对金额、链、地址一致，认领原来的付款 {}（状态 {}）", r.withdrawalId, p.code(), existingRef, after);
+    return after.notPaid() ? new Refused(after.name()) : new Accepted(existingRef, after);
+  }
+
+  /** 提供方的一笔付款是不是这笔提现的：金额、链、收款地址都一样返回 null，否则返回原因 */
+  static String payoutMismatch(PaymentMapper.PayoutRow row, PaymentProvider.PayoutView v) {
+    if (v.amount() == null || row.amount.compareTo(v.amount()) != 0) return "金额不一样（这笔 " + row.amount.toPlainString() + "，那笔 " + v.amount() + "）";
+    if (v.network() == null || !row.network.equals(v.network().name())) return "链不一样（这笔 " + row.network + "，那笔 " + v.network() + "）";
+    if (!sameAddress(PayNetwork.valueOf(row.network), row.address, v.address())) return "收款地址不一样";
+    return null;
+  }
+
+  /** 收款地址是否相同：TRON 的 Base58 区分大小写；以太坊、BSC 的十六进制地址大小写只是校验写法，不区分 */
+  public static boolean sameAddress(PayNetwork network, String a, String b) {
+    if (a == null || b == null) return false;
+    return network == PayNetwork.TRC20 ? a.equals(b) : a.equalsIgnoreCase(b);
   }
 
   /** 状态只往前走；"未知"可以被任何确定的状态替换 */

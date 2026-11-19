@@ -218,6 +218,14 @@ public final class FakeTopUp implements AutoCloseable {
     return emit("withdrawal.updated", withdrawalView(w));
   }
 
+  /** 测试用：TopUP 那边直接有一笔付款（例如 Trading 早先提交、返回丢了；或者同一个商户下别人建的），不发回调 */
+  public Withdrawal addWithdrawal(String chain, String to, BigDecimal amount, String merchantRef) {
+    String no = "WD-" + seq.incrementAndGet();
+    Withdrawal w = new Withdrawal(no, chain, to, amount, null, merchantRef);
+    withdrawals.put(no, w);
+    return w;
+  }
+
   /** 按商户单号（Trading 提现对外编号）找提现 */
   public Optional<Withdrawal> byMerchantRef(String ref) {
     return withdrawals.values().stream().filter(w -> ref.equals(w.merchantRef)).findFirst();
@@ -381,6 +389,15 @@ public final class FakeTopUp implements AutoCloseable {
           return new Reply(422, error("invalid_param"));
         }
         if (amt.signum() <= 0 || amt.scale() > 6) return new Reply(422, error("invalid_param"));
+        // v1.1（TG-1）：商户单号永久唯一，用过的返回 409 duplicate_merchant_ref，带原来那笔的提现号（server/pay/core.js、common.js）
+        String ref = b.path("merchant_ref").asString("");
+        if (!ref.isEmpty()) {
+          Optional<Withdrawal> used = byMerchantRef(ref);
+          if (used.isPresent()) {
+            return new Reply(409, JSON.writeValueAsString(Map.of("error", Map.of("code", "duplicate_merchant_ref", "message",
+                "merchant_ref already used by another withdrawal (see error.withdrawal_no)", "field", "merchant_ref", "withdrawal_no", used.get().no))));
+          }
+        }
         if (amt.compareTo(available) > 0) return new Reply(422, error("insufficient_balance"));
         available = available.subtract(amt);
         String no = "WD-" + seq.incrementAndGet();
