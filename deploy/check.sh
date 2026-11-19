@@ -306,7 +306,8 @@ fp_case() { # fp_case <watch|on|rollback> <健康检查报的版本> → 标记�
   prod_env ""; echo "IMAGE_TAG=prod-$a" > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; echo "$b" > "$tmp/tr/state/previous"
   pid=$(fp_health "$2"); sleep 0.5
   case "$1" in
-    watch) tr_run bash deploy/kit/trading watch > /dev/null ;;
+    watch) tr_run FAKE_QUOTE_HEALTHY=1 bash deploy/kit/trading watch > /dev/null ;;
+    watch-noquote) tr_run bash deploy/kit/trading watch > /dev/null ;;
     on) tr_run TR_MIN_MEM_MB=1 FAKE_TRADING_RUNNING=1 FAKE_QUOTE_HEALTHY=1 bash deploy/kit/trading on > /dev/null ;;
     rollback) tr_run FAKE_QUOTE_HEALTHY=1 bash deploy/kit/trading rollback > /dev/null ;;
   esac
@@ -316,6 +317,7 @@ fp_case() { # fp_case <watch|on|rollback> <健康检查报的版本> → 标记�
 export -f fp_case
 check "首次部署标记：watch 看到当前版本健康运行就删" bash -c '[ "$(fp_case watch "$(printf "a%.0s" {1..40})")" = 无 ]'
 check "首次部署标记：watch 看到的版本不是 image.env 当前版本，不删" bash -c '[ "$(fp_case watch "$(printf "c%.0s" {1..40})")" = 在 ]'
+check "首次部署标记：trading-app 健康、版本对，但报价服务不健康，watch 不删" bash -c '[ "$(fp_case watch-noquote "$(printf "a%.0s" {1..40})")" = 在 ]'
 check "首次部署标记：on 启动后当前版本健康就删" bash -c '[ "$(fp_case on "$(printf "a%.0s" {1..40})")" = 无 ]'
 check "首次部署标记：rollback 回到上一个版本、健康就删" bash -c '[ "$(fp_case rollback "$(printf "b%.0s" {1..40})")" = 无 ]'
 exit $fail
