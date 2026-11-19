@@ -140,6 +140,10 @@ case "$1" in
   # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
   ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; esac; exit 0 ;;
   rm) exit 0 ;;
+  # Trading 的 Docker 网络的子网（真实 IP 重叠检查用）：FAKE_SUBNETS
+  network) echo "${FAKE_SUBNETS:-}"; exit 0 ;;
+  # 镜像的版本号（trading update 用）：FAKE_REVISION
+  image) [ -n "${FAKE_REVISION:-}" ] && echo "$FAKE_REVISION"; exit 0 ;;
   *) exit 1 ;;
 esac
 FAKE
@@ -278,4 +282,8 @@ check "轮流模式、Trading 停着：set 只保存、不 compose up（不和 T
 check "backup-key 只认 age 公钥，off 去掉" bash -c 'prod_env; ! tr_run bash deploy/kit/trading backup-key nope > /dev/null && tr_run bash deploy/kit/trading backup-key "age1$(printf "q%.0s" $(seq 1 58))" > /dev/null && [ -s "$tmp/tr/state/backup-amos.pub" ] && tr_run bash deploy/kit/trading backup-key off > /dev/null && [ ! -e "$tmp/tr/state/backup-amos.pub" ]'
 check "trading.log 超过上限就轮转（.1～.5），最多 6 个文件" bash -c 'prod_env; head -c 2000 /dev/zero > "$tmp/tr/logs/trading.log"; for i in 1 2 3 4 5 6 7; do tr_run TR_LOG_MAX_BYTES=1000 bash deploy/kit/trading set TR_QUOTE_BIND 127.0.0.1 > /dev/null; head -c 2000 /dev/zero >> "$tmp/tr/logs/trading.log"; done; [ -f "$tmp/tr/logs/trading.log.5" ] && [ ! -e "$tmp/tr/logs/trading.log.6" ]'
 check "生产的每天备份时间 UTC 18:10 写在 trading 命令里（systemd 覆盖文件）" grep -q 'OnCalendar=\*-\*-\* 18:10:00 UTC' deploy/kit/trading
+check "重跑安装（TR_FIRST）、这台已经部署成功过：不清 paused、不当作没部署过（照样先做更新前备份）" bash -c 'prod_env; rm -f "$tmp/tr/state/first-pending" "$tmp/tr/state/skip"; echo IMAGE_TAG=prod-$(printf "a%.0s" {1..40}) > "$tmp/tr/state/image.env"; echo "$(printf "c%.0s" {1..40})" > "$tmp/tr/state/paused"; o=$(tr_run TR_FIRST=1 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); [ -s "$tmp/tr/state/paused" ] && ! grep -q "发现新版本" <<< "$o" && rm -f "$tmp/tr/state/paused" && o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 $(printf "a%.0s" {1..40})" <<< "$o" && grep -q "没有备份加密密钥" <<< "$o"'
+check "重跑安装（TR_FIRST）、第一次部署没起来（first-pending）：不跳过上次失败的版本、不做更新前备份" bash -c 'prod_env; echo IMAGE_TAG=prod-$(printf "c%.0s" {1..40}) > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; printf "c%.0s" {1..40} > "$tmp/tr/state/skip"; o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 无" <<< "$o" && ! grep -q "没有备份加密密钥" <<< "$o" && [ ! -e "$tmp/tr/state/skip" ]'
+check "生产：TR_REAL_IP_FROM 和 Trading 实际的 Docker 子网（docker network inspect）重叠也拒绝，不重叠照常" bash -c 'prod_env; ! tr_run FAKE_SUBNETS="10.99.0.0/16 192.168.5.0/24" bash deploy/kit/trading set TR_REAL_IP_FROM 10.99.3.0/24 > /dev/null && ! grep -q "^TR_REAL_IP_FROM=" "$tmp/tr/.env" && tr_run FAKE_SUBNETS="10.99.0.0/16" bash deploy/kit/trading set TR_REAL_IP_FROM 10.98.0.0/16 > /dev/null && grep -q "^TR_REAL_IP_FROM=10.98.0.0/16$" "$tmp/tr/.env"'
+check "生产：两次检查隔了 15 分钟以上报\"可能休眠\"；trading on（停过再启动）之后第一次检查不误报" bash -c 'prod_env; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; grep -q "休眠" "$tmp/tr/state/watch" || exit 1; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; tr_run TR_MIN_MEM_MB=1 bash deploy/kit/trading on > /dev/null; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; ! grep -q "休眠" "$tmp/tr/state/watch"'
 exit $fail

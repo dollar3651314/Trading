@@ -797,13 +797,35 @@ realip_from_ok() {
   done
 }
 
+# 真实 IP 的地址段和 Trading 自己的 Docker 网络（internal、quote、egress，加上默认的 bridge）实际用的子网重叠吗（审查 #27 🟡：
+# Docker 的地址池可以改，不一定在 172.17～172.31 里）。只比 IPv4；查不到网络（还没起过）就不算重叠。重叠的输出那个子网
+realip_overlaps_docker() {
+  local v=$1 nets item addr pfx n s e sub saddr spfx sn ss se
+  nets=$(docker network inspect trading_internal trading_quote trading_egress bridge --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' 2> /dev/null || true)
+  for item in ${v//,/ }; do
+    addr=${item%%/*}; pfx=32; [[ $item == */* ]] && pfx=$((10#${item#*/}))
+    n=$(ipv4_int "$addr") || continue
+    s=$(( n & ~((1 << (32 - pfx)) - 1) )); e=$(( s + (1 << (32 - pfx)) - 1 ))
+    for sub in $nets; do
+      saddr=${sub%%/*}; spfx=${sub#*/}
+      sn=$(ipv4_int "$saddr") || continue
+      [[ $spfx =~ ^[0-9]+$ ]] || continue
+      ss=$(( sn & ~((1 << (32 - spfx)) - 1) )); se=$(( ss + (1 << (32 - spfx)) - 1 ))
+      if [ "$e" -ge "$ss" ] && [ "$s" -le "$se" ]; then echo "$sub"; return 0; fi
+    done
+  done
+  return 1
+}
+
 # 生产才有的设置：先检查值，改完经 Nginx 的后台端口查一次健康检查，不通过就换回原来的值
 set_prod() {
   local k=$1 v=$2 old body _
   case "$k" in
     TR_REAL_IP_HEADER) case "$v" in off | X-Forwarded-For | X-Real-IP) ;; *) die "TR_REAL_IP_HEADER 只能是 off、X-Forwarded-For、X-Real-IP（按实测网关带的那个填）；什么都没有改" ;; esac ;;
     TR_REAL_IP_FROM) [ -z "$v" ] || [ "$v" = off ] || realip_from_ok "$v" || die "TR_REAL_IP_FROM 要是网关的地址段（逗号分隔；IPv4 前缀 16～32、IPv6 48～128），不能和 Docker 的 172.17～172.31 重叠；什么都没有改"
-      [ "$v" != off ] || v="" ;;
+      [ "$v" != off ] || v=""
+      local hit
+      if [ -n "$v" ] && hit=$(realip_overlaps_docker "$v"); then die "TR_REAL_IP_FROM 和 Trading 的 Docker 网络 $hit 重叠（信任它等于信任所有人带的请求头）；什么都没有改"; fi ;;
     TR_QUOTE_BIND) case "$v" in 127.0.0.1 | 0.0.0.0) ;; *) die "TR_QUOTE_BIND 只能是 127.0.0.1（报价对外不发布，默认）或 0.0.0.0（在平台上发布 8085 时）" ;; esac ;;
   esac
   old=$(envget "$k")
@@ -994,10 +1016,11 @@ cmd_update() {
   local new cur
   new=$(revision "$REG/trading-app:$TRACK"); cur=$(current_rev)
   [ -n "$new" ] || { log "$TRACK 镜像没有版本号，跳过"; return 1; }
-  # 安装（TR_FIRST）重新运行时：上次没起来的版本不跳过；image.env 里记着的版本没在健康运行就当作还没部署过
-  if [ -n "${TR_FIRST:-}" ]; then
-    rm -f "$STATE/skip" "$STATE/paused"
-    [ "$(health_field status "$(health)")" = UP ] || cur=""
+  # 安装（TR_FIRST）重新运行、并且这台机器还从没部署成功过（image.env 空，或者第一次部署没起来留下的 state/first-pending）时：
+  # 上次没起来的版本不跳过、当作还没部署过（没有可备份的旧版本）。已经部署成功过的机器重跑安装命令照常走：不清 paused、更新前照样备份（审查 #27 🟡）
+  if [ -n "${TR_FIRST:-}" ] && { [ -z "$cur" ] || [ -f "$STATE/first-pending" ]; }; then
+    rm -f "$STATE/skip"
+    cur=""
   fi
   [ "$new" = "$cur" ] && return 0
   [ "$new" = "$(cat "$STATE/skip" 2>/dev/null || true)" ] && return 0
@@ -1033,8 +1056,11 @@ cmd_update() {
     rm -f "$STATE/backup-backoff"
   fi
   sync_kit "$tag" || { log "取不出 $tag 的工具包，下一分钟再试"; return 1; }
+  # 第一次部署（没有旧版本）：记一个标记，起来了才删；没起来时重跑安装命令按"还没部署过"处理
+  [ -n "$cur" ] || : > "$STATE/first-pending"
   switch_to "$tag" > /dev/null 2>&1 || true
   if wait_healthy "$new"; then
+    rm -f "$STATE/first-pending"
     if [ -n "$cur" ]; then echo "$cur" > "$STATE/previous"; fi
     log "更新成功：$new"
     prune_images
@@ -1586,6 +1612,7 @@ cmd_memguard() {
   [ "$avail" -lt "$MEMGUARD_MB" ] || return 0
   log "内存守护：可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），停 Trading（不碰 TopUP）"
   sysctl_ disable --now trading-deploy.timer trading-backup.timer trading-watch.timer > /dev/null 2>&1 || true
+  rm -f "$STATE/watch-last-run"
   compose stop > /dev/null 2>&1 || true
   date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/memguard-stopped"
   send_mail "内存守护已停 Trading" "可用内存只剩 ${avail} MB（低于 ${MEMGUARD_MB} MB），已停 Trading 的全部容器和自动更新，数据保留；TopUP 没动。查清原因后运行 sudo trading on。" || true
@@ -1653,6 +1680,8 @@ cmd_on() {
   guard_env
   compose up -d > /dev/null 2>&1
   if wait_healthy "$(current_rev)"; then ok "Trading 已启动，健康检查通过"; else bad "Trading 3 分钟内没通过健康检查（sudo trading status 截图给主会话）"; fi
+  # 停过（trading off、内存守护）再启动：检查的间隔从这次重新算，第一次检查不报"可能休眠"（审查 #27 🟡）
+  rm -f "$STATE/watch-last-run"
   sysctl_ enable --now "${TIMERS[@]}" > /dev/null 2>&1 && ok "定时器已打开（含内存守护）"
   rm -f "$STATE/memguard-stopped"
   log "trading on"
@@ -1687,6 +1716,7 @@ cmd_off() {
   # 从这里到数据库停下之前被打断（或备份失败）：按原样恢复 Trading、打开定时器（on_exit）
   [ -z "$running" ] || OFF_RESTORE_TRADING=1
   sysctl_ disable --now "${TIMERS[@]}" > /dev/null 2>&1 || true
+  rm -f "$STATE/watch-last-run"
   ok "定时器已停"
   if [ -n "$running" ]; then
     compose stop trading-web trading-app quote-app > /dev/null 2>&1 || true
