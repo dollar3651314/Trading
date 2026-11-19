@@ -5,13 +5,13 @@
 # 什么时候重跑（#25 审查 🟡：不能变相重跑不稳定的测试）：
 #   - 只看 Maven 自己的 [ERROR] 行里的下载失败（Could not transfer artifact、Could not resolve dependencies / plugin、
 #     Failed to read artifact descriptor、… or one of its dependencies could not be resolved），不看测试和应用自己打的日志；
-#   - 日志里只要有测试失败（Tests run: … Failures / Errors 非 0、There are test failures、测试进程出错）或编译错误，一律不重跑。
+#   - 日志里只要有测试失败（Tests run: … Failures / Errors 非 0、There are test failures、测试进程出错：in the fork、forked VM terminated、forked process）或编译错误，一律不重跑。
 # 测试用例：scripts/ci-mvn-test.sh（CI 的 backend job 先跑它）。
 set -uo pipefail
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 tests_or_compile_failed() {
-  grep -Eq 'Tests run: [0-9]+, Failures: [1-9]|Tests run: [0-9]+, Failures: [0-9]+, Errors: [1-9]|There are test failures|There was a timeout or other error in the fork|COMPILATION ERROR|Compilation failure' "$log"
+  grep -Eq 'Tests run: [0-9]+, Failures: [1-9]|Tests run: [0-9]+, Failures: [0-9]+, Errors: [1-9]|There are test failures|There was a timeout or other error in the fork|in the fork|forked VM terminated|forked process|COMPILATION ERROR|Compilation failure' "$log"
 }
 transfer_failed() {
   grep -Eq '^\[ERROR\] .*(Could not transfer artifact|Could not resolve dependencies|Could not resolve plugin|Failed to read artifact descriptor|or one of its dependencies could not be resolved)' "$log"

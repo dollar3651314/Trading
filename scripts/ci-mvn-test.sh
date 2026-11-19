@@ -25,6 +25,8 @@ case "$MODE" in
   test-and-download) echo "[ERROR] Tests run: 5, Failures: 1, Errors: 0, Skipped: 0"; echo "$dl"; exit 1 ;;
   compile) echo "[ERROR] COMPILATION ERROR :"; echo "[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.15.0:compile (default-compile) on project backend: Compilation failure"; echo "$dl"; exit 1 ;;
   fork) echo "[ERROR] There was a timeout or other error in the fork"; echo "$dl"; exit 1 ;;
+  fork-timeout) echo "[ERROR] Surefire is going to kill self fork JVM. The exit has elapsed 30 seconds after System.exit(0). There was a timeout in the fork"; echo "$dl"; exit 1 ;;
+  fork-vm) echo "[ERROR] The forked VM terminated without properly saying goodbye. VM crash or System.exit called?"; echo "$dl"; exit 1 ;;
 esac
 FAKE
 chmod +x "$tmp/mvn"
@@ -45,4 +47,6 @@ case_ "测试出错、测试自己的日志里有 Could not transfer：不重跑
 case_ "测试失败、同时有下载失败的 [ERROR]：不重跑" test-and-download 1 1
 case_ "编译错误、同时有下载失败的 [ERROR]：不重跑" compile 1 1
 case_ "测试进程出错、同时有下载失败的 [ERROR]：不重跑" fork 1 1
+case_ "测试进程超时（timeout in the fork）、同时有下载失败的 [ERROR]：不重跑" fork-timeout 1 1
+case_ "测试进程意外退出（forked VM terminated）、同时有下载失败的 [ERROR]：不重跑" fork-vm 1 1
 exit $fail
