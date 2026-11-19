@@ -53,12 +53,12 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
   }
 
   FakeTopUp.Withdrawal topup(long id) {
-    return FAKE.byMerchantRef(String.valueOf(publicNo(id))).orElseThrow();
+    return FAKE.byMerchantRef(app.trading.payment.core.PaymentService.merchantRef(publicNo(id))).orElseThrow();
   }
 
   /** 这一笔在 TopUP 建了几单（定时推进会顺带处理库里别的测试留下的提现，所以不看总数） */
   long createdFor(long id) {
-    String ref = String.valueOf(publicNo(id));
+    String ref = app.trading.payment.core.PaymentService.merchantRef(publicNo(id));
     return FAKE.withdrawals.values().stream().filter(w -> ref.equals(w.merchantRef)).count();
   }
 
@@ -245,7 +245,8 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
   }
 
   @Test
-  void 不是Trading发起的提现回调_返回200忽略_提现单和账本都不动_联调R2() throws Exception {
+  @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void 不是Trading发起的提现回调_返回200忽略_提现单和账本都不动_联调R2(org.springframework.boot.test.system.CapturedOutput out) throws Exception {
     // 联调 R-2（11/19）：TopUP 在重试一批不是 Trading 发起的提现状态回调（单号 WD-20261118-*，商户单号 Trading 不认识）。
     // 返回 2xx（TopUP 只把 2xx 当送达，其他一律按 1 分钟…24 小时重试），不改任何提现单、不记账
     long uid = user("1000", true);
@@ -269,9 +270,84 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
       FAKE.pending.clear();
       assertThat(deliver(cb)).as(state).isEqualTo(200);
       assertThat(deliver(cb)).as("重投同一个事件").isEqualTo(200);
+      assertThat(callbackRows(cb.eventId())).as("记了去重，重投直接回 200").isEqualTo(1);
     }
+    assertThat(out.getAll()).as("走到了按单号查找、没找到").contains("付款回调找不到对应的提现：ref=WD-20261118-ZZ6");
     assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).as("账本").isEqualTo(before);
     assertThat(jdbc.queryForObject("SELECT GROUP_CONCAT(CONCAT(id, ':', status) ORDER BY id) FROM wallet_withdrawal", String.class)).as("提现单").isEqualTo(wd);
+  }
+
+  int callbackRows(String eventId) {
+    return jdbc.queryForObject("SELECT COUNT(*) FROM pay_callback WHERE event_id = ?", Integer.class, eventId);
+  }
+
+  String payoutRow(long id) {
+    return jdbc.queryForObject("SELECT CONCAT(COALESCE(provider_ref, '-'), '|', status) FROM pay_payout WHERE withdrawal_id = ?", String.class, id);
+  }
+
+  /** 一个"别人的"付款回调：付款编号 no、商户单号 merchantRef，其余可指定 */
+  FakeTopUp.Callback foreign(String no, String merchantRef, String status, String chain, String to, String amount) {
+    java.util.Map<String, Object> v = new java.util.LinkedHashMap<>();
+    v.put("withdrawal_no", no);
+    v.put("kind", "payout");
+    v.put("chain", chain);
+    v.put("to", to);
+    v.put("amount", amount);
+    v.put("status", status);
+    v.put("txid", null);
+    v.put("reason", "rejected by someone else");
+    v.put("merchant_ref", merchantRef);
+    FakeTopUp.Callback cb = FAKE.emit("withdrawal.updated", v);
+    FAKE.pending.clear();
+    return cb;
+  }
+
+  @Test
+  @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void 别人的付款回调商户单号碰巧等于旧的数字单号_这笔已有别的付款编号_忽略不退款_审查23(org.springframework.boot.test.system.CapturedOutput out) throws Exception {
+    // 改成 trading-<编号> 之前提交、还没结束的提现，库里的商户单号是光秃秃的数字；同一个 TopUP 商户下别人的付款可能用同一个数字
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    FakeTopUp.Withdrawal mine = topup(id);
+    String bare = String.valueOf(publicNo(id));
+    jdbc.update("UPDATE pay_payout SET merchant_ref = ? WHERE withdrawal_id = ?", bare, id);
+    String ledger = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    String payout = payoutRow(id);
+    String wd = status(id);
+    FakeTopUp.Callback cb = foreign("WD-20261118-COLLIDE", bare, "failed", "bsc", ETH, "100.00");
+    assertThat(deliver(cb)).isEqualTo(200);
+    assertThat(callbackRows(cb.eventId())).isEqualTo(1);
+    assertThat(out.getAll()).as("按商户单号对上了、但付款编号不同").contains("对上了提现 " + id).contains("已经记了付款编号 " + mine.no);
+    assertThat(payoutRow(id)).isEqualTo(payout);
+    assertThat(status(id)).as("没被标失败").isEqualTo(wd);
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).as("没退款").isEqualTo(ledger);
+    // 自己的回调（按付款编号）照常处理，旧的数字单号也认得
+    assertThat(deliver(FAKE.moveWithdrawal(mine.no, "completed", "0x" + "c".repeat(64), null))).isEqualTo(200);
+    assertThat(status(id)).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  void 回调比提交的返回先到_金额链地址都对得上_照常处理并记下付款编号_对不上的忽略_审查23() throws Exception {
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    FakeTopUp.Withdrawal mine = topup(id);
+    // 模拟"回调先到"：Trading 还没记下付款编号
+    jdbc.update("UPDATE pay_payout SET provider_ref = NULL WHERE withdrawal_id = ?", id);
+    String ref = app.trading.payment.core.PaymentService.merchantRef(publicNo(id));
+    String ledger = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    // 商户单号一样但金额、链、地址任一不对：忽略
+    for (FakeTopUp.Callback bad : List.of(foreign("WD-X-1", ref, "failed", "bsc", ETH, "99.00"), foreign("WD-X-2", ref, "failed", "tron", ETH, "100.00"),
+        foreign("WD-X-3", ref, "failed", "bsc", "0x" + "9".repeat(40), "100.00"))) {
+      assertThat(deliver(bad)).isEqualTo(200);
+    }
+    assertThat(payoutRow(id)).startsWith("-|");
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).isEqualTo(ledger);
+    // 真的那笔先到：金额、链、地址都对得上 → 处理，并记下付款编号
+    FAKE.pending.clear();
+    assertThat(deliver(FAKE.moveWithdrawal(mine.no, "approved", null, null))).isEqualTo(200);
+    assertThat(payoutRow(id)).isEqualTo(mine.no + "|APPROVED");
   }
 
   @Test
