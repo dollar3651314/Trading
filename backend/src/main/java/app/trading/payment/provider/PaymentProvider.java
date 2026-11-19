@@ -66,7 +66,9 @@ public interface PaymentProvider {
 
   record DepositEvent(String eventId, String customerId, PayNetwork network, String address, String txHash, BigDecimal amount, BigDecimal fee) implements Event {}
 
-  record PayoutEvent(String eventId, String ref, String merchantRef, PayoutState state, String txHash, String reason) implements Event {}
+  /** amount、network、address：回调里这笔付款的金额、链、收款地址（只按商户单号对上时核对用，见 PaymentService.payoutEvent）；没有时为空 */
+  record PayoutEvent(String eventId, String ref, String merchantRef, PayoutState state, String txHash, String reason, BigDecimal amount, PayNetwork network,
+      String address) implements Event {}
 
   /** 到账冲正（TopUP 还没有，TG-11；测试替身用） */
   record ReversalEvent(String eventId, String depositRef) implements Event {}

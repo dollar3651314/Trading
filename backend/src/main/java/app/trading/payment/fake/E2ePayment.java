@@ -97,10 +97,10 @@ class E2ePayment {
       return ResponseEntity.ok(Map.of("head", 0));
     }
 
-    /** id 是客户端和后台看到的提现对外编号（= 交给 TopUP 的 merchant_ref） */
+    /** id 是客户端和后台看到的提现对外编号（交给 TopUP 的 merchant_ref 是 trading-<id>） */
     @PostMapping("/api/e2e/wallet/withdrawals/{id}/confirm")
     ResponseEntity<Map<String, String>> confirm(@PathVariable long id) {
-      Optional<FakeTopUp.Withdrawal> w = e2e.fake.byMerchantRef(String.valueOf(id));
+      Optional<FakeTopUp.Withdrawal> w = e2e.fake.byMerchantRef(app.trading.payment.core.PaymentService.merchantRef(id));
       if (w.isEmpty()) return ResponseEntity.notFound().build();
       String no = w.get().no;
       e2e.fake.moveWithdrawal(no, "approved", null, null);

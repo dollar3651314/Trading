@@ -225,7 +225,7 @@ class PaymentDepositFlowTest extends PaymentTestSupport {
     deliver(FAKE.deposit("tron", tronOld, "50").orElseThrow());
     assertThat(balance(uid)).isEqualByComparingTo("950");
     // 进行中的提现由 TopUP 付完
-    String no = FAKE.byMerchantRef(String.valueOf(jdbc.queryForObject("SELECT public_no FROM wallet_withdrawal WHERE id = ?", Long.class, wid))).orElseThrow().no;
+    String no = FAKE.byMerchantRef(app.trading.payment.core.PaymentService.merchantRef(jdbc.queryForObject("SELECT public_no FROM wallet_withdrawal WHERE id = ?", Long.class, wid))).orElseThrow().no;
     deliver(FAKE.moveWithdrawal(no, "completed", "e".repeat(64), null));
     assertThat(jdbc.queryForObject("SELECT status FROM wallet_withdrawal WHERE id = ?", String.class, wid)).isEqualTo("COMPLETED");
   }
@@ -302,7 +302,7 @@ class PaymentDepositFlowTest extends PaymentTestSupport {
     WithdrawTestHooks.advance(withdraws);
     withdraws.approve(wid, 7);
     long no = jdbc.queryForObject("SELECT public_no FROM wallet_withdrawal WHERE id = ?", Long.class, wid);
-    FakeTopUp.Withdrawal w = FAKE.byMerchantRef(String.valueOf(no)).orElseThrow();
+    FakeTopUp.Withdrawal w = FAKE.byMerchantRef(app.trading.payment.core.PaymentService.merchantRef(no)).orElseThrow();
     recon.run();
     assertThat(jdbc.queryForList("SELECT kind FROM wallet_recon_issue WHERE user_id = ? AND status = 'OPEN'", String.class, uid)).as("都还在等放款：一致")
         .doesNotContain("PAYOUT_STATUS_MISMATCH");
