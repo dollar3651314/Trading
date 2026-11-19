@@ -281,7 +281,8 @@ check_mysql_swap() {
   fi
 }
 
-# 第一次部署的标记 state/first-pending（cmd_update）：现在 image.env 记的版本已经健康运行（status=UP、version 是它）就删掉。
+# 第一次部署的标记 state/first-pending（cmd_update）：现在 image.env 记的版本已经健康运行（trading-app status=UP、version 是它，
+# 并且报价服务健康——和 update 判定成功是同一个标准）就删掉。
 # 第一次部署健康检查没过、之后经 on、retry 或应用自己变健康时，不删的话上线后重跑 install 会被当成首次部署（跳过更新前备份、不自动换回）。
 # watch、on、rollback 调用；参数是已经取到的健康检查返回（没有就现取）
 clear_first_pending() {
@@ -289,7 +290,7 @@ clear_first_pending() {
   local body=${1:-} rev
   [ -n "$body" ] || body=$(health)
   rev=$(current_rev)
-  if [ -n "$rev" ] && [ "$(health_field status "$body")" = UP ] && [ "$(health_field version "$body")" = "$rev" ]; then
+  if [ -n "$rev" ] && [ "$(health_field status "$body")" = UP ] && [ "$(health_field version "$body")" = "$rev" ] && quote_healthy; then
     rm -f "$STATE/first-pending"; log "第一次部署的版本 $rev 已经健康运行，去掉首次部署标记" > /dev/null
   fi
   return 0
