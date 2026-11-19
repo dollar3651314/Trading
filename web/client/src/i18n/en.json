@@ -390,7 +390,7 @@
       "reversed": "Reversed"
     },
     "notOpenTitle": "Deposits are not open yet",
-    "notOpenHint": "Deposit channels are being prepared. Your deposit address will appear here once they open. Questions? Contact info@example.com",
+    "notOpenHint": "Deposit channels are being prepared. Your deposit address will appear here once they open.",
     "generated": "{{network}} deposit address created",
     "generatedBody": "You will always get this address for this network",
     "generatedTag": "Created",

@@ -1,12 +1,9 @@
 /**
- * 官网的固定配置：联系邮箱、客户端地址、品种的短名称和分类。
+ * 官网的固定配置：客户端地址、品种的短名称和分类。（联系邮箱、公司信息、牌照都不写：Amos 11/19，生产方案 v1 07 页 R-6）
  * 行情显示哪些品种由后端配置决定（application.yml 的 trading.market.public-quotes.symbols），这里只补充展示用的短名称和分类；
  * 后端返回了这里没有的代码时，名称用接口返回的中英文名，只出现在"热门"分类。
  */
 import type { Lang } from './i18n/lang';
-
-/** 联系邮箱（v2 需求第 10 节 F2-3） */
-export const CONTACT_EMAIL = 'info@example.com';
 
 /** 分类（顺序就是行情面板的分类标签顺序，"热门"是全部） */
 export const CATEGORIES = ['hot', 'fx', 'metal', 'index', 'energy', 'crypto'] as const;
@@ -18,7 +15,7 @@ export interface SymbolMeta {
   category: Exclude<Category, 'hot'>;
 }
 
-/** 默认 10 个品种的短名称（品种表里的全称太长，例如原油），和 V4 品种表的代码一致 */
+/** 品种的短名称（品种表里的全称太长，例如原油），和 V4 品种表的代码一致 */
 export const SYMBOL_META: Record<string, SymbolMeta> = {
   XAUUSD: { zh: '黄金', en: 'Gold', category: 'metal' },
   XAGUSD: { zh: '白银', en: 'Silver', category: 'metal' },
@@ -30,10 +27,19 @@ export const SYMBOL_META: Record<string, SymbolMeta> = {
   XTIUSD: { zh: '美国原油', en: 'US Crude Oil', category: 'energy' },
   BTCUSD: { zh: '比特币', en: 'Bitcoin', category: 'crypto' },
   ETHUSD: { zh: '以太坊', en: 'Ethereum', category: 'crypto' },
+  // 生产只开加密货币（生产方案 v1 07 页 R-1）：官网列 10 个币安品种（生产 FX_PUBLIC_QUOTES_SYMBOLS），其余 8 个的短名称和分类
+  SOLUSD: { zh: 'Solana', en: 'Solana', category: 'crypto' },
+  XRPUSD: { zh: '瑞波币', en: 'XRP', category: 'crypto' },
+  BNBUSD: { zh: '币安币', en: 'BNB', category: 'crypto' },
+  DOGEUSD: { zh: '狗狗币', en: 'Dogecoin', category: 'crypto' },
+  ADAUSD: { zh: '艾达币', en: 'Cardano', category: 'crypto' },
+  LTCUSD: { zh: '莱特币', en: 'Litecoin', category: 'crypto' },
+  DOTUSD: { zh: '波卡', en: 'Polkadot', category: 'crypto' },
+  BCHUSD: { zh: '比特币现金', en: 'Bitcoin Cash', category: 'crypto' },
 };
 
-/** 默认品种顺序（第一次拿到行情之前先按这个显示占位行） */
-export const DEFAULT_SYMBOLS = Object.keys(SYMBOL_META);
+/** 默认品种顺序（第一次拿到行情之前先按这个显示占位行；和 application.yml 的默认 10 个一致） */
+export const DEFAULT_SYMBOLS = ['XAUUSD', 'XAGUSD', 'EURUSD', 'GBPUSD', 'USDJPY', 'USDCNH', 'NAS100', 'XTIUSD', 'BTCUSD', 'ETHUSD'];
 
 /** 品种的展示名：优先用短名称，没有时用接口返回的名称 */
 export function symbolName(code: string, lang: Lang, fromApi?: { nameZh?: string; nameEn?: string }): string {

@@ -1,6 +1,7 @@
 /**
  * 系统配置：只列真正生效的配置项（出金限额、冷静期、白名单、确认数、登录锁定、IP 白名单、余额调整上限、追保通知节流、热钱包余额告警下限）。
  * 热钱包余额告警下限（分组 hotWallet）：0 = 不告警（默认，负责人 2026-10-17），显示为"0（不告警）"。
+ * 钱包提供方可用余额告警下限（分组 payment，payment.balance.minUsdt，生产方案 v1 07 页 R-5）：同样 0 = 不告警；生产初始 5,000（Amos 11/19）。
  * 修改是高危操作，二次确认并写审计。
  */
 import { useCallback } from 'react';
@@ -21,6 +22,9 @@ import { shortTime } from '../../utils/display';
 /** 手续费币单位的显示名 */
 const COIN_UNITS: Partial<Record<SystemConfig['unit'], string>> = { eth: 'ETH', bnb: 'BNB', trx: 'TRX' };
 
+/** 余额告警下限的分组：0 = 不告警 */
+const ALERT_GROUPS = new Set<SystemConfig['group']>(['hotWallet', 'payment']);
+
 /** 新值的格式：USDT 最多 2 位小数；手续费币最多 8 位小数（和后端一致）；其余是整数 */
 function valuePattern(unit: SystemConfig['unit']): RegExp {
   if (unit === 'usdt') return /^\d+(\.\d{1,2})?$/;
@@ -29,7 +33,7 @@ function valuePattern(unit: SystemConfig['unit']): RegExp {
 }
 
 function displayValue(c: SystemConfig, t: (k: string, o?: Record<string, unknown>) => string): string {
-  if (c.group === 'hotWallet' && Number(c.value) === 0) return t('config.alertOff');
+  if (ALERT_GROUPS.has(c.group) && Number(c.value) === 0) return t('config.alertOff');
   switch (c.unit) {
     case 'eth':
     case 'bnb':
@@ -67,7 +71,7 @@ export function ConfigPage() {
             { required: true, whitespace: true, message: t('validation.required') },
             c.unit === 'text' ? { max: 500 } : { pattern: valuePattern(c.unit), message: t('validation.positiveNumber') },
           ]}
-          extra={c.group === 'hotWallet' ? t('config.hotWalletHint') : undefined}
+          extra={c.group === 'hotWallet' ? t('config.hotWalletHint') : c.group === 'payment' ? t('config.paymentBalanceHint') : undefined}
         >
           <Input />
         </Form.Item>

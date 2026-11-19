@@ -20,5 +20,5 @@ interface ConfigMapper {
 
   Row lock(@Param("key") String key);
 
-  void upsert(@Param("key") String key, @Param("value") String value, @Param("adminId") long adminId, @Param("now") LocalDateTime now);
+  void upsert(@Param("key") String key, @Param("value") String value, @Param("adminId") Long adminId, @Param("now") LocalDateTime now);
 }

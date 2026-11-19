@@ -337,6 +337,7 @@
     "minutes": "{{count}} 分钟",
     "name": "配置项",
     "newValue": "新值",
+    "paymentBalanceHint": "Trading 在钱包提供方（TopUP）的 USDT 可用余额低于这个值时给告警邮箱发邮件（30 分钟内不重复），恢复时再发一封；填 0 = 不告警。",
     "sub": "只列出真正生效的配置项",
     "title": "系统配置",
     "updatedAt": "更新时间",
@@ -347,6 +348,7 @@
     "deposit": "入金",
     "hotWallet": "热钱包余额告警",
     "notify": "通知",
+    "payment": "钱包提供方余额告警",
     "security": "安全",
     "withdraw": "出金"
   },
@@ -366,6 +368,7 @@
     "login_lockMinutes": "锁定时长",
     "login_lockThreshold": "登录失败锁定次数",
     "notify_marginCallThrottleMinutes": "追保通知节流",
+    "payment_balance_minUsdt": "钱包提供方可用余额告警下限（USDT）",
     "whitelist_effectiveHours": "白名单生效等待",
     "whitelist_maxAddresses": "白名单地址上限",
     "withdraw_coolingHours": "冷静期",

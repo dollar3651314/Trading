@@ -922,8 +922,8 @@ export interface SystemConfig {
   value: string;
   /** eth / bnb / trx：热钱包手续费币的告警下限 */
   unit: 'usdt' | 'hours' | 'minutes' | 'count' | 'percent' | 'text' | 'eth' | 'bnb' | 'trx';
-  /** hotWallet：热钱包余额告警下限（0 = 不告警） */
-  group: 'withdraw' | 'deposit' | 'security' | 'adjust' | 'notify' | 'hotWallet';
+  /** hotWallet：热钱包余额告警下限（0 = 不告警，原型）；payment：钱包提供方可用余额告警下限（0 = 不告警，生产方案 v1 07 页 R-5） */
+  group: 'withdraw' | 'deposit' | 'security' | 'adjust' | 'notify' | 'hotWallet' | 'payment';
   /** 从没改过时为空 */
   updatedAt: string | null;
 }

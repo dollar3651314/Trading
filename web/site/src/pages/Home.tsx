@@ -146,7 +146,6 @@ export function HomeDesktop() {
               </div>
             ))}
           </div>
-          <div className="tbd license">{t('safe.license')}</div>
         </div>
       </section>
 
@@ -252,7 +251,6 @@ export function HomeMobile() {
             </div>
           ))}
         </div>
-        <div className="tbd license">{t('safe.license')}</div>
       </section>
 
       <section className="blk" id="faq" data-testid="sec-faq">

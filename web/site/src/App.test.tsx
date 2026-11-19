@@ -23,7 +23,10 @@ describe('官网首页（原型模式，模拟行情）', () => {
     expect(screen.getByTestId('menu-btn')).toBeInTheDocument();
     expect(screen.queryByTestId('nav-register')).toBeNull();
     expect(screen.getAllByTestId('faq-item').length).toBeGreaterThanOrEqual(5);
-    expect(screen.getByTestId('contact')).toHaveTextContent('info@example.com');
+    // 公司信息、联系邮箱、牌照都不写（Amos 11/19，生产方案 v1 07 页 R-6）：整页没有邮箱、没有"待提供"的占位
+    expect(screen.queryByTestId('contact')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.]+/);
+    expect(document.body.textContent).not.toMatch(/待提供|公司信息|牌照/);
     expect(screen.getByTestId('footer')).toHaveTextContent('© Trading');
     // 行情：10 个品种，模拟行情标"示例行情"
     expect(await screen.findByTestId('sample-tag')).toHaveTextContent('示例行情');

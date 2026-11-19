@@ -19,6 +19,10 @@ describe('i18n', () => {
   const zhKeys = flatten(zh).sort();
   const enKeys = flatten(en).sort();
 
+  it('不写联系邮箱（Amos 11/19「公司信息、联系邮箱、牌照等 都不写」，生产方案 v1 07 页 R-6）', () => {
+    expect(JSON.stringify(zh) + JSON.stringify(en)).not.toMatch(/info@example\.com|待提供|to be provided/i);
+  });
+
   it('中英文翻译文件的键完全一致', () => {
     expect(enKeys).toEqual(zhKeys);
   });

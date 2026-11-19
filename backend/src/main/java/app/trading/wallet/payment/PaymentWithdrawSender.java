@@ -25,10 +25,12 @@ class PaymentWithdrawSender implements WithdrawSender {
 
   private final PaymentApi payments;
   private final WithdrawSenders senders;
+  private final PayoutPause pause;
 
-  PaymentWithdrawSender(PaymentApi payments, WithdrawSenders senders) {
+  PaymentWithdrawSender(PaymentApi payments, WithdrawSenders senders, PayoutPause pause) {
     this.payments = payments;
     this.senders = senders;
+    this.pause = pause;
   }
 
   @EventListener(ApplicationReadyEvent.class)
@@ -38,6 +40,8 @@ class PaymentWithdrawSender implements WithdrawSender {
 
   @Override
   public Outcome send(Order o) {
+    // 恢复数据后暂停交付款（PayoutPause）：留在"已审核待放款"，不访问提供方、不退款，打开后照常用同一个防重键提交
+    if (pause.paused()) return new Wait(PayoutPause.REASON);
     return switch (payments.payout(o.withdrawalId(), o.publicNo(), o.userId(), PayNetwork.valueOf(o.network()), o.address(), o.sendAmount())) {
       case PaymentApi.Accepted a -> new Submitted(a.providerRef());
       case PaymentApi.Retry r -> new Wait(r.reason());
