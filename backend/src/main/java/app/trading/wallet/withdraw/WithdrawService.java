@@ -462,9 +462,8 @@ public class WithdrawService implements WithdrawAdminApi {
     ledger.apply(new LedgerCommand(w.userId, Bucket.BALANCE, w.amount, LedgerEntryType.WITHDRAW_UNFREEZE, BIZ_WITHDRAW, String.valueOf(w.id), "提现退回"));
   }
 
-  /** 推给客户：{"type":"withdraw","status":"cooling","amount":"100"} 和账户变化 */
   /**
-   * 推 withdraw、account 事件，客户端收到就重新拉提现记录和余额。<b>要在状态提交以后推</b>：在调用方的事务里（钱包提供方的回调
+   * 推给客户 {"type":"withdraw","status":"cooling","amount":"100"} 和 account 事件，客户端收到就重新拉提现记录和余额。<b>要在状态提交以后推</b>：在调用方的事务里（钱包提供方的回调
    * → payoutUpdate，"回调比提交的返回先到"时改成放款中）就等事务提交再推，不然客户端拉到的还是旧状态，之后 send() 看到状态已经变了
    * 不再推，客户端就一直停在"已审核待放款"（PR #29 第一次 CI 端到端偶发失败的原因，PayoutNotifyCommitTest 复现）。
    * 不在事务里（各处 tx.execute 返回之后）照旧马上推。和 DepositService 的推送同一个做法
