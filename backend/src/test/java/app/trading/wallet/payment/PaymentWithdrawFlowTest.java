@@ -245,6 +245,36 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
   }
 
   @Test
+  void 不是Trading发起的提现回调_返回200忽略_提现单和账本都不动_联调R2() throws Exception {
+    // 联调 R-2（11/19）：TopUP 在重试一批不是 Trading 发起的提现状态回调（单号 WD-20261118-*，商户单号 Trading 不认识）。
+    // 返回 2xx（TopUP 只把 2xx 当送达，其他一律按 1 分钟…24 小时重试），不改任何提现单、不记账
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    topup(id);
+    String before = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    String wd = jdbc.queryForObject("SELECT GROUP_CONCAT(CONCAT(id, ':', status) ORDER BY id) FROM wallet_withdrawal", String.class);
+    for (String state : new String[] {"approved", "completed", "failed"}) {
+      java.util.Map<String, Object> v = new java.util.LinkedHashMap<>();
+      v.put("withdrawal_no", "WD-20261118-ZZ" + state.length());
+      v.put("kind", "payout");
+      v.put("chain", "tron");
+      v.put("to", "TXYZnotOurs111111111111111111111");
+      v.put("amount", "5.00");
+      v.put("status", state);
+      v.put("txid", null);
+      v.put("reason", null);
+      v.put("merchant_ref", "not-a-trading-ref-" + state);
+      FakeTopUp.Callback cb = FAKE.emit("withdrawal.updated", v);
+      FAKE.pending.clear();
+      assertThat(deliver(cb)).as(state).isEqualTo(200);
+      assertThat(deliver(cb)).as("重投同一个事件").isEqualTo(200);
+    }
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).as("账本").isEqualTo(before);
+    assertThat(jdbc.queryForObject("SELECT GROUP_CONCAT(CONCAT(id, ':', status) ORDER BY id) FROM wallet_withdrawal", String.class)).as("提现单").isEqualTo(wd);
+  }
+
+  @Test
   void 回调乱序_先到成功再到已批准_不回退() throws Exception {
     long uid = user("1000", true);
     long id = reviewing(uid, "BSC", ETH, "100");
