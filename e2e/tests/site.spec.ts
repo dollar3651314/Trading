@@ -41,7 +41,10 @@ test('官网：区块、行情跳动、字段、跳转、中英文、三种宽�
     await expect(page.getByTestId('nav-register')).toHaveCount(0);
     await page.mouse.wheel(0, 2000);
     await expect(page.getByTestId('sticky-register')).toBeInViewport();
-    await expect(page.getByTestId('contact')).toContainText('info@example.com');
+    // 公司信息、联系邮箱、牌照都不写（Amos 11/19，生产方案 v1 07 页 R-6）
+    await expect(page.getByTestId('contact')).toHaveCount(0);
+    await expect(page.getByTestId('footer')).not.toContainText('@');
+    await expect(page.getByTestId('footer')).not.toContainText('待提供');
     await expect(page.getByTestId('footer')).toContainText('© Trading');
     if (EXPECT_ENV_BANNER) await expect(page.getByTestId('env-banner')).toBeVisible();
     await expectNoHorizontalScroll(page, '官网首页 390');
