@@ -59,6 +59,9 @@ services:
       # 第一次启动时各只做一次（admin/ops/ProductionInit），之后以后台为准
       FX_INIT_ENABLED_CATEGORIES: crypto
       FX_INIT_BALANCE_MIN_USDT: "5000"
+      # 邮件端口：生产默认 2587（InstaBox 虚拟机拦出站 587、465、25）。和 trading 命令的 resend_port 一致，
+      # 不然 .env 没写端口时 trading test-mail 走 2587 显示成功、应用的告警和验证码却走 587 发不出去
+      FX_MAIL_PORT: ${FX_MAIL_PORT:-2587}
     mem_limit: ${TR_MEM_APP:-1024m}
     memswap_limit: ${TR_MEM_APP:-1024m}
     cpus: 2
