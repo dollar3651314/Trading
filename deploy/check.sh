@@ -323,4 +323,20 @@ check "首次部署标记：watch 看到的版本不是 image.env 当前版本�
 check "首次部署标记：trading-app 健康、版本对，但报价服务不健康，watch 不删" bash -c '[ "$(fp_case watch-noquote "$(printf "a%.0s" {1..40})")" = 在 ]'
 check "首次部署标记：on 启动后当前版本健康就删" bash -c '[ "$(fp_case on "$(printf "a%.0s" {1..40})")" = 无 ]'
 check "首次部署标记：rollback 回到上一个版本、健康就删" bash -c '[ "$(fp_case rollback "$(printf "b%.0s" {1..40})")" = 无 ]'
+# 邮件（11/20 生产实测：InstaBox 拦出站 587、465、25，2587 通）：生产默认端口 2587、测试 587；失败时日志写退出码和原因分类、不写密码。
+# 假的 curl：把参数记下来，按 FAKE_CURL_RC 退出、按 FAKE_SMTP_CODE 打出回应码（-w %{response_code}）
+cat > "$tmp/fakebin/curl" << 'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${FAKE_CURL_ARGS:?}"
+printf '%s' "${FAKE_SMTP_CODE:-250}"
+exit "${FAKE_CURL_RC:-0}"
+FAKE
+chmod +x "$tmp/fakebin/curl"
+mail_env() { printf '%bFX_MAIL_HOST=smtp.resend.com\nFX_MAIL_FROM=ops@example.com\nFX_ALERT_EMAILS=amos@example.com\nFX_MAIL_USERNAME=resend\nFX_MAIL_PASSWORD=re_not_a_real_key_check_only\n' "$1" > "$tmp/tr/.env"; : > "$tmp/tr/logs/trading.log"; }
+mail_run() { env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_CURL_ARGS="$tmp/curl-args" "$@" bash deploy/kit/trading test-mail > /dev/null 2>&1; }
+export -f mail_env mail_run
+check "邮件：生产没写端口时默认 2587（虚拟机拦 587），测试环境默认 587" bash -c 'mail_env "TR_ENV=production\n"; mail_run; grep -q "smtp://smtp.resend.com:2587 " "$tmp/curl-args" && mail_env ""; mail_run; grep -q "smtp://smtp.resend.com:587 " "$tmp/curl-args"'
+check "邮件：setup / keys 在生产写 2587、测试写 587（resend_port）" bash -c '[ "$(grep -c "envset FX_MAIL_PORT \"\$(resend_port)\"" deploy/kit/trading)" = 2 ] && grep -q "ask FX_MAIL_PORT .* 2587$" deploy/kit/trading && grep -q "ask FX_MAIL_PORT \"端口（587 或 465）\" 587$" deploy/kit/trading'
+check "邮件失败：日志写 curl 退出码和原因（连不上 / 认证失败 / 发件人被拒），不写密码" bash -c 'for c in "7 000 连不上" "28 000 连接超时" "67 535 认证失败" "55 550 发件人或收件人被拒"; do set -- $c; mail_env "TR_ENV=production\n"; ! mail_run FAKE_CURL_RC=$1 FAKE_SMTP_CODE=$2 || exit 1; grep -q "邮件发送失败.*curl 退出码 $1，SMTP 回应码 $2：$3" "$tmp/tr/logs/trading.log" || exit 1; ! grep -q re_not_a_real_key "$tmp/tr/logs/trading.log" || exit 1; done'
+check "邮件成功：日志写已发邮件" bash -c 'mail_env "TR_ENV=production\n"; mail_run && grep -q "已发邮件" "$tmp/tr/logs/trading.log"'
 exit $fail
