@@ -180,7 +180,7 @@ compose() { "${COMPOSE[@]}" "$@"; }
 prod() { [ "$(envget TR_ENV)" = production ]; }
 # 自动更新跟哪个标签：生产只跟 production（CI 推 prod-<提交号>，Amos 在 GitHub 批准后才移动 production），测试跟 staging
 TRACK=staging
-# trading-app 健康检查口（只绑 127.0.0.1）：生产 18080（8080 是同机 TopUP 生产的），测试 8080
+# trading-app 健康检查口（只绑 127.0.0.1）：生产 18082（同机 TopUP 生产占着 0.0.0.0:8080（nginx）和 127.0.0.1:18080（topup-web-1），11/20 虚拟机实测），测试 8080
 HEALTH_PORT=8080
 # 数据库备份合计上限（MB，至少留 3 份）：测试 2 GB，生产 0.6 GB（生产方案 03 页）
 BACKUP_MAX_MB=${TR_BACKUP_MAX_MB:-2048}
@@ -191,7 +191,7 @@ DRILL_NEED_MB=$((DRILL_MEM_MB + 64))
 # 按 .env 的 TR_ENV 定上面这些和 compose 文件（main 开头、install 写完 TR_ENV 后各调一次）
 mode_defaults() {
   if prod; then
-    TRACK=production; HEALTH_PORT=18080; KEEP_IMAGES=0
+    TRACK=production; HEALTH_PORT=18082; KEEP_IMAGES=0
     MIN_MEM_MB=${TR_MIN_MEM_MB:-2600}; MEMGUARD_MB=${TR_MEMGUARD_MB:-300}
     DRILL_MEM_MB=${TR_DRILL_MEM_MB:-512}; DRILL_NEED_MB=${TR_DRILL_NEED_MB:-800}
     BACKUP_MAX_MB=${TR_BACKUP_MAX_MB:-600}
@@ -1655,8 +1655,8 @@ stop_topup_and_check_mem() {
 # 80/443 空着（或者就是 Trading 自己的 Nginx）、可用内存够；不够时轮流模式恢复 TopUP（独立模式 restart_topup 什么也不做）
 check_ports_mem() {
   local p ports=(80 443)
-  # 生产：8082～8085（Nginx）、127.0.0.1:18080（健康检查口）；Trading 自己的容器在跑时占着是正常的
-  prod && ports=(8082 8083 8084 8085 18080)
+  # 生产：8082～8085（Nginx）、127.0.0.1:18082（健康检查口）；Trading 自己的容器在跑时占着是正常的
+  prod && ports=(8082 8083 8084 8085 18082)
   for p in "${ports[@]}"; do
     if port_busy "$p" && ! trading_running; then bad "$p 端口还被别的程序占着，Trading 不启动"; restart_topup; return 1; fi
   done
