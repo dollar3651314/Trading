@@ -206,4 +206,37 @@ class AlertMonitorTest {
     m.check();
     assertThat(outbox.sent).as("状态没被清：持续异常不重复发").hasSize(1);
   }
+
+  /**
+   * 生产方案 v1 07 页 R-5（审查 #26 🟡）：钱包提供方余额低于下限 → 告警；中间查不到余额（刚启动、切换提供方）时告警项不能消失
+   * （消失时只清状态、不发恢复邮件）；余额回到下限以上要收到"已恢复"。用真的 PaymentHotWallet（包内可见，反射建），余额和配置用替身
+   */
+  @Test
+  void 余额告警_低于下限_中间查不到余额_恢复时照样发恢复邮件_R5() throws Exception {
+    var payments = org.mockito.Mockito.mock(app.trading.payment.api.PaymentApi.class);
+    var config = org.mockito.Mockito.mock(app.trading.common.config.SystemConfig.class);
+    org.mockito.Mockito.when(config.decimal(org.mockito.ArgumentMatchers.eq(app.trading.common.config.ConfigKey.PAYMENT_BALANCE_MIN_USDT), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(new java.math.BigDecimal("5000"));
+    var ctor = Class.forName("app.trading.wallet.payment.PaymentHotWallet").getDeclaredConstructor(app.trading.payment.api.PaymentApi.class,
+        app.trading.common.config.SystemConfig.class);
+    ctor.setAccessible(true);
+    AlertCheck hot = (AlertCheck) ctor.newInstance(payments, config);
+    AlertMonitor m = new AlertMonitor(List.of(hot), props("ops@example.com"), outbox, clock);
+    java.util.function.Consumer<String> balance = v -> org.mockito.Mockito.when(payments.balance())
+        .thenReturn(new app.trading.payment.api.PaymentApi.Balance("TOPUP", v == null ? null : new java.math.BigDecimal(v), null, null));
+
+    balance.accept(null);
+    m.check();
+    assertThat(outbox.sent).as("从来没查到过余额：不检查").isEmpty();
+    balance.accept("4000");
+    m.check();
+    assertThat(outbox.sent).singleElement().asString().startsWith("ops@example.com OPS_ALERT 钱包提供方可用余额低于告警下限");
+    balance.accept(null);
+    clock.advance(Duration.ofMinutes(1));
+    m.check();
+    assertThat(hot.evaluate()).singleElement().satisfies(i -> assertThat(i.ok()).as("查不到余额：沿用上一次的判断（低）").isFalse());
+    balance.accept("6000");
+    m.check();
+    assertThat(outbox.sent).hasSize(2).last().asString().isEqualTo("ops@example.com OPS_RECOVERED 钱包提供方可用余额低于告警下限");
+  }
 }

@@ -23,7 +23,10 @@ describe('官网首页（原型模式，模拟行情）', () => {
     expect(screen.getByTestId('menu-btn')).toBeInTheDocument();
     expect(screen.queryByTestId('nav-register')).toBeNull();
     expect(screen.getAllByTestId('faq-item').length).toBeGreaterThanOrEqual(5);
-    expect(screen.getByTestId('contact')).toHaveTextContent('info@example.com');
+    // 公司信息、联系邮箱、牌照都不写（Amos 11/19，生产方案 v1 07 页 R-6）：整页没有邮箱、没有"待提供"的占位
+    expect(screen.queryByTestId('contact')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.]+/);
+    expect(document.body.textContent).not.toMatch(/待提供|公司信息|牌照/);
     expect(screen.getByTestId('footer')).toHaveTextContent('© Trading');
     // 行情：10 个品种，模拟行情标"示例行情"
     expect(await screen.findByTestId('sample-tag')).toHaveTextContent('示例行情');
@@ -90,6 +93,30 @@ describe('法律页（AC2-08）', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(title);
     expect(screen.getByTestId('risk-bar')).toBeInTheDocument();
     expect(screen.getByTestId('footer-risk')).toHaveTextContent('风险提示');
+  });
+
+  it.each([
+    ['/', 'zh-CN', 'Trading｜快人一步，交易全球行情'],
+    ['/terms', 'zh-CN', '服务条款｜Trading'],
+    ['/privacy', 'zh-CN', '隐私政策｜Trading'],
+    ['/risk', 'zh-CN', '风险披露｜Trading'],
+    ['/nope', 'zh-CN', '页面不存在｜Trading'],
+    ['/risk', 'en', 'Risk Disclosure | Trading'],
+    ['/nope', 'en', 'Page not found | Trading'],
+  ] as const)('%s（%s）浏览器标签标题是"%s"（测试环境验收 T-3）', (path, lang, title) => {
+    window.history.replaceState(null, '', path);
+    render(<App initialLang={lang} />);
+    expect(document.title).toBe(title);
+  });
+
+  it('页内切换页面时标题跟着变', () => {
+    window.history.replaceState(null, '', '/');
+    render(<App initialLang="en" />);
+    expect(document.title).toBe('Trading | Trade global markets, one step ahead');
+    act(() => {
+      fireEvent.click(within(screen.getByTestId('footer')).getByText('Privacy Policy'));
+    });
+    expect(document.title).toBe('Privacy Policy | Trading');
   });
 
   it('页脚链接在页面内切换，不重新加载', () => {

@@ -95,10 +95,10 @@ quote:
     ws-renew: 20s
     # 开发者文档：auto = 只用模拟源时能看（报价模式 live 或配了任何真实报价源都不给看）
     docs: ${FX_QUOTE_OPEN_DOCS:auto}
-  # 报价源授权登记（技术方案 08 页，TQ-11 A）：auto = 报价模式 live（生产）时只用"交易用途"已授权的源开仓、外部 Key 只拿转售已授权的品种；测试环境不受限制。
-  # 报价模式 live，或者配了任何真实报价源（在用真实数据）时一律检查：FX_QUOTE_LICENSE_ENFORCE=false 只在只用模拟源时有效
+  # 报价源授权登记（技术方案 08 页，TQ-11 A）：授权检查所有环境默认关（Amos 2026-11-17"授权检查彻底关掉"，含生产、真实报价源），登记只记录和显示。
+  # 只有 FX_QUOTE_LICENSE_ENFORCE=true 才检查：开仓只用"交易用途"已授权的源、外部 Key 只拿"转售"已授权的品种。false / auto（旧写法）都是关
   license:
-    enforce: ${FX_QUOTE_LICENSE_ENFORCE:auto}
+    enforce: ${FX_QUOTE_LICENSE_ENFORCE:false}
     reload-interval: 60s
   # 真实报价源（内部文档）：外汇、指数、贵金属、原油、美股 AllTick 主、iTick 备；10 个加密货币币安现货主、AllTick 备（第 12 节）。
   # AllTick、iTick 的 token 只由 负责人 填进服务器 .env，空 = 不用这家；币安不要 token，用开关 FX_QUOTE_BINANCE_ENABLED（默认关闭）。

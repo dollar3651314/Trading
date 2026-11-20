@@ -390,7 +390,7 @@
       "reversed": "已冲正"
     },
     "notOpenTitle": "充值暂未开通",
-    "notOpenHint": "充值通道还在准备中，开通后这里会显示你的专属充值地址。如有疑问请联系 info@example.com",
+    "notOpenHint": "充值通道还在准备中，开通后这里会显示你的专属充值地址。",
     "generated": "{{network}} 充值地址已生成",
     "generatedBody": "以后选这条网络都是这个地址",
     "generatedTag": "已生成",

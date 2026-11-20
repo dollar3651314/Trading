@@ -53,12 +53,12 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
   }
 
   FakeTopUp.Withdrawal topup(long id) {
-    return FAKE.byMerchantRef(String.valueOf(publicNo(id))).orElseThrow();
+    return FAKE.byMerchantRef(app.trading.payment.core.PaymentService.merchantRef(publicNo(id))).orElseThrow();
   }
 
   /** 这一笔在 TopUP 建了几单（定时推进会顺带处理库里别的测试留下的提现，所以不看总数） */
   long createdFor(long id) {
-    String ref = String.valueOf(publicNo(id));
+    String ref = app.trading.payment.core.PaymentService.merchantRef(publicNo(id));
     return FAKE.withdrawals.values().stream().filter(w -> ref.equals(w.merchantRef)).count();
   }
 
@@ -118,6 +118,39 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     assertThat(createdFor(id)).isEqualTo(1);
   }
 
+  /** 生产方案 v1 05 页第 3 节、07 页 R-4：服务器恢复数据后暂停交付款（payment.payout.paused），人工核对后 trading start-payout 再开 */
+  @Test
+  void 恢复数据后暂停交付款_停在已审核待放款不退款_有告警项_打开后照常交TopUP() throws Exception {
+    var config = ctx.getBean(app.trading.common.config.SystemConfig.class);
+    String key = app.trading.common.config.ConfigKey.PAYMENT_PAYOUT_PAUSED.key;
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    // 服务器的 trading restore 直接写库（应用 5 秒内读到；这里清缓存）
+    jdbc.update("INSERT INTO common_config (config_key, value) VALUES (?, 'true') ON DUPLICATE KEY UPDATE value = 'true'", key);
+    config.refresh();
+    try {
+      withdraws.approve(id, 7);
+      assertThat(status(id)).as("不交 TopUP，停在已审核待放款").isEqualTo("APPROVED");
+      assertThat(createdFor(id)).isZero();
+      assertThat(frozen(uid)).as("不退款").isEqualByComparingTo("100");
+      assertThat(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/health")).andReturn().getResponse().getContentAsString())
+          .contains("\"payout.paused\":\"DOWN\"");
+      WithdrawTestHooks.advance(withdraws);
+      assertThat(createdFor(id)).as("定时任务也不交").isZero();
+
+      jdbc.update("UPDATE common_config SET value = 'false' WHERE config_key = ?", key);
+      config.refresh();
+      WithdrawTestHooks.advance(withdraws);
+      assertThat(status(id)).isEqualTo("BROADCASTING");
+      assertThat(createdFor(id)).isEqualTo(1);
+      assertThat(mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/health")).andReturn().getResponse().getContentAsString())
+          .doesNotContain("payout.paused");
+    } finally {
+      jdbc.update("DELETE FROM common_config WHERE config_key = ?", key);
+      config.refresh();
+    }
+  }
+
   @Test
   void 大额_延迟期结束后1分钟内交TopUP_AC_W4() throws Exception {
     long uid = user("5000", true);
@@ -169,6 +202,72 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     assertThat(api.payoutInfo(id).orElseThrow().state()).isEqualTo(PayoutState.UNKNOWN);
     assertThat(status(id)).as("不退款，等人查").isEqualTo("APPROVED");
     assertThat(frozen(uid)).isEqualByComparingTo("100");
+  }
+
+  String ledgerSum() {
+    return jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+  }
+
+  @Test
+  void 提交时商户单号已用过_原来那笔金额链地址都对得上_认领付款编号_照常完成_不多付不多记账() throws Exception {
+    // TopUP v1.1：商户单号永久唯一。场景：早先那次提交在 TopUP 建了单但返回丢了、防重键又过了期，再提时 409 duplicate_merchant_ref
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    FAKE.down = true;
+    withdraws.approve(id, 7);
+    // 交给 TopUP 的金额是扣完手续费的（看付款记录）
+    BigDecimal pay = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, id);
+    FakeTopUp.Withdrawal early = FAKE.addWithdrawal("tron", TRON, pay, app.trading.payment.core.PaymentService.merchantRef(publicNo(id)));
+    String ledger = ledgerSum();
+    FAKE.down = false;
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).as("没有再建一笔").isEqualTo(1);
+    assertThat(api.payoutInfo(id).orElseThrow().providerRef()).as("认领了原来的付款编号").isEqualTo(early.no);
+    assertThat(api.payoutInfo(id).orElseThrow().state()).isEqualTo(PayoutState.PENDING);
+    assertThat(ledgerSum()).as("认领不记账").isEqualTo(ledger);
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    // 之后照常跟踪：回调按付款编号对上，完成
+    assertThat(deliver(FAKE.moveWithdrawal(early.no, "completed", "d".repeat(64), null))).isEqualTo(200);
+    assertThat(status(id)).isEqualTo("COMPLETED");
+    assertThat(frozen(uid)).isEqualByComparingTo("0");
+    assertThat(balance(uid)).isEqualByComparingTo("900");
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).isEqualTo(1);
+  }
+
+  @Test
+  void 提交时商户单号已用过_原来那笔对不上_记未知写明原因_不重提不退款() throws Exception {
+    long uid = user("1000", true);
+    long id = reviewing(uid, "TRC20", TRON, "100");
+    FAKE.down = true;
+    withdraws.approve(id, 7);
+    // 同一个商户单号的另一笔：金额不一样
+    BigDecimal pay = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, id);
+    FakeTopUp.Withdrawal other = FAKE.addWithdrawal("tron", TRON, pay.add(BigDecimal.ONE), app.trading.payment.core.PaymentService.merchantRef(publicNo(id)));
+    String ledger = ledgerSum();
+    FAKE.down = false;
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    PaymentApi.PayoutInfo info = api.payoutInfo(id).orElseThrow();
+    assertThat(info.state()).isEqualTo(PayoutState.UNKNOWN);
+    assertThat(info.providerRef()).as("不认领").isNull();
+    assertThat(info.reason()).contains(other.no).contains("金额不一样").contains("核对");
+    time().advance(Duration.ofMinutes(5));
+    WithdrawTestHooks.advance(withdraws);
+    assertThat(createdFor(id)).as("没有再提").isEqualTo(1);
+    assertThat(status(id)).as("不退款，等人查").isEqualTo("APPROVED");
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    assertThat(ledgerSum()).isEqualTo(ledger);
+  }
+
+  @Test
+  void 地址比较_TRON区分大小写_以太坊BSC不区分() {
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.TRC20, TRON, TRON.toLowerCase())).isFalse();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.TRC20, TRON, TRON)).isTrue();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.ERC20, ETH, ETH.toLowerCase())).isTrue();
+    assertThat(app.trading.payment.core.PaymentService.sameAddress(PayNetwork.BSC, ETH, ETH.toUpperCase().replace("0X", "0x"))).isTrue();
   }
 
   @Test
@@ -242,6 +341,140 @@ class PaymentWithdrawFlowTest extends PaymentTestSupport {
     assertThat(status(id)).isEqualTo("FAILED_REFUNDED");
     assertThat(frozen(uid)).isEqualByComparingTo("0");
     assertThat(balance(uid)).isEqualByComparingTo("1000");
+  }
+
+  @Test
+  @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void 不是Trading发起的提现回调_返回200忽略_提现单和账本都不动_联调R2(org.springframework.boot.test.system.CapturedOutput out) throws Exception {
+    // 联调 R-2（11/19）：TopUP 在重试一批不是 Trading 发起的提现状态回调（单号 WD-20261118-*，商户单号 Trading 不认识）。
+    // 返回 2xx（TopUP 只把 2xx 当送达，其他一律按 1 分钟…24 小时重试），不改任何提现单、不记账
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    topup(id);
+    String before = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    String wd = jdbc.queryForObject("SELECT GROUP_CONCAT(CONCAT(id, ':', status) ORDER BY id) FROM wallet_withdrawal", String.class);
+    for (String state : new String[] {"approved", "completed", "failed"}) {
+      java.util.Map<String, Object> v = new java.util.LinkedHashMap<>();
+      v.put("withdrawal_no", "WD-20261118-ZZ" + state.length());
+      v.put("kind", "payout");
+      v.put("chain", "tron");
+      v.put("to", "TXYZnotOurs111111111111111111111");
+      v.put("amount", "5.00");
+      v.put("status", state);
+      v.put("txid", null);
+      v.put("reason", null);
+      v.put("merchant_ref", "not-a-trading-ref-" + state);
+      FakeTopUp.Callback cb = FAKE.emit("withdrawal.updated", v);
+      FAKE.pending.clear();
+      assertThat(deliver(cb)).as(state).isEqualTo(200);
+      assertThat(deliver(cb)).as("重投同一个事件").isEqualTo(200);
+      assertThat(callbackRows(cb.eventId())).as("记了去重，重投直接回 200").isEqualTo(1);
+    }
+    assertThat(out.getAll()).as("走到了按单号查找、没找到").contains("付款回调找不到对应的提现：ref=WD-20261118-ZZ6");
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).as("账本").isEqualTo(before);
+    assertThat(jdbc.queryForObject("SELECT GROUP_CONCAT(CONCAT(id, ':', status) ORDER BY id) FROM wallet_withdrawal", String.class)).as("提现单").isEqualTo(wd);
+  }
+
+  int callbackRows(String eventId) {
+    return jdbc.queryForObject("SELECT COUNT(*) FROM pay_callback WHERE event_id = ?", Integer.class, eventId);
+  }
+
+  String payoutRow(long id) {
+    return jdbc.queryForObject("SELECT CONCAT(COALESCE(provider_ref, '-'), '|', status) FROM pay_payout WHERE withdrawal_id = ?", String.class, id);
+  }
+
+  /** 一个"别人的"付款回调：付款编号 no、商户单号 merchantRef，其余可指定 */
+  FakeTopUp.Callback foreign(String no, String merchantRef, String status, String chain, String to, String amount) {
+    java.util.Map<String, Object> v = new java.util.LinkedHashMap<>();
+    v.put("withdrawal_no", no);
+    v.put("kind", "payout");
+    v.put("chain", chain);
+    v.put("to", to);
+    v.put("amount", amount);
+    v.put("status", status);
+    v.put("txid", null);
+    v.put("reason", "rejected by someone else");
+    v.put("merchant_ref", merchantRef);
+    FakeTopUp.Callback cb = FAKE.emit("withdrawal.updated", v);
+    FAKE.pending.clear();
+    return cb;
+  }
+
+  @Test
+  @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+  void 别人的付款回调商户单号碰巧等于旧的数字单号_这笔已有别的付款编号_忽略不退款_审查23(org.springframework.boot.test.system.CapturedOutput out) throws Exception {
+    // 改成 trading-<编号> 之前提交、还没结束的提现，库里的商户单号是光秃秃的数字；同一个 TopUP 商户下别人的付款可能用同一个数字
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    FakeTopUp.Withdrawal mine = topup(id);
+    String bare = String.valueOf(publicNo(id));
+    jdbc.update("UPDATE pay_payout SET merchant_ref = ? WHERE withdrawal_id = ?", bare, id);
+    String ledger = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    String payout = payoutRow(id);
+    String wd = status(id);
+    FakeTopUp.Callback cb = foreign("WD-20261118-COLLIDE", bare, "failed", "bsc", ETH, "100.00");
+    assertThat(deliver(cb)).isEqualTo(200);
+    assertThat(callbackRows(cb.eventId())).isEqualTo(1);
+    assertThat(out.getAll()).as("按商户单号对上了、但付款编号不同").contains("对上了提现 " + id).contains("已经记了付款编号 " + mine.no);
+    assertThat(payoutRow(id)).isEqualTo(payout);
+    assertThat(status(id)).as("没被标失败").isEqualTo(wd);
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).as("没退款").isEqualTo(ledger);
+    // 自己的回调（按付款编号）照常处理，旧的数字单号也认得
+    assertThat(deliver(FAKE.moveWithdrawal(mine.no, "completed", "0x" + "c".repeat(64), null))).isEqualTo(200);
+    assertThat(status(id)).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  void 回调比提交的返回先到_金额链地址都对得上_照常处理并记下付款编号_对不上的忽略_审查23() throws Exception {
+    long uid = user("1000", true);
+    long id = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(id, 7);
+    FakeTopUp.Withdrawal mine = topup(id);
+    // 模拟"回调先到"：Trading 还没记下付款编号
+    jdbc.update("UPDATE pay_payout SET provider_ref = NULL WHERE withdrawal_id = ?", id);
+    String ref = app.trading.payment.core.PaymentService.merchantRef(publicNo(id));
+    String ledger = jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class);
+    // 商户单号一样但金额、链、地址任一不对：忽略
+    for (FakeTopUp.Callback bad : List.of(foreign("WD-X-1", ref, "failed", "bsc", ETH, "99.00"), foreign("WD-X-2", ref, "failed", "tron", ETH, "100.00"),
+        foreign("WD-X-3", ref, "failed", "bsc", "0x" + "9".repeat(40), "100.00"))) {
+      assertThat(deliver(bad)).isEqualTo(200);
+    }
+    assertThat(payoutRow(id)).startsWith("-|");
+    assertThat(jdbc.queryForObject("SELECT CONCAT(COUNT(*), '|', COALESCE(SUM(amount), 0)) FROM trading_ledger", String.class)).isEqualTo(ledger);
+    // 真的那笔先到：金额、链、地址都对得上 → 处理，并记下付款编号
+    FAKE.pending.clear();
+    assertThat(deliver(FAKE.moveWithdrawal(mine.no, "approved", null, null))).isEqualTo(200);
+    assertThat(payoutRow(id)).isEqualTo(mine.no + "|APPROVED");
+  }
+
+  @Test
+  void 回调先到按商户单号对上时_TRON地址区分大小写_以太坊BSC不区分() throws Exception {
+    // TRON：大小写不同的地址是另一个地址 → 忽略；真的那笔照常处理
+    long uid = user("1000", true);
+    long t = reviewing(uid, "TRC20", TRON, "100");
+    withdraws.approve(t, 7);
+    FakeTopUp.Withdrawal tm = topup(t);
+    jdbc.update("UPDATE pay_payout SET provider_ref = NULL WHERE withdrawal_id = ?", t);
+    String tAmount = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, t).toPlainString();
+    String tRef = app.trading.payment.core.PaymentService.merchantRef(publicNo(t));
+    String tStatus = status(t);
+    assertThat(deliver(foreign("WD-CASE-T", tRef, "failed", "tron", TRON.toLowerCase(), tAmount))).isEqualTo(200);
+    assertThat(payoutRow(t)).as("TRON 大小写不同不算同一个地址").startsWith("-|");
+    assertThat(status(t)).as("没被标失败").isEqualTo(tStatus);
+    FAKE.pending.clear();
+    assertThat(deliver(FAKE.moveWithdrawal(tm.no, "approved", null, null))).isEqualTo(200);
+    assertThat(payoutRow(t)).isEqualTo(tm.no + "|APPROVED");
+    // 以太坊 / BSC：十六进制地址大小写只是校验写法，全小写也是同一个地址 → 处理
+    long e = reviewing(uid, "BSC", ETH, "100");
+    withdraws.approve(e, 7);
+    FakeTopUp.Withdrawal em = topup(e);
+    jdbc.update("UPDATE pay_payout SET provider_ref = NULL WHERE withdrawal_id = ?", e);
+    String eAmount = jdbc.queryForObject("SELECT amount FROM pay_payout WHERE withdrawal_id = ?", BigDecimal.class, e).toPlainString();
+    String eRef = app.trading.payment.core.PaymentService.merchantRef(publicNo(e));
+    assertThat(deliver(foreign(em.no, eRef, "approved", "bsc", ETH.toLowerCase(), eAmount))).isEqualTo(200);
+    assertThat(payoutRow(e)).as("小写的以太坊地址也对得上").isEqualTo(em.no + "|APPROVED");
   }
 
   @Test

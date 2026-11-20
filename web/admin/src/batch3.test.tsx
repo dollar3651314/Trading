@@ -10,7 +10,7 @@ import { QuoteUsagePage } from './pages/quote/QuoteUsagePage';
 import { QuoteLicensePage } from './pages/quote/QuoteLicensePage';
 import { QuoteSourcesPage } from './pages/quote/QuoteSourcesPage';
 import { getQuoteOverview, setQuoteGate } from './api';
-import { seedQuoteLicensesForDemo } from './mocks/quoteService';
+import { seedQuoteLicensesForDemo, setQuoteLicenseEnforcedForTest } from './mocks/quoteService';
 import { PERMISSIONS } from './config/permissions';
 import { MENU } from './config/menu';
 
@@ -20,8 +20,9 @@ configure({ asyncUtilTimeout: 15000 });
 afterEach(async () => {
   setScenario('normal');
   db.session.adminId = 1;
-  // 总开关复原成关（默认）
+  // 总开关复原成关（默认）；授权检查复原成关（默认）
   await setQuoteGate(false, false, '测试复原');
+  setQuoteLicenseEnforcedForTest(false);
 });
 
 async function confirmHighRisk(dialog: HTMLElement, reason: string, okName: RegExp) {
@@ -111,6 +112,27 @@ describe('授权登记和总开关（P10）', () => {
     expect(screen.getByText(/默认关。关的时候只有"内部测试"Key/)).toBeInTheDocument();
   });
 
+  it('授权检查关（默认，Amos 11/17）：顶部、闸 2、底部都说"只做记录"，不说"只显示、不开仓 / 外部 Key 拿不到"（T-5）', async () => {
+    renderAs(<QuoteLicensePage />);
+    expect(await screen.findByText(/授权检查已关闭（所有环境默认关，Amos 11\/17 决定）：没有登记也照常开仓/)).toBeInTheDocument();
+    expect(screen.getByText('授权登记（报价商 × 品种，只做记录）')).toBeInTheDocument();
+    expect(screen.getByText('授权检查：关（只登记）')).toBeInTheDocument();
+    expect(screen.getByText(/三项（交易用途、登录后展示、转售）只做记录/)).toBeInTheDocument();
+    expect(screen.getByText('没有交易用途授权的品种（只是记录：授权检查已关闭，这些品种照常开仓）')).toBeInTheDocument();
+    expect(screen.queryByText(/外部 Key 拿不到任何品种/)).toBeNull();
+    expect(screen.queryByText(/只显示、不开仓/)).toBeNull();
+  });
+
+  it('授权检查开（FX_QUOTE_LICENSE_ENFORCE=true）：照旧说"只显示、不开仓 / 外部 Key 拿不到"', async () => {
+    setQuoteLicenseEnforcedForTest(true);
+    renderAs(<QuoteLicensePage />);
+    expect(await screen.findByText(/授权检查已打开：没有交易用途授权的品种只显示、不开仓；外部 Key 拿不到任何品种/)).toBeInTheDocument();
+    expect(screen.getByText('闸 2：授权登记（报价商 × 品种）')).toBeInTheDocument();
+    expect(screen.getByText('授权检查：开')).toBeInTheDocument();
+    expect(screen.getByText(/没有交易用途授权的品种（授权检查打开时只显示、不开仓/)).toBeInTheDocument();
+    expect(screen.queryByText(/只做记录/)).toBeNull();
+  });
+
   it('打开总开关：要写原因、勾"Amos 已同意打开"，没勾不能开；超管打开后写审计', async () => {
     renderAs(<QuoteLicensePage />);
     fireEvent.click(await screen.findByRole('button', { name: '打开对外总开关' }));
@@ -133,12 +155,21 @@ describe('授权登记和总开关（P10）', () => {
     await expect(setQuoteGate(true, true, 'x')).rejects.toMatchObject({ reasonKey: 'errors.quoteGateSuperOnly' });
   }, 60_000);
 
-  it('快到期标"还剩 N 天 · 已发提醒邮件"，已到期标"已到期，按没授权处理"', async () => {
+  it('快到期标"还剩 N 天 · 已发提醒邮件"，已到期标"已到期，按没授权处理"（授权检查开时）', async () => {
+    setQuoteLicenseEnforcedForTest(true);
     seedQuoteLicensesForDemo();
     renderAs(<QuoteLicensePage />);
     expect(await screen.findByText('还剩 18 天 · 已发提醒邮件')).toBeInTheDocument();
     expect(screen.getByText('已到期，按没授权处理')).toBeInTheDocument();
     expect(screen.getByText(/2 条授权到期或快到期/)).toBeInTheDocument();
+  });
+
+  it('授权检查关时，已到期只标"已到期（授权检查关，只做记录）"', async () => {
+    seedQuoteLicensesForDemo();
+    renderAs(<QuoteLicensePage />);
+    expect(await screen.findByText('已到期（授权检查关，只做记录）')).toBeInTheDocument();
+    expect(screen.queryByText('已到期，按没授权处理')).toBeNull();
+    expect(screen.getByText(/授权检查已关闭：到期只做提醒/)).toBeInTheDocument();
   });
 });
 

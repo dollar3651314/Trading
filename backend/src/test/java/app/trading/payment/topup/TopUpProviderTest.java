@@ -127,6 +127,9 @@ class TopUpProviderTest {
       assertThat(w.state()).isEqualTo(PayoutState.REJECTED);
       assertThat(w.reason()).isEqualTo("风险地址");
     });
+    // v1.1：同一个商户单号再提（换了防重键）→ 409 duplicate_merchant_ref，带原来那笔的付款编号
+    assertThatThrownBy(() -> p.submitPayout("trading-wd-9-again", "9", "5001", PayNetwork.TRC20, "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", BigDecimal.TEN))
+        .isInstanceOfSatisfying(PaymentProvider.DuplicateRef.class, d -> assertThat(d.existingRef).isEqualTo(s.ref()));
     FakeTopUp.Callback other = FAKE.emit("order.matched", Map.of("order_no", "x"));
     assertThat(p.parseCallback(lower(other.headers()), other.body())).isEmpty();
 

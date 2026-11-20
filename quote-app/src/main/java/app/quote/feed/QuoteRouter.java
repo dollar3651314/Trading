@@ -47,6 +47,8 @@ import org.springframework.stereotype.Component;
 public class QuoteRouter implements QuoteSink {
 
   private static final Logger log = LoggerFactory.getLogger(QuoteRouter.class);
+  /** 一模一样的报价至少隔这么久再往下传一次（{@link #repeat}） */
+  static final Duration SAME_QUOTE_RESEND = Duration.ofSeconds(1);
   private static final MathContext MC = MathContext.DECIMAL64;
 
   /** 报价模式（quote.market.source） */
@@ -75,6 +77,11 @@ public class QuoteRouter implements QuoteSink {
     int active;
     boolean blocked;
     BigDecimal deviation;
+    /** 上一次交给主链路的报价（哪家、买卖价、什么时候），去重用 */
+    String sentFeed;
+    BigDecimal sentBid;
+    BigDecimal sentAsk;
+    Instant sentAt;
 
     Route(String symbol, List<QuoteFeedsProperties.Route> feeds) {
       this.symbol = symbol;
@@ -241,9 +248,26 @@ public class QuoteRouter implements QuoteSink {
       r.last.put(feed, new Last(bid, ask, now, gap ? now : prev.streakSince()));
       choose(r, now);
       crossCheck(r, now);
-      if (feed.equals(r.activeFeed())) out = new RawQuote(r.symbol, bid, ask, time == null ? now : time);
+      if (feed.equals(r.activeFeed()) && !repeat(r, feed, bid, ask, now)) {
+        out = new RawQuote(r.symbol, bid, ask, time == null ? now : time);
+        r.sentFeed = feed;
+        r.sentBid = bid;
+        r.sentAsk = ask;
+        r.sentAt = now;
+      }
     }
     if (out != null) processor.submit(out);
+  }
+
+  /**
+   * 和上一次交给主链路的报价一模一样（同一家、按品种位数取整后买卖价都没变），并且离上一次还不到 {@link #SAME_QUOTE_RESEND}：不再往下传。
+   * 币安 bookTicker 在挂单数量变了时也推送（价格没变），取整后相同的也很多：以前每条都进主链路（处理、K 线、推给 trading-app、撮合检查查库），
+   * 测试环境闲着时 quote-app 一个核 59%、trading-app 29%、MySQL 30%（每秒 1,500 条查询）；去重后都在 5% 左右（11/18 开发机实测）。
+   * 价格一变立即传；没变也至少每秒传一次，"多久没报价"的判断（5 秒算过期）不受影响。只省掉没有新信息的重复报价
+   */
+  private static boolean repeat(Route r, String feed, BigDecimal bid, BigDecimal ask, Instant now) {
+    return feed.equals(r.sentFeed) && bid.compareTo(r.sentBid) == 0 && ask.compareTo(r.sentAsk) == 0
+        && Duration.between(r.sentAt, now).compareTo(SAME_QUOTE_RESEND) < 0;
   }
 
   private boolean fresh(Last l, Instant now, Duration within) {

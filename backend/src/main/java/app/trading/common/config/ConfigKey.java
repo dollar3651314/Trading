@@ -66,7 +66,26 @@ public enum ConfigKey {
   AUTO_APPROVE_R10_MAX_PROFIT_PCT("withdraw.autoApprove.R10.maxProfitPct", Unit.PERCENT, "autoApprove", BigDecimal.ZERO, false),
   AUTO_APPROVE_R11_MAX_COUNT("withdraw.autoApprove.R11.maxCount", Unit.COUNT, "autoApprove", BigDecimal.ZERO, false),
   /** R13 盈利客户的门槛（累计净盈利 &gt; 它就转人工），默认 0，可以是 0 */
-  AUTO_APPROVE_R13_MAX_NET_PROFIT("withdraw.autoApprove.R13.maxNetProfit", Unit.USDT, "autoApprove", BigDecimal.ZERO, false);
+  AUTO_APPROVE_R13_MAX_NET_PROFIT("withdraw.autoApprove.R13.maxNetProfit", Unit.USDT, "autoApprove", BigDecimal.ZERO, false),
+  /**
+   * 钱包提供方可用余额告警下限（USDT，生产方案 v1 07 页 R-5）：Trading 在当前钱包提供方（TopUP）的可用余额低于它就给告警邮箱发邮件，
+   * 恢复时再发一封（通知模块的 AlertMonitor）；<b>0 = 不告警</b>（迁移 V34 的初始值）。生产第一次启动时设成 5,000（FX_INIT_BALANCE_MIN_USDT，Amos 11/19），
+   * 之后以后台为准。在系统配置页改（权限 config:edit，高危，写审计）
+   */
+  PAYMENT_BALANCE_MIN_USDT("payment.balance.minUsdt", Unit.USDT, "payment", BigDecimal.ZERO),
+  /**
+   * 暂停把提现交给钱包提供方（生产方案 v1 05 页第 3 节、07 页 R-4）：{@code true} 时审核通过的提现停在"已审核待放款"、不交 TopUP（不退款），
+   * 健康检查 alerts 出现 {@code payout.paused} DOWN。服务器上 {@code sudo trading restore … --confirm --production} 恢复数据后自动写 true
+   * （备份之后已经交给 TopUP 的提现会变回"已审核待放款"，再交一次就重复付款），人工在 TopUP 后台核对后 {@code sudo trading start-payout --confirm} 写回 false。
+   * 没有这一行 = 不暂停。不在系统配置页（只由服务器命令改）
+   */
+  PAYMENT_PAYOUT_PAUSED("payment.payout.paused", Unit.BOOL, "payment", null, false),
+  /**
+   * 只做一次的初始化标记（生产方案 v1 07 页 R-1、R-5，admin.ops.ProductionInit）：值是做的时间和用的设置；有这一行就不再做，
+   * 以后台的改动为准（不在每次启动时覆盖）。不在系统配置页
+   */
+  INIT_ENABLED_CATEGORIES("init.enabledCategories", Unit.TEXT, "init", null, false),
+  INIT_BALANCE_MIN_USDT("init.balanceMinUsdt", Unit.TEXT, "init", null, false);
 
   /** 单位，和原型一致 */
   public enum Unit {

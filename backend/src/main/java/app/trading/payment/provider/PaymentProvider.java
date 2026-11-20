@@ -35,6 +35,19 @@ public interface PaymentProvider {
     }
   }
 
+  /**
+   * 商户单号已经被另一笔付款用过（TopUP v1.1 起商户单号永久唯一，409 duplicate_merchant_ref，带原来那笔的付款编号）。
+   * 一般是 Trading 自己早先那次提交（返回丢了、防重键又过了 24 小时），由调用方核对后认领
+   */
+  class DuplicateRef extends ProviderError {
+    public final String existingRef;
+
+    public DuplicateRef(int status, String existingRef) {
+      super(status, "duplicate_merchant_ref");
+      this.existingRef = existingRef;
+    }
+  }
+
   void ensureCustomer(String customerId);
 
   /** 这个客户在这条链的地址：没有就生成。返回地址 */
@@ -66,7 +79,9 @@ public interface PaymentProvider {
 
   record DepositEvent(String eventId, String customerId, PayNetwork network, String address, String txHash, BigDecimal amount, BigDecimal fee) implements Event {}
 
-  record PayoutEvent(String eventId, String ref, String merchantRef, PayoutState state, String txHash, String reason) implements Event {}
+  /** amount、network、address：回调里这笔付款的金额、链、收款地址（只按商户单号对上时核对用，见 PaymentService.payoutEvent）；没有时为空 */
+  record PayoutEvent(String eventId, String ref, String merchantRef, PayoutState state, String txHash, String reason, BigDecimal amount, PayNetwork network,
+      String address) implements Event {}
 
   /** 到账冲正（TopUP 还没有，TG-11；测试替身用） */
   record ReversalEvent(String eventId, String depositRef) implements Event {}

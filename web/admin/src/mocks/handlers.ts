@@ -761,6 +761,11 @@ export function getPayment(): Promise<PaymentOverview> {
   return respond(() => structuredClone(payment), { empty: () => ({ ...structuredClone(payment), audits: [] }) });
 }
 
+/** 测试用：在用的提供方接入 / 没接入（服务器上地址和 Key 没配全） */
+export function setCurrentProviderConnectedForTest(connected: boolean): void {
+  payment.providers.find((x) => x.current)!.connected = connected;
+}
+
 export function checkPayment(): Promise<PaymentProvider> {
   return mutate(() => {
     const p = payment.providers.find((x) => x.current)!;

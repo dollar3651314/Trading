@@ -3,10 +3,11 @@
 set $tr_quote http://quote-internal:8090;
 proxy_pass $tr_quote;
 proxy_http_version 1.1;
-proxy_set_header Host $host;
+# Host、X-Forwarded-Proto：测试环境（site.conf.template）= $host、$scheme；生产平台网关模式（gateway.conf.template）固定成该端口的平台主机名和 https
+proxy_set_header Host $tr_host;
 proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-Proto $scheme;
+proxy_set_header X-Forwarded-Proto $tr_proto;
 proxy_set_header X-Forwarded-Host "";
 proxy_set_header X-Request-Id $request_id;
 proxy_set_header X-Fx-Health-Alerts "";

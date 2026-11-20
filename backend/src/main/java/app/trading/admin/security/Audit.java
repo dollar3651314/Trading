@@ -35,6 +35,8 @@ public class Audit {
   }
 
   static final String MASK = "***";
+  /** 系统自己做的操作（没有管理员）记的操作人名 */
+  public static final String SYSTEM = "system";
   private static final Pattern SECRET = Pattern.compile("(?i).*(password|secret|token|privatekey|private_key).*");
 
   private final SecurityMapper mapper;
@@ -82,11 +84,26 @@ public class Audit {
     write(action, target, highRisk, result, reason, before, after);
   }
 
+  /** 系统自己做的高危操作（没有管理员，例如生产第一次启动时的初始化 admin.ops.ProductionInit）：操作人记 {@value #SYSTEM} */
+  public void recordSystem(String action, String target, String reason, Map<String, Object> before, Map<String, Object> after) {
+    SecurityMapper.AuditRow r = row(action, target, true, "SUCCESS", reason, before, after);
+    r.adminId = null;
+    r.adminName = SYSTEM;
+    r.ip = null;
+    own.executeWithoutResult(st -> mapper.insertAudit(r));
+  }
+
   private static String join(String reason, String code) {
     return reason == null || reason.isBlank() ? code : reason + "（失败：" + code + "）";
   }
 
   void write(String action, String target, boolean highRisk, String result, String reason, Map<String, Object> before, Map<String, Object> after) {
+    SecurityMapper.AuditRow r = row(action, target, highRisk, result, reason, before, after);
+    own.executeWithoutResult(st -> mapper.insertAudit(r));
+  }
+
+  private SecurityMapper.AuditRow row(String action, String target, boolean highRisk, String result, String reason, Map<String, Object> before,
+      Map<String, Object> after) {
     var ctx = AdminContext.find();
     SecurityMapper.AuditRow r = new SecurityMapper.AuditRow();
     r.adminId = ctx.map(AdminContext::adminId).orElse(null);
@@ -100,7 +117,7 @@ public class Audit {
     r.beforeJson = before == null ? null : json.writeValueAsString(scrub(before));
     r.afterJson = after == null ? null : json.writeValueAsString(scrub(after));
     r.createdAt = LocalDateTime.now(clock);
-    own.executeWithoutResult(st -> mapper.insertAudit(r));
+    return r;
   }
 
   /** 去掉密码等字段的值（任何层级） */

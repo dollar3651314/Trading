@@ -13,6 +13,12 @@
 #   image：合并到 staging 且 ci-ok 通过后，构建 trading-app、trading-quote、trading-web 三个镜像，扫一遍不带密钥（gitleaks），
 #          推到 GitHub 镜像仓库（标签 = 完整提交号，再移动 staging 标签）；测试服务器每分钟自己来拉（deploy/kit/trading update），GitHub 不登录服务器
 #   staging-smoke：等测试服务器换成这个提交后跑冒烟检查（e2e/staging-smoke.sh）；地址在仓库密钥 STAGING_URL，没配就跳过
+# 生产（生产方案 v1 05 页、07 页 R-7，照 TopUP ci.yml 的 image-production / promote-production / production-smoke）：
+#   image-production：合并到 main 且 ci-ok 通过后，构建三个镜像、gitleaks 扫，只推 prod-<提交号>，输出三个镜像摘要；不碰 staging、production 标签
+#   approve-production：GitHub 环境 production（Required reviewers = Amos、只允许 main；智能体不批准，C157）批准后才运行，只检查环境密钥
+#          PRODUCTION_PROMOTE_GUARD 和摘要；新的合并进来时取消还在等批准的旧的
+#   promote-production：批准后按摘要把三个镜像的 production 标签指过去（不重新构建，正在移的不会被取消）；生产服务器每分钟自己拉
+#   production-smoke：等生产换成这个提交，只读冒烟（e2e/production-smoke.sh）；地址在仓库密钥 PRODUCTION_URL、PRODUCTION_ADMIN_URL（可选 PRODUCTION_SITE_URL），没配就跳过
 # PR 上按改动路径决定跑哪些 job（changes），没跑的显示"跳过"，ci-ok 把"跳过"当作通过；push 和手动运行时全部都跑。
 name: ci
 on:
@@ -26,8 +32,10 @@ permissions:
   pull-requests: read   # 密钥扫描（gitleaks-action）、路径判断（paths-filter）要读 PR 的提交和文件列表，只读
 concurrency:
   # PR：同一分支新推送时取消旧运行。push / 手动：不取消正在跑的（包括正在推镜像的），排队中的只保留最新一个——
-  # 修"连续合并互相取消"：以前 staging 上后一次合并会取消前一次，加了推镜像后前一次发布会被打断
-  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.head_ref) || format('{0}-{1}', github.event_name, github.ref) }}
+  # 修"连续合并互相取消"：以前 staging 上后一次合并会取消前一次，加了推镜像后前一次发布会被打断（测试环境方案缺口 G3，已核对）。
+  # main 上的 push 每次运行自成一组（不互相排队）：不然后一次合并要等前一次的 promote-production 被批准或拒绝才能开始；
+  # "只批最新的"由 approve-production 自己的 concurrency 做（新的进来就取消还在等批准的旧的，生产方案 05 页第 1 节）
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.head_ref) || (github.event_name == 'push' && github.ref == 'refs/heads/main') && format('main-{0}', github.run_id) || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   # 决定 PR 上跑哪些 job。不是 PR（push、手动）或者改到了 .github/ 时全部为 'true'。
@@ -63,6 +71,9 @@ jobs:
               - 'web/site/**'
             backend:
               - 'pom.xml'
+              - '.mvn/**'
+              - 'scripts/ci-mvn.sh'
+              - 'scripts/ci-mvn-test.sh'
               - 'backend/**'
               - 'quote-app/**'
               - 'quote-protocol/**'
@@ -73,6 +84,7 @@ jobs:
               - 'deploy/**'
               - '.dockerignore'
               - 'e2e/staging-smoke.sh'
+              - 'e2e/production-smoke.sh'
               - 'e2e/staging-e2e/**'
       - name: 是否全部都跑
         id: all
@@ -184,9 +196,20 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - name: 单元测试、集成测试和模块边界检查
-        run: mvn -B -ntp verify
+        run: |
+          # 先跑重跑脚本自己的用例：只在下载失败时重跑，测试失败、编译失败从不重跑
+          bash scripts/ci-mvn-test.sh
+          bash scripts/ci-mvn.sh -B -ntp verify
 
   # 端到端（Playwright）：真实接口模式构建的三个前端 + 后端（profile e2e，外部依赖用替身）+ MySQL、Redis 容器。
   # 主流程：注册 → 充值（链替身）→ 下单 → 止盈止损 → 平仓 → 提现，后台审核；官网用例。失败时上传 trace、截图、录像和两个进程的日志。
@@ -227,7 +250,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
         with:
           node-version: 22
@@ -244,7 +275,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
       - name: 构建后端
-        run: mvn -B -ntp package -DskipTests
+        run: bash scripts/ci-mvn.sh -B -ntp package -DskipTests
       - name: 构建客户端（真实接口模式）
         working-directory: web/client
         run: npm ci --no-audit --no-fund && npm run build
@@ -361,7 +392,15 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-          cache: maven
+      # Maven 依赖缓存每个 job 一份（key 带 job 名）：以前三个 job 共用 setup-java 的同一个缓存，先存的要是打包 job（-DskipTests），
+      # 测试用的 surefire 提供者就永远不在缓存里，backend 每次都要从 Maven Central 下，碰上 429 就失败
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
         with:
           node-version: 22
@@ -371,7 +410,7 @@ jobs:
             web/admin/package-lock.json
             web/site/package-lock.json
       - name: 打包 trading-app、quote-app（测试已在 backend、e2e job 跑过）
-        run: mvn -B -ntp package -DskipTests
+        run: bash scripts/ci-mvn.sh -B -ntp package -DskipTests
       - name: 构建三个前端（真实接口模式，不设 VITE_API_MODE）
         run: |
           for app in client admin site; do
@@ -426,6 +465,8 @@ jobs:
     timeout-minutes: 20
     env:
       STAGING_URL: ${{ secrets.STAGING_URL }}
+      # TopUP 测试环境地址（可选）：配了才能认出"服务器在 TopUP 模式"并跳过冒烟，没配就和以前一样失败（e2e/staging-smoke.sh 开头）
+      SMOKE_TOPUP_URL: ${{ secrets.STAGING_TOPUP_URL }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
         with:
@@ -434,3 +475,184 @@ jobs:
         run: |
           if [ -z "$STAGING_URL" ]; then echo "::warning::仓库密钥 STAGING_URL 还没有配置，跳过"; exit 0; fi
           bash e2e/staging-smoke.sh "$STAGING_URL" "$GITHUB_SHA"
+
+  # ---------- 生产（合并到 main 后）：构建 → Amos 批准 → 移动 production → 冒烟（生产方案 v1 05 页、07 页 R-7） ----------
+  # 生产镜像：合并到 main 且 ci-ok 通过后构建三个镜像，只推 prod-<提交号>。这一步不影响生产：生产服务器只跟 production 标签
+  # （deploy/kit/trading update，.env 的 TR_ENV=production），这里不碰它，也不碰 staging 标签。构建和扫描的步骤和上面的 image job 一样
+  # （image job 没动，免得改坏测试环境的发布）。输出三个镜像摘要：promote-production 按摘要移动 production（标签被人挪过也不会推错镜像）
+  image-production:
+    needs: [ci-ok]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: image-production
+      cancel-in-progress: false
+    outputs:
+      digest_app: ${{ steps.push.outputs.digest_app }}
+      digest_quote: ${{ steps.push.outputs.digest_quote }}
+      digest_web: ${{ steps.push.outputs.digest_web }}
+    env:
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5（v5.7.0）
+        with:
+          distribution: temurin
+          java-version: 25
+      - name: 缓存 Maven 依赖（每个 job 一份）
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4（v4.3.0）
+        with:
+          path: ~/.m2/repository
+          key: maven-${{ runner.os }}-${{ github.job }}-${{ hashFiles('**/pom.xml', '.mvn/**') }}
+          restore-keys: |
+            maven-${{ runner.os }}-${{ github.job }}-
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5（v5.0.0）
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/client/package-lock.json
+            web/admin/package-lock.json
+            web/site/package-lock.json
+      - name: 打包 trading-app、quote-app（测试已在 backend、e2e job 跑过）
+        run: bash scripts/ci-mvn.sh -B -ntp package -DskipTests
+      - name: 构建三个前端（真实接口模式，不设 VITE_API_MODE）
+        run: |
+          for app in client admin site; do
+            npm ci --prefix "web/$app" --no-audit --no-fund
+            npm run build --prefix "web/$app"
+          done
+      - name: 构建三个镜像（标签 prod-<完整提交号>；健康检查的 version 是提交号本身）
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          for pair in app:trading-app quote:trading-quote web:trading-web; do
+            docker build -f "deploy/${pair%%:*}.Dockerfile" --build-arg FX_VERSION="$SHA" \
+              --label org.opencontainers.image.revision="$SHA" \
+              --label org.opencontainers.image.source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              -t "$reg/${pair#*:}:prod-$SHA" .
+          done
+      - name: 镜像里不带密钥（gitleaks 扫三个镜像里我们放进去的文件，含前端脚本，jar 解开扫；镜像里不能有 .env）
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          scan=$(mktemp -d)
+          for img in trading-app trading-quote trading-web; do
+            cid=$(docker create "$reg/$img:prod-$SHA")
+            mkdir -p "$scan/$img"
+            case "$img" in
+              trading-web) for p in /trading-kit /usr/share/nginx /etc/nginx /docker-entrypoint.d; do docker cp "$cid:$p" "$scan/$img/" ; done ;;
+              *) docker cp "$cid:/app" "$scan/$img/"; for j in "$scan/$img"/app/*.jar; do mkdir -p "$j.d"; (cd "$j.d" && unzip -q "$j"); rm -f "$j"; done ;;
+            esac
+            docker rm "$cid" > /dev/null
+          done
+          if find "$scan" -name '.env' -o -name '*.pem' -o -name 'id_rsa*' | grep -q .; then echo "::error::镜像里有 .env、证书私钥或 SSH 私钥"; exit 1; fi
+          docker run --rm -v "$scan:/scan:ro" -v "$PWD/deploy/gitleaks-image.toml:/gitleaks.toml:ro" \
+            ghcr.io/gitleaks/gitleaks@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
+            dir /scan --config /gitleaks.toml --no-banner --redact --exit-code 1
+      - name: 推送 prod-<提交号>，取三个镜像摘要（还没有上生产：等 promote-production 批准）
+        id: push
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for pair in quote:trading-quote web:trading-web app:trading-app; do
+            img="$reg/${pair#*:}"
+            docker push -q "$img:prod-$SHA"
+            digest=$(docker buildx imagetools inspect "$img:prod-$SHA" --format '{{.Manifest.Digest}}')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::取不到 ${pair#*:} 的镜像摘要"; exit 1; }
+            echo "digest_${pair%%:*}=$digest" >> "$GITHUB_OUTPUT"
+            echo "已推送 ${pair#*:}:prod-$SHA（$digest）" >> "$GITHUB_STEP_SUMMARY"
+          done
+          docker logout ghcr.io
+          echo "还没有上生产：等 Amos 在 GitHub 批准 promote-production" >> "$GITHUB_STEP_SUMMARY"
+
+  # 上生产分两个 job（审查 #28 🟡：取消只针对还在等批准的运行，已经批准、正在移标签的不取消）：
+  #   approve-production：GitHub 环境 production（Required reviewers = Amos、只允许 main）批准后才运行；智能体不批准（C157）。只做检查
+  #     （环境密钥 PRODUCTION_PROMOTE_GUARD 在不在、三个摘要格式对不对），不碰镜像。concurrency 取消进行中的：main 上又合并了新的，
+  #     新的这次走到这里时，旧的还在等批准就被取消（只批最新的，生产方案 05 页第 1 节）；旧的已经批准过，这个 job 早就结束了，取消不到它
+  #   promote-production：approve-production 通过后才运行，按摘要把三个镜像的 production 标签指过去（不重新构建；trading-app 最后移：
+  #     服务器看到它变时另外两个都已就绪）。concurrency 不取消进行中的：正在移标签的一定做完，后面批准的排队接着移
+  approve-production:
+    needs: [image-production]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    concurrency:
+      group: approve-production
+      cancel-in-progress: true
+    steps:
+      # PRODUCTION_PROMOTE_GUARD 只放在 GitHub 环境 production 的环境密钥里（值随便，不打印）：环境没建好时 GitHub 会自动建一个
+      # 没有保护、没有这个密钥的同名环境，这里读不到就失败，后面的 promote-production 不会运行，不会不经批准就上生产
+      - name: 检查环境密钥和镜像摘要（不碰镜像）
+        env:
+          PRODUCTION_PROMOTE_GUARD: ${{ secrets.PRODUCTION_PROMOTE_GUARD }}
+          DIGEST_APP: ${{ needs.image-production.outputs.digest_app }}
+          DIGEST_QUOTE: ${{ needs.image-production.outputs.digest_quote }}
+          DIGEST_WEB: ${{ needs.image-production.outputs.digest_web }}
+        run: |
+          [ -n "$PRODUCTION_PROMOTE_GUARD" ] || { echo "::error::GitHub 环境 production 里没有环境密钥 PRODUCTION_PROMOTE_GUARD（环境没建好？），不上生产"; exit 1; }
+          for d in "$DIGEST_APP" "$DIGEST_QUOTE" "$DIGEST_WEB"; do
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::镜像摘要格式不对（要 sha256:[0-9a-f]{64}），不上生产"; exit 1; }
+          done
+          echo "Amos 已批准提交 $GITHUB_SHA 上生产" >> "$GITHUB_STEP_SUMMARY"
+
+  promote-production:
+    needs: [image-production, approve-production]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: promote-production
+      cancel-in-progress: false
+    steps:
+      - name: 把三个镜像的 production 标签指到刚推的镜像（按摘要，不重新构建）
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST_APP: ${{ needs.image-production.outputs.digest_app }}
+          DIGEST_QUOTE: ${{ needs.image-production.outputs.digest_quote }}
+          DIGEST_WEB: ${{ needs.image-production.outputs.digest_web }}
+        run: |
+          for d in "$DIGEST_APP" "$DIGEST_QUOTE" "$DIGEST_WEB"; do
+            [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::镜像摘要格式不对，不上生产"; exit 1; }
+          done
+          reg="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx imagetools create -t "$reg/trading-quote:production" "$reg/trading-quote@$DIGEST_QUOTE"
+          docker buildx imagetools create -t "$reg/trading-web:production" "$reg/trading-web@$DIGEST_WEB"
+          docker buildx imagetools create -t "$reg/trading-app:production" "$reg/trading-app@$DIGEST_APP"
+          docker logout ghcr.io
+          echo "生产标签已指到提交 $GITHUB_SHA 的三个镜像（trading-app $DIGEST_APP）" >> "$GITHUB_STEP_SUMMARY"
+
+  # 移动 production 之后：等生产服务器换成这个提交，再跑只读冒烟（e2e/production-smoke.sh）。地址在仓库密钥里（不写在仓库里、日志里自动遮盖）；
+  # PRODUCTION_URL 没配就跳过；PRODUCTION_ADMIN_URL、PRODUCTION_SITE_URL 没配时按平台的规律从客户端地址推
+  production-smoke:
+    needs: [promote-production]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    concurrency:
+      group: production-smoke
+      cancel-in-progress: true
+    env:
+      PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+      PRODUCTION_ADMIN_URL: ${{ secrets.PRODUCTION_ADMIN_URL }}
+      PRODUCTION_SITE_URL: ${{ secrets.PRODUCTION_SITE_URL }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5（v5.1.0）
+        with:
+          persist-credentials: false
+      - name: 生产冒烟检查（只读）
+        run: |
+          if [ -z "$PRODUCTION_URL" ]; then echo "::warning::仓库密钥 PRODUCTION_URL 还没有配置，跳过"; exit 0; fi
+          bash e2e/production-smoke.sh "$PRODUCTION_URL" "$GITHUB_SHA" "$PRODUCTION_ADMIN_URL" "$PRODUCTION_SITE_URL"

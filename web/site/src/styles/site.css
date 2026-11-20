@@ -49,7 +49,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .ico svg { width: 18px; height: 18px; }
 .card h3 { font-size: 16px; margin-bottom: 6px; }
 .card p { color: var(--muted); font-size: 14px; }
-.tbd { border: 1px dashed currentColor; border-radius: var(--r-md); padding: 10px 14px; color: var(--amber); font-size: 14px; }
 .tag-sample { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px dashed currentColor; color: var(--amber); white-space: nowrap; }
 
 /* ---------- 行情 ---------- */
@@ -99,7 +98,6 @@ footer { background: var(--s2); border-top: 1px solid var(--border); color: var(
 footer .links { display: flex; flex-wrap: wrap; gap: 8px 24px; color: var(--muted); }
 footer .links a:hover { color: var(--text); }
 footer .risk-full { line-height: 1.7; }
-footer .tbd { display: inline-block; font-size: 13px; }
 
 /* ---------- 法律页 ---------- */
 .legal { padding: 40px 0 64px; }
@@ -156,7 +154,6 @@ footer .tbd { display: inline-block; font-size: 13px; }
 .is-desktop .grid-safe { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
 .is-desktop .grid-safe .card { padding: 22px; }
 .is-desktop .grid-safe .ico { margin-bottom: 14px; }
-.is-desktop .license { margin-top: 16px; }
 .is-desktop .faq { margin-top: 24px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .is-desktop .faq-item { padding: 16px 20px; background: var(--s1); border: 1px solid var(--border); border-radius: var(--r-lg); }
 .is-desktop .final { text-align: center; }
@@ -205,7 +202,6 @@ footer .tbd { display: inline-block; font-size: 13px; }
 .is-mobile .step .n { position: absolute; left: -36px; top: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--bg); border: 1px solid var(--cyan); color: var(--cyan); display: grid; place-items: center; font-size: 13px; }
 .is-mobile .step h3 { font-size: 15px; }
 .is-mobile .step p { color: var(--muted); font-size: 13px; }
-.is-mobile .license { margin-top: 12px; font-size: 13px; }
 .is-mobile .faq { margin-top: 14px; }
 .is-mobile .faq-item { padding: 14px 0; border-bottom: 1px solid var(--hair); }
 .is-mobile .final { text-align: center; padding-bottom: 24px; }

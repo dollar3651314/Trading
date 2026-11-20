@@ -15,7 +15,10 @@ export function useSymbolFilter(initialCategory: Category) {
   const hot = useMemo(() => list.filter((s) => s.hot).map((s) => s.code), [list]);
   const fav = useFavorites(hot);
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState<Category>(initialCategory);
+  const [selected, setCat] = useState<Category>(initialCategory);
+  // 只显示有品种的分类（自选、全部总在）：生产只开加密货币时外汇等标签点进去是空的（生产方案 v1 07 页 R-1）；选中的分类没有品种了就按"全部"
+  const cats = useMemo(() => CATEGORIES.filter((c) => c === 'fav' || c === 'all' || list.some((s) => s.category === c)), [list]);
+  const cat: Category = cats.includes(selected) ? selected : 'all';
   const filtered = useMemo(() => {
     const k = q.trim().toLowerCase();
     return list.filter(
@@ -24,7 +27,7 @@ export function useSymbolFilter(initialCategory: Category) {
         (!k || s.code.toLowerCase().includes(k) || s.nameZh.toLowerCase().includes(k) || s.nameEn.toLowerCase().includes(k)),
     );
   }, [list, q, cat, fav.list]);
-  return { list, loading, error, reload, q, setQ, cat, setCat, filtered, fav };
+  return { list, loading, error, reload, q, setQ, cat, setCat, cats, filtered, fav };
 }
 
 export type SymbolFilter = ReturnType<typeof useSymbolFilter>;

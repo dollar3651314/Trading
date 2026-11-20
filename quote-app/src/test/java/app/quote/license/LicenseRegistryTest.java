@@ -37,7 +37,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * 报价源授权登记（技术方案 08 页，TQ-11 A）：报价商 × 品种三项（交易用途、登录后展示、转售），各自有起止日期；具体品种优先于 {@code *}；
- * 启用检查时（这里强制 enforce=true，生产是报价模式 live 时自动启用）报价的 tradable 按"交易用途"标，没有授权的品种只显示不开仓。
+ * 启用检查时（这里明确设 enforce=true；所有环境默认关，Amos 2026-11-17）报价的 tradable 按"交易用途"标，没有授权的品种只显示不开仓。
  * 报价源用 mock 的路由给出（EURUSD 在用 alltick），日期用可调时钟（2026-10-14）。
  */
 @QuoteAppTest

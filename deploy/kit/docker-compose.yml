@@ -5,14 +5,29 @@
 # Trading 自己占 80、443，自己的 MySQL、Redis，不动 TopUP 的任何容器、配置和数据。
 # trading-app 只绑本机 127.0.0.1:8080 给部署脚本看健康检查；quote-app、MySQL、Redis 不映射任何端口。
 # 内存（Amos 11/17 选 B：在现有 2G 上单独模式硬跑，是 Amos 批准的 C75 例外；11/17 测试服务器实测后调整，合计待 Amos 确认）：
-#   trading-app 348、quote-app 264、mysql 320、redis 16、web 16，合计 964 MB（原 900：trading-app 380、mysql 224）。
+#   trading-app 348、quote-app 312、mysql 272、redis 16、web 16，合计 964 MB（原 900：trading-app 380、mysql 224；11/17：quote-app 264、mysql 320）。
+#   11/18 调整（合计不变）：服务器启动 5 分钟实测（sudo trading mem，MiB，anon = 程序内存）quote-app 259/264、anon 247，贴着上限
+#   （11/17 也见过 quote-app 比别的容器晚启动 20 多分钟，推断是被内核按超限杀掉后重启）；mysql 225/320、anon 160；trading-app 289/348、anon 278。
+#   开发机同样参数跑 5 分钟（NMT，实际执行）：quote-app 程序内存约 216，其中堆 64（满）、元空间 + 类 69、代码缓存 22、符号表 14、线程 6、
+#   NMT 以外的 malloc 约 20～30；JVM 几个区的上限合计 196，加上不受这些上限管的部分约 70，最多可到约 266，264 不够。
+#   mysql 320 → 272：anon 160 + 缓冲池填满约 10 + 备份时的 mysqldump 约 25 + 内存临时表最多 32 ≈ 227，留约 45（文件缓存可回收，不算）。
+#   quote-app 264 → 312：最多约 266，留约 46。trading-app 348 不动（anon 278，堆还没用满，最多约 304 + 70，靠 GC 回收，留约 70）。
+#   11/18 第二次（各容器跑了 44 分钟，上限都不变）：quote-app 峰值 312/312、触顶 23 次、没被杀，anon 243；trading-app anon 297（不再涨）。
+#   开发机 NMT（实际执行）：quote-app 启动后 C2 编译用的临时内存（Arena Chunk）峰值 34 MB，用完还给 glibc，glibc 不还给系统，
+#   所以 anon 停在高位、再加文件缓存就顶到上限。两个 JVM 都加 -XX:TrimNativeHeapInterval=5000（每 5 秒把 glibc 空着的内存还给系统，
+#   JDK 25 正式参数）：同样跑 4 分钟，quote-app anon 232 → 206、trading-app 264 → 234，CPU 看不出差别；C2 照用，性能不变。
+#   只用 C1（-XX:TieredStopAtLevel=1）能到 193，但启动和运行多耗约 20% CPU，2 核机器上不用。
+#   redis 16：上限常被 dump.rdb 的文件缓存顶满（触顶几万次），程序内存只有 2，内核回收文件缓存就行、不会被杀，不加。
 #   为什么改：测试服务器 setup 第 ⑤ 步备份时 mysql 用到 208/224（mysqldump 跑在 mysql 容器里，也算进它的上限），顶到上限又不能用交换分区，
 #   内核反复回收页面（系统态 CPU 92.7%、负载 48），卡了 20 多分钟后 mysqldump 断连。同一时刻 trading-app 286/380、quote-app 121/264、web 11、redis 8。
 #   trading-app 余量最大（服务器和开发机实测都约 287），降 32 给 mysql；quote-app 开发机并发实测约 243，不降。
 #   门槛：install 时实测可用 1,029 MB（那时 Docker 守护进程已在内存里，原来"Docker 约 80"大部分已含在这个数里，推断），
 #   合计 964 + 每个容器的运行开销约 36（推断，未实测）= 1,000，启动门槛 TR_MIN_MEM_MB 仍是 1,000。
-#   除 mysql 外每个容器 mem_limit = memswap_limit（不用交换分区：JVM 被换出去会卡死 GC，宁可超限被杀重启）；
-#   mysql 例外：内存 320 + 最多 128 MB 交换分区（memswap_limit 448，主机有 2 GB 交换分区），顶到上限时把不常用的页换出去，不再卡死在回收上。
+#   每个容器 mem_limit = memswap_limit，都不用交换分区（JVM 被换出去会卡死 GC，宁可超限被杀重启）。
+#   mysql 以前多给 128 MB 交换分区（448），11/18 服务器实测 vm.swappiness=0、cgroup v2：容器触到上限时内核不换出程序内存，这 128 MB 用不上，
+#   改成和内存一样（vm.swappiness 全机共用、TopUP 也在用，不改；docker 的 --memory-swappiness 在 cgroup v2 上无效）。
+#   mysql 自己的内存（11/18 峰值 297/320，含文件缓存）用启动参数压住：临时表、表缓存、连接数、日志缓冲，见 mysql 的 command。
+#   各容器实际用量（当前、峰值、anon / file）：sudo trading mem
 #   JVM 各区（堆、元空间、代码缓存、直接内存、线程栈）显式写在 JAVA_TOOL_OPTIONS，按开发机实测（11/17，并发请求 3 分钟后的用量，实际执行）分配，
 #   数都能在 .env 改（TR_MEM_*、TR_HEAP_* 等）。两个 JVM 都按 2 核算（-XX:ActiveProcessorCount=2，和服务器一样，GC、编译线程数固定）。
 #   trading on / install 要可用内存 ≥ 1,000 MB 才启动；内存守护（trading memguard，每 30 秒）可用内存低于阈值时只停 Trading，不碰 TopUP。
@@ -47,6 +62,9 @@ services:
       ADMIN_DOMAIN: ${ADMIN_DOMAIN:?缺少 ADMIN_DOMAIN}
       WWW_DOMAIN: ${WWW_DOMAIN:?缺少 WWW_DOMAIN}
       QUOTE_DOMAIN: ${QUOTE_DOMAIN:?缺少 QUOTE_DOMAIN}
+      # 测试环境官网不让搜索引擎收录（X-Robots-Tag: noindex + robots.txt 全部禁止，测试环境验收 T-2）；生产要让官网被收录时设 "false"。
+      # 这个开关只管官网，客户端、后台、报价子域名在 Nginx 配置里写死永远不收录
+      FX_NGINX_NOINDEX: "true"
     volumes:
       # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来
       - /etc/letsencrypt/live/trading:/etc/letsencrypt/live/trading:ro
@@ -75,8 +93,8 @@ services:
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
       # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 348（开发机实测并发后约 287，测试服务器跑 30 分钟约 286）
-      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
-      # 连接池（MySQL 最多 25 个连接：trading 12 + quote 3 + 余量）
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
+      # 连接池（MySQL 最多 18 个连接：trading 12 + quote 3 + 备份 1 + 健康检查 1 + 余量 1）
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}
       FX_COOKIE_SECURE: "true"
       FX_ENV_LABEL: test
@@ -139,8 +157,9 @@ services:
       FX_REDIS_HOST: redis
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
-      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，线程栈 256K × 约 70 + 本机内存，容器 264（开发机实测并发后约 243，元空间用到约 78；测试服务器跑 30 分钟约 121）
-      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError
+      # JVM 上限：堆 64 + 元空间 96 + 代码缓存 28 + 直接内存 8 = 196，加上符号表、线程栈（256K × 约 60）、GC、JIT、malloc 约 70，容器 312
+      # （11/18 服务器启动 5 分钟 anon 247，原来 264 贴着上限；开发机 NMT 实测见开头）。TrimNativeHeapInterval：把 C2 编译用完的临时内存还给系统（见开头）
+      JAVA_TOOL_OPTIONS: -Xms32m -Xmx${TR_HEAP_QUOTE:-64m} -XX:MaxMetaspaceSize=${TR_META_QUOTE:-96m} -XX:ReservedCodeCacheSize=${TR_CODE_QUOTE:-28m} -XX:MaxDirectMemorySize=${TR_DIRECT_QUOTE:-8m} -Xss256k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
       FX_QUOTE_DB_POOL_SIZE: ${TR_DB_POOL_QUOTE:-3}
       FX_QUOTE_INTERNAL_KEY: ${FX_QUOTE_INTERNAL_KEY:?缺少 FX_QUOTE_INTERNAL_KEY}
       FX_QUOTE_KEY_ENC_KEY: ${FX_QUOTE_KEY_ENC_KEY:?缺少 FX_QUOTE_KEY_ENC_KEY}
@@ -148,8 +167,11 @@ services:
       FX_QUOTE_MARKET_SOURCE: simulated
       FX_QUOTE_BINANCE_ENABLED: ${FX_QUOTE_BINANCE_ENABLED:-true}
       FX_QUOTE_BINANCE_FUTURES_ENABLED: "false"
-      FX_QUOTE_LICENSE_ENFORCE: auto
-      FX_QUOTE_OPEN_DOCS: auto
+      # 报价源授权检查关（Amos 2026-11-17"授权检查彻底关掉"，所有环境默认关；代码默认也是 false，这里写明）
+      FX_QUOTE_LICENSE_ENFORCE: "false"
+      # 开发者文档 /docs/：测试环境明确打开（测试环境验收 T-1）。auto 在"配了任何真实报价源"时也不给看，而测试环境币安默认打开（TD4-11），
+      # auto 会让 /docs/ 返回 404；需求是"对外开放前只在测试环境能看"，所以这里写死 true。生产不能照抄，用 auto 或 false
+      FX_QUOTE_OPEN_DOCS: "true"
       FX_QUOTE_ALLTICK_TOKEN: ${FX_QUOTE_ALLTICK_TOKEN:-}
       FX_QUOTE_ITICK_TOKEN: ${FX_QUOTE_ITICK_TOKEN:-}
     networks:
@@ -170,8 +192,8 @@ services:
       retries: 3
       start_period: 90s
     stop_grace_period: 30s
-    mem_limit: ${TR_MEM_QUOTE:-264m}
-    memswap_limit: ${TR_MEM_QUOTE:-264m}
+    mem_limit: ${TR_MEM_QUOTE:-312m}
+    memswap_limit: ${TR_MEM_QUOTE:-312m}
     logging: *logging
 
   mysql:
@@ -186,9 +208,23 @@ services:
     command:
       - --innodb-buffer-pool-size=${TR_MYSQL_BUFFER_POOL:-32M}
       - --performance-schema=OFF
-      - --max-connections=25
-      - --innodb-log-buffer-size=8M
-      - --key-buffer-size=8M
+      # 内存（11/18，峰值 297/320，"MySQL 内存"PR）：连接数 = trading-app 连接池 12 + quote-app 3 + 备份导出 1 + 健康检查 1 + 余量 1；
+      # 每个连接按需分配排序、连接缓冲（几百 KB～几 MB），少开连接就少占
+      - --max-connections=18
+      - --innodb-log-buffer-size=4M
+      # 不用 MyISAM
+      - --key-buffer-size=1M
+      # 表缓存：默认 4000 个 × 16 份，两个库合计约 60 张表，256 个 × 1 份足够；表定义缓存 400 是允许的最小值
+      - --table-open-cache=256
+      - --table-open-cache-instances=1
+      - --table-definition-cache=400
+      - --thread-cache-size=4
+      # 内存里的临时表（分组、排序）合计上限：8.4 默认 1 GiB（比整个容器还大），超过后落到磁盘上的 InnoDB 临时表。
+      # temptable_max_mmap 在 8.4 默认 0、temptable_use_mmap 默认 OFF（不用内存映射文件），不用再设（mysql:8.4.13 实测）
+      - --temptable-max-ram=32M
+      # 不按主机名认账号（两个应用账号是 '%'，root 也有 '%'）；官方镜像本来就是这样，这里写明
+      - --skip-name-resolve
+      - --host-cache-size=0
       - --tmp-table-size=16M
       - --max-heap-table-size=16M
       - --character-set-server=utf8mb4
@@ -204,15 +240,16 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
-    # 内存 320（服务器上 224 时备份卡死，见开头）；只有 mysql 允许用交换分区，最多 128 MB（memswap_limit = 内存 + 交换）
-    mem_limit: ${TR_MEM_MYSQL:-320m}
-    memswap_limit: ${TR_MEMSWAP_MYSQL:-448m}
+    # 内存 272（11/18 从 320 降，见开头：anon 160 + 备份导出 + 临时表 ≈ 227）；不用交换分区（见开头）
+    mem_limit: ${TR_MEM_MYSQL:-272m}
+    memswap_limit: ${TR_MEM_MYSQL:-272m}
     logging: *logging
 
   redis:
     image: redis:7
     restart: unless-stopped
-    # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）；只放计数和票据，maxmemory 8 MB，容器 16 MB
+    # 密码从容器的环境变量读，不写进命令行；写满报错不淘汰（限流和防重放计数不能被挤掉）；只放计数和票据，maxmemory 8 MB，容器 16 MB。
+    # 16 MB 常被 dump.rdb 的文件缓存顶满（trading mem 里"触到上限"几万次），程序内存只有约 2 MB：内核回收文件缓存即可，不会被杀，无害
     command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\" --maxmemory 8mb --maxmemory-policy noeviction --save 300 10"]
     environment:
       REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
