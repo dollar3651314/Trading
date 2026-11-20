@@ -183,6 +183,10 @@ echo "== 生产：叠加 docker-compose.production.yml 后的约束（生产方�
 cfgp() { docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml -f deploy/kit/docker-compose.production.yml --env-file "$tmp/.env" --env-file "$tmp/image.env" config "$@"; }
 check "生产 compose 能解析（!override、!reset 要 docker compose ≥ 2.24）" cfgp -q
 cfgp --format json > "$tmp/prod.json"
+# 邮件端口没写时的默认值（.env 里 FX_MAIL_PORT 空）
+grep -v "^FX_MAIL_PORT=" "$tmp/.env" > "$tmp/.env-noport"
+docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml -f deploy/kit/docker-compose.production.yml --env-file "$tmp/.env-noport" --env-file "$tmp/image.env" config --format json > "$tmp/prod-noport.json"
+docker compose --project-name trading --project-directory deploy/kit -f deploy/kit/docker-compose.yml --env-file "$tmp/.env-noport" --env-file "$tmp/image.env" config --format json > "$tmp/test-noport.json"
 jqp() { jq -e "$1" "$tmp/prod.json" > /dev/null; }
 check "生产：只有 trading-web 映射 8082、8083、8084（对外）和 127.0.0.1:8085（报价对外默认不发布），不占 80、443" jqp '[.services["trading-web"].ports[] | "\(.host_ip // "")|\(.published)"] | sort == ["127.0.0.1|8085","|8082","|8083","|8084"]'
 check "生产：trading-app 健康检查口 127.0.0.1:18082（8080、18080 是同机 TopUP 生产的）" jqp '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"18082","protocol":"tcp"}]'
@@ -323,4 +327,30 @@ check "首次部署标记：watch 看到的版本不是 image.env 当前版本�
 check "首次部署标记：trading-app 健康、版本对，但报价服务不健康，watch 不删" bash -c '[ "$(fp_case watch-noquote "$(printf "a%.0s" {1..40})")" = 在 ]'
 check "首次部署标记：on 启动后当前版本健康就删" bash -c '[ "$(fp_case on "$(printf "a%.0s" {1..40})")" = 无 ]'
 check "首次部署标记：rollback 回到上一个版本、健康就删" bash -c '[ "$(fp_case rollback "$(printf "b%.0s" {1..40})")" = 无 ]'
+# 邮件（11/20 生产实测：InstaBox 拦出站 587、465、25，2587 通）：生产默认端口 2587、测试 587；失败时日志写退出码和原因分类、不写密码。
+# 假的 curl：把参数记下来，按 FAKE_CURL_RC 退出、按 FAKE_SMTP_CODE 打出回应码（-w %{response_code}）
+cat > "$tmp/fakebin/curl" << 'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${FAKE_CURL_ARGS:?}"
+printf '%s' "${FAKE_SMTP_CODE:-250}"
+exit "${FAKE_CURL_RC:-0}"
+FAKE
+chmod +x "$tmp/fakebin/curl"
+mail_env() { printf '%bFX_MAIL_HOST=smtp.resend.com\nFX_MAIL_FROM=ops@example.com\nFX_ALERT_EMAILS=amos@example.com\nFX_MAIL_USERNAME=resend\nFX_MAIL_PASSWORD=re_not_a_real_key_check_only\n' "$1" > "$tmp/tr/.env"; : > "$tmp/tr/logs/trading.log"; }
+mail_run() { env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_CURL_ARGS="$tmp/curl-args" "$@" bash deploy/kit/trading test-mail > /dev/null 2>&1; }
+export -f mail_env mail_run
+check "邮件：生产没写端口时默认 2587（虚拟机拦 587），测试环境默认 587" bash -c 'mail_env "TR_ENV=production\n"; mail_run; grep -q "smtp://smtp.resend.com:2587 " "$tmp/curl-args" && mail_env ""; mail_run; grep -q "smtp://smtp.resend.com:587 " "$tmp/curl-args"'
+check "邮件：setup / keys 在生产写 2587、测试写 587（resend_port）" bash -c '[ "$(grep -c "envset FX_MAIL_PORT \"\$(resend_port)\"" deploy/kit/trading)" = 2 ] && grep -q "ask FX_MAIL_PORT .* 2587$" deploy/kit/trading && grep -q "ask FX_MAIL_PORT \"端口（587 或 465）\" 587$" deploy/kit/trading'
+check "邮件失败：日志写 curl 退出码和原因（连不上 / 认证失败 / 发件人被拒），不写密码" bash -c 'for c in "7 000 连不上" "28 000 连接超时" "67 535 认证失败" "55 550 发件人或收件人被拒"; do set -- $c; mail_env "TR_ENV=production\n"; ! mail_run FAKE_CURL_RC=$1 FAKE_SMTP_CODE=$2 || exit 1; grep -q "邮件发送失败.*curl 退出码 $1，SMTP 回应码 $2：$3" "$tmp/tr/logs/trading.log" || exit 1; ! grep -q re_not_a_real_key "$tmp/tr/logs/trading.log" || exit 1; done'
+check "邮件成功：日志写已发邮件" bash -c 'mail_env "TR_ENV=production\n"; mail_run && grep -q "已发邮件" "$tmp/tr/logs/trading.log"'
+# 生产不重启、不停 Docker（11/20 事故：install --production 写了 daemon.json 后 systemctl restart docker，同机 TopUP 生产全部容器跟着重启）：
+# 生产的代码路径里不能有 systemctl restart / stop docker。只有测试环境的安装（cmd_install 里 install --production 分支之后的部分）允许
+check "生产：生产模式的代码里没有 systemctl restart / stop docker、不写 daemon.json（只有测试环境的安装允许）" bash -c '
+  code=$(grep -vE "^[[:space:]]*#" deploy/kit/trading)
+  n=$(grep -cE "systemctl (restart|stop) docker" <<< "$code")
+  t=$(awk "/^cmd_install\\(\\) \\{/{f=1} f&&/^}/{f=0} f" <<< "$code" | grep -cE "systemctl (restart|stop) docker")
+  p=$(awk "/^cmd_install_production\\(\\) \\{/{f=1} f&&/^}/{f=0} f" <<< "$code" | grep -cE "systemctl (restart|stop) docker|/etc/docker/daemon\\.json")
+  [ "$n" = "$t" ] && [ "$p" = 0 ]'
+check "邮件端口默认值：应用（生产 compose）和 trading 命令（resend_port）都是 2587，测试环境都是 587" bash -c 'grep -q "FX_MAIL_PORT: \${FX_MAIL_PORT:-2587}" deploy/kit/docker-compose.production.yml && grep -q "FX_MAIL_PORT: \${FX_MAIL_PORT:-587}" deploy/kit/docker-compose.yml && grep -q "^resend_port() { if prod; then echo 2587; else echo 587; fi; }" deploy/kit/trading && [ "$(jq -r ".services[\"trading-app\"].environment.FX_MAIL_PORT" "$1")" = 2587 ] && [ "$(jq -r ".services[\"trading-app\"].environment.FX_MAIL_PORT" "$2")" = 587 ]' _ "$tmp/prod-noport.json" "$tmp/test-noport.json"
+check "生产：不装 unattended-upgrades（会自动升级、重启 Docker）；清没有标签的镜像只清 Trading 自己的" bash -c 'p=$(awk "/^cmd_install_production\\(\\) \\{/{f=1} f&&/^}/{f=0} f" deploy/kit/trading | grep -vE "^[[:space:]]*#"); ! grep -q unattended-upgrades <<< "$p" && grep -q "docker image prune -f --filter \"label=org.opencontainers.image.source=https://github.com/dollar3651314/Trading\"" deploy/kit/trading && [ "$(grep -vE "^[[:space:]]*#" deploy/kit/trading | grep -c "docker image prune -f > /dev/null")" = 1 ]'
 exit $fail
