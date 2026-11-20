@@ -359,7 +359,13 @@ prune_images() {
       if [ "$keep" -gt "$KEEP_IMAGES" ] && [ "$tag" != "$cur" ] && [ "$tag" != "$prev" ]; then docker image rm "$REG/$repo:$tag" > /dev/null 2>&1 || true; fi
     done < <(docker image ls "$REG/$repo" --format '{{.Tag}}')
   done
-  docker image prune -f > /dev/null 2>&1 || true
+  # 没有标签的镜像：生产只清 Trading 自己的（按镜像标签 org.opencontainers.image.source 过滤），不碰同机 TopUP 的；
+  # 测试环境照旧清整台机器没有标签的
+  if prod; then
+    docker image prune -f --filter "label=org.opencontainers.image.source=https://github.com/dollar3651314/Trading" > /dev/null 2>&1 || true
+  else
+    docker image prune -f > /dev/null 2>&1 || true
+  fi
 }
 
 # Resend SMTP 的默认端口：生产 2587（InstaBox 虚拟机拦出站 587、465、25，2587、2465 通，11/20 实测），测试环境 587
@@ -485,8 +491,9 @@ cmd_install_production() {
   export DEBIAN_FRONTEND=noninteractive
   if ! command -v docker > /dev/null || ! docker compose version > /dev/null 2>&1 || ! command -v age > /dev/null || ! command -v jq > /dev/null; then
     apt-get update -q > /dev/null
-    if command -v docker > /dev/null; then apt-get install -y -q age jq curl unattended-upgrades > /dev/null
-    else apt-get install -y -q docker.io docker-compose-v2 age jq curl unattended-upgrades > /dev/null; fi
+    # 生产不装 unattended-upgrades（自动升级 docker 时会重启 Docker，同机 TopUP 跟着重启）；机器上已经有的也不动它
+    if command -v docker > /dev/null; then apt-get install -y -q age jq curl > /dev/null
+    else apt-get install -y -q docker.io docker-compose-v2 age jq curl > /dev/null; fi
   fi
   # 生产任何时候都不重启、不停 Docker（同机 TopUP 生产的容器会跟着重启）：不写全局的 /etc/docker/daemon.json。
   # 容器日志轮转已经在 docker-compose.production.yml 里按容器设了（20 MB × 3），全局这一项不需要。
