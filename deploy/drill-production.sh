@@ -8,7 +8,7 @@
 #     docker build -f deploy/${p%%:*}.Dockerfile --build-arg FX_VERSION=$SHA --label org.opencontainers.image.revision=$SHA -t ghcr.io/dollar3651314/${p#*:}:prod-$SHA .; done
 #   docker tag ghcr.io/dollar3651314/trading-app:prod-$SHA ghcr.io/dollar3651314/trading-app:production
 #   sudo bash deploy/drill-production.sh <空目录>
-# 会占用本机 8082～8085、127.0.0.1:18080，起名为 trading 的 compose 项目（跑完 docker compose down）。
+# 会占用本机 8082～8085、127.0.0.1:18082，起名为 trading 的 compose 项目（跑完 docker compose down）。
 # 磁盘紧的开发机可以设 TR_INSTALL_MIN_DISK_MB、TR_UPDATE_MIN_DISK_MB、TR_DRILL_MIN_DISK_MB 调低门槛（演练日志里写明）。不需要任何密钥：邮件没配置时只记日志。
 set -uo pipefail
 D=${1:?用法：sudo bash deploy/drill-production.sh <空目录>}
@@ -74,7 +74,7 @@ T restore "$(basename "$daily")" --confirm
 T restore "$(basename "$daily")" --confirm --production
 echo "-- 备份之后写的 drill.after.backup 应该没了，payment.payout.paused 应该是 true"
 q "SELECT config_key, value FROM trading.common_config WHERE config_key IN ('payment.payout.paused', 'drill.after.backup')"
-curl -s http://127.0.0.1:18080/api/health; echo
+curl -s http://127.0.0.1:18082/api/health; echo
 T status | grep -E "暂停|版本"
 T start-payout --confirm
 q "SELECT config_key, value FROM trading.common_config WHERE config_key = 'payment.payout.paused'"

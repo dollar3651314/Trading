@@ -185,7 +185,10 @@ check "生产 compose 能解析（!override、!reset 要 docker compose ≥ 2.24
 cfgp --format json > "$tmp/prod.json"
 jqp() { jq -e "$1" "$tmp/prod.json" > /dev/null; }
 check "生产：只有 trading-web 映射 8082、8083、8084（对外）和 127.0.0.1:8085（报价对外默认不发布），不占 80、443" jqp '[.services["trading-web"].ports[] | "\(.host_ip // "")|\(.published)"] | sort == ["127.0.0.1|8085","|8082","|8083","|8084"]'
-check "生产：trading-app 健康检查口 127.0.0.1:18080（8080 是同机 TopUP 生产的）" jqp '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"18080","protocol":"tcp"}]'
+check "生产：trading-app 健康检查口 127.0.0.1:18082（8080、18080 是同机 TopUP 生产的）" jqp '.services["trading-app"].ports == [{"mode":"ingress","host_ip":"127.0.0.1","target":8080,"published":"18082","protocol":"tcp"}]'
+# 同机 TopUP 生产已知占用的端口（11/20 虚拟机实测：nginx 0.0.0.0:8080、topup-web-1 127.0.0.1:18080）：Trading 生产映射的端口、
+# trading 命令生产模式检查的端口、健康检查口都不能是它们
+check "生产：端口不和 TopUP 生产已知占用的 8080、18080 冲突（compose 映射、trading 命令的端口检查和健康检查口）" bash -c '! jq -e "[.services[].ports[]?.published] | any(. == \"8080\" or . == \"18080\")" "$1" > /dev/null && p=$(grep -E "^  prod && ports=\(" deploy/kit/trading) && [ -n "$p" ] && ! grep -qwE "8080|18080" <<< "$p" && grep -q "HEALTH_PORT=18082;" deploy/kit/trading' _ "$tmp/prod.json"
 check "生产：quote-app、mysql、redis 不映射端口" jqp '[.services["quote-app","mysql","redis"].ports] | all(. == null)'
 check "生产：不挂证书（平台网关做 HTTPS）" jqp '[.services[].volumes[]? | select(.source | startswith("/etc/letsencrypt") or startswith("/var/www/certbot"))] | length == 0'
 check "生产：每个容器 mem_limit = memswap_limit，合计 2,432 MB（1,024 + 512 + 768 + 64 + 64，生产方案 03 页）" jqp '([.services[] | (.mem_limit == .memswap_limit)] | all) and (([.services[].mem_limit | tonumber] | add) == (2432 * 1024 * 1024)) and ((.services["trading-app"].mem_limit | tonumber) == 1024 * 1048576) and ((.services["quote-app"].mem_limit | tonumber) == 512 * 1048576) and ((.services.mysql.mem_limit | tonumber) == 768 * 1048576)'
@@ -288,7 +291,7 @@ check "重跑安装（TR_FIRST）、这台已经部署成功过：不清 paused�
 check "重跑安装（TR_FIRST）、第一次部署没起来（first-pending）：不跳过上次失败的版本、不做更新前备份" bash -c 'prod_env; echo IMAGE_TAG=prod-$(printf "c%.0s" {1..40}) > "$tmp/tr/state/image.env"; : > "$tmp/tr/state/first-pending"; printf "c%.0s" {1..40} > "$tmp/tr/state/skip"; o=$(tr_run TR_FIRST=1 TR_UPDATE_MIN_DISK_MB=0 FAKE_REVISION=$(printf "c%.0s" {1..40}) bash deploy/kit/trading update); grep -q "当前 无" <<< "$o" && ! grep -q "没有备份加密密钥" <<< "$o" && [ ! -e "$tmp/tr/state/skip" ]'
 check "生产：TR_REAL_IP_FROM 和 Trading 实际的 Docker 子网（docker network inspect）重叠也拒绝，不重叠照常" bash -c 'prod_env; ! tr_run FAKE_SUBNETS="10.99.0.0/16 192.168.5.0/24" bash deploy/kit/trading set TR_REAL_IP_FROM 10.99.3.0/24 > /dev/null && ! grep -q "^TR_REAL_IP_FROM=" "$tmp/tr/.env" && tr_run FAKE_SUBNETS="10.99.0.0/16" bash deploy/kit/trading set TR_REAL_IP_FROM 10.98.0.0/16 > /dev/null && grep -q "^TR_REAL_IP_FROM=10.98.0.0/16$" "$tmp/tr/.env"'
 check "生产：两次检查隔了 15 分钟以上报\"可能休眠\"；trading on（停过再启动）之后第一次检查不误报" bash -c 'prod_env; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; grep -q "休眠" "$tmp/tr/state/watch" || exit 1; echo $(( $(date +%s) - 3600 )) > "$tmp/tr/state/watch-last-run"; tr_run TR_MIN_MEM_MB=1 bash deploy/kit/trading on > /dev/null; rm -f "$tmp/tr/state/watch"; tr_run bash deploy/kit/trading watch > /dev/null; ! grep -q "休眠" "$tmp/tr/state/watch"'
-# 首次部署标记（state/first-pending）：版本健康运行后由 watch、on、rollback 删掉。健康检查用一个本机小服务假扮（127.0.0.1:18080 回 status、version）
+# 首次部署标记（state/first-pending）：版本健康运行后由 watch、on、rollback 删掉。健康检查用一个本机小服务假扮（127.0.0.1:18082 回 status、version）
 fp_health() { # fp_health <version>：起假的健康检查，打印进程号
   python3 -c 'import http.server,sys
 v=sys.argv[1]
@@ -296,7 +299,7 @@ class H(http.server.BaseHTTPRequestHandler):
   def do_GET(s):
     b=("{\"status\":\"UP\",\"version\":\"%s\"}" % v).encode(); s.send_response(200); s.end_headers(); s.wfile.write(b)
   def log_message(s,*a): pass
-http.server.HTTPServer(("127.0.0.1",18080),H).serve_forever()' "$1" > /dev/null 2>&1 &
+http.server.HTTPServer(("127.0.0.1",18082),H).serve_forever()' "$1" > /dev/null 2>&1 &
   echo $!
 }
 export -f fp_health
