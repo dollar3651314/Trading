@@ -488,13 +488,11 @@ cmd_install_production() {
     if command -v docker > /dev/null; then apt-get install -y -q age jq curl unattended-upgrades > /dev/null
     else apt-get install -y -q docker.io docker-compose-v2 age jq curl unattended-upgrades > /dev/null; fi
   fi
-  # 已有 daemon.json（TopUP 装过）就不动它、不重启 Docker（TopUP 生产在跑）；开发机演练（TR_OFFLINE_TEST）不动
-  if [ ! -f /etc/docker/daemon.json ] && [ -z "${TR_OFFLINE_TEST:-}" ]; then
-    mkdir -p /etc/docker
-    printf '{ "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "3" } }\n' > /etc/docker/daemon.json
-    systemctl restart docker
-  fi
-  systemctl enable --now docker > /dev/null 2>&1 || true
+  # 生产任何时候都不重启、不停 Docker（同机 TopUP 生产的容器会跟着重启）：不写全局的 /etc/docker/daemon.json。
+  # 容器日志轮转已经在 docker-compose.production.yml 里按容器设了（20 MB × 3），全局这一项不需要。
+  # 11/20 事故：以前这里在 daemon.json 不存在时写了一个并 systemctl restart docker，05:55 TopUP 生产全部容器跟着重启了一次
+  # Docker 没在运行时才启动它（不是重启；刚装的机器）
+  systemctl is-active --quiet docker 2> /dev/null || systemctl enable --now docker > /dev/null 2>&1 || true
   ok "$(docker --version)"; ok "$(docker compose version)"; ok "age $(age --version)"
 
   say "== 3/8 目录和 .env（只有 root 能读），环境定为生产（之后不能改）"

@@ -339,4 +339,12 @@ check "邮件：生产没写端口时默认 2587（虚拟机拦 587），测试�
 check "邮件：setup / keys 在生产写 2587、测试写 587（resend_port）" bash -c '[ "$(grep -c "envset FX_MAIL_PORT \"\$(resend_port)\"" deploy/kit/trading)" = 2 ] && grep -q "ask FX_MAIL_PORT .* 2587$" deploy/kit/trading && grep -q "ask FX_MAIL_PORT \"端口（587 或 465）\" 587$" deploy/kit/trading'
 check "邮件失败：日志写 curl 退出码和原因（连不上 / 认证失败 / 发件人被拒），不写密码" bash -c 'for c in "7 000 连不上" "28 000 连接超时" "67 535 认证失败" "55 550 发件人或收件人被拒"; do set -- $c; mail_env "TR_ENV=production\n"; ! mail_run FAKE_CURL_RC=$1 FAKE_SMTP_CODE=$2 || exit 1; grep -q "邮件发送失败.*curl 退出码 $1，SMTP 回应码 $2：$3" "$tmp/tr/logs/trading.log" || exit 1; ! grep -q re_not_a_real_key "$tmp/tr/logs/trading.log" || exit 1; done'
 check "邮件成功：日志写已发邮件" bash -c 'mail_env "TR_ENV=production\n"; mail_run && grep -q "已发邮件" "$tmp/tr/logs/trading.log"'
+# 生产不重启、不停 Docker（11/20 事故：install --production 写了 daemon.json 后 systemctl restart docker，同机 TopUP 生产全部容器跟着重启）：
+# 生产的代码路径里不能有 systemctl restart / stop docker。只有测试环境的安装（cmd_install 里 install --production 分支之后的部分）允许
+check "生产：生产模式的代码里没有 systemctl restart / stop docker、不写 daemon.json（只有测试环境的安装允许）" bash -c '
+  code=$(grep -vE "^[[:space:]]*#" deploy/kit/trading)
+  n=$(grep -cE "systemctl (restart|stop) docker" <<< "$code")
+  t=$(awk "/^cmd_install\\(\\) \\{/{f=1} f&&/^}/{f=0} f" <<< "$code" | grep -cE "systemctl (restart|stop) docker")
+  p=$(awk "/^cmd_install_production\\(\\) \\{/{f=1} f&&/^}/{f=0} f" <<< "$code" | grep -cE "systemctl (restart|stop) docker|/etc/docker/daemon\\.json")
+  [ "$n" = "$t" ] && [ "$p" = 0 ]'
 exit $fail
