@@ -63,7 +63,8 @@ class FundsOps {
    * 审核时要看的安全情况（第 4 批审查 🔴4a-1）：账户是否冻结、提现是否冻结（来源小写）、最近 48 小时的安全事件（类型小写、时间，最新的在前）。
    * 冻结时后端也拒绝通过（WITHDRAW_FROZEN），这里是让审核员先看到
    */
-  record Safety(boolean accountFrozen, boolean withdrawFrozen, String withdrawFrozenSource, List<SafetyEvent> securityEvents48h) {}
+  record Safety(boolean accountFrozen, boolean withdrawFrozen, String withdrawFrozenSource, List<String> withdrawFrozenSources,
+      List<SafetyEvent> securityEvents48h) {}
 
   record SafetyEvent(String type, String at) {}
 
@@ -298,7 +299,8 @@ class FundsOps {
     boolean accountFrozen = accounts.status(userId) == UserStatus.FROZEN;
     var events = accounts.securityEventsSince(userId, now().minus(SAFETY_WINDOW)).stream()
         .map(e -> new SafetyEvent(e.type().toLowerCase(), Ops.time(e.at()))).toList();
-    return new Safety(accountFrozen, pin.withdrawFrozen(), pin.frozenSource() == null ? null : pin.frozenSource().toLowerCase(), events);
+    return new Safety(accountFrozen, pin.withdrawFrozen(), pin.frozenSource() == null ? null : pin.frozenSource().toLowerCase(),
+        pin.freezes().stream().map(f -> f.source().toLowerCase()).toList(), events);
   }
 
   WithdrawalView approve(AdminContext actor, long no) {

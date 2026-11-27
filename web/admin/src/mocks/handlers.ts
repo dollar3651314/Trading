@@ -14,6 +14,7 @@ import {
   type CurrentAdmin,
   type CustomerDetail,
   type WithdrawSafety,
+  freezesOf,
   type HeldWithdrawal,
   type Recovery,
   type RecoveryDetail,
@@ -309,7 +310,7 @@ export function getCustomer(id: number): Promise<CustomerDetail> {
 /** 第 4 批：TG 客户的提现安全（原型里只放在内存，刷新即恢复） */
 export const withdrawSafety = new Map<number, WithdrawSafety>();
 
-export function unfreezeCustomerWithdraw(id: number, reason: string, password: string): Promise<CustomerDetail> {
+export function unfreezeCustomerWithdraw(id: number, reason: string, password: string, source = 'all'): Promise<CustomerDetail> {
   return mutate(() => {
     requirePerm('withdraw:unfreeze');
     const r = requireReason(reason);
@@ -317,9 +318,12 @@ export function unfreezeCustomerWithdraw(id: number, reason: string, password: s
     if (!password) throw new ApiError('errors.currentPasswordWrong', undefined, { status: 400, code: 'CURRENT_PASSWORD_WRONG' });
     const s = withdrawSafety.get(id);
     if (!s?.withdrawFrozen) throw new ApiError('errors.notWithdrawFrozen');
-    const was = s.frozenSource;
-    withdrawSafety.set(id, { ...s, withdrawFrozen: false, frozenSource: null, frozenAt: null });
-    audit('customer.withdraw_unfreeze', String(id), true, r, { withdrawFrozen: was }, { withdrawFrozen: 'no' });
+    // 4b 审查 🔴R2：一个来源一条，只解除选的来源（'all' 全部）
+    const all = freezesOf(s);
+    const left = source === 'all' ? [] : all.filter((f) => f.source !== source);
+    if (left.length === all.length) throw new ApiError('errors.notWithdrawFrozen');
+    withdrawSafety.set(id, { ...s, withdrawFrozen: left.length > 0, frozenSource: left[0]?.source ?? null, frozenAt: left[0]?.at ?? null, freezes: left });
+    audit('customer.withdraw_unfreeze', String(id), true, r, { withdrawFrozen: all.map((f) => f.source).join(',') }, { withdrawFrozen: left.length ? left.map((f) => f.source).join(',') : 'no' });
   }).then(() => getCustomer(id));
 }
 
@@ -625,7 +629,13 @@ export function getWithdrawal(id: string): Promise<WithdrawalDetail> {
 /** 第 4 批审查：出金详情的安全情况（原型：账户冻结看客户状态，提现冻结看 withdrawSafety；安全事件原型里没有） */
 function withdrawalSafety(c: { id: number; status: string }) {
   const s = withdrawSafety.get(c.id);
-  return { accountFrozen: c.status === 'frozen', withdrawFrozen: !!s?.withdrawFrozen, withdrawFrozenSource: s?.frozenSource ?? null, securityEvents48h: withdrawEvents.get(c.id) ?? [] };
+  return {
+    accountFrozen: c.status === 'frozen',
+    withdrawFrozen: !!s?.withdrawFrozen,
+    withdrawFrozenSource: s?.frozenSource ?? null,
+    withdrawFrozenSources: s ? freezesOf(s).map((f) => f.source) : [],
+    securityEvents48h: withdrawEvents.get(c.id) ?? [],
+  };
 }
 
 /** 原型：客户最近 48 小时的安全事件（测试里设置） */
@@ -1550,6 +1560,7 @@ export function approveRecovery(id: string, note: string, password: string): Pro
     if (!r) throw new ApiError('errors.notFound');
     if (r.status === 'objection') throw new ApiError('errors.recoveryNotReady');
     if (r.status !== 'proof') throw new ApiError('errors.recoveryNotPending');
+    if (r.revokeRequested) throw new ApiError('errors.recoveryRevokePending');
     r.status = 'approved';
     r.proofNote = note.trim();
     r.approvedBy = currentAdmin().displayName;
@@ -1591,7 +1602,7 @@ export function keepRecovery(id: string, reason: string, password: string): Prom
     requireAdminPassword(password);
     const x = recoveries.find((y) => y.id === id);
     if (!x) throw new ApiError('errors.notFound');
-    if (x.status !== 'approved' || !x.revokeRequested) throw new ApiError('errors.recoveryNoRevokeRequest');
+    if ((x.status !== 'approved' && x.status !== 'proof') || !x.revokeRequested) throw new ApiError('errors.recoveryNoRevokeRequest');
     x.revokeRequested = false;
     x.revokeRequestedAt = null;
     recoveryEvent(id, 'keep', r);

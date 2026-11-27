@@ -351,8 +351,12 @@ describe('S18b：品种与行情、交易参数', () => {
 describe('第 4 批：解除提现冻结', () => {
   it('POST /customers/{id}/withdraw-unfreeze 带原因和管理员自己的登录密码', async () => {
     const { calls } = fakeFetch({ 'POST /api/admin/customers/7/withdraw-unfreeze': { body: { id: 7 } } });
+    // 请求体多了 source（4b 审查 🔴R2：默认 all 解除全部来源）
     await real.unfreezeCustomerWithdraw(7, '视频核实本人', 'my-own-password');
-    expect(calls[0].body).toEqual({ reason: '视频核实本人', password: 'my-own-password' });
+    expect(calls[0].body).toEqual({ reason: '视频核实本人', password: 'my-own-password', source: 'all' });
+    // 4b 审查 🔴R2：只解除一个来源
+    await real.unfreezeCustomerWithdraw(7, '只解锁定', 'my-own-password', 'pin_locks');
+    expect(calls[1].body).toEqual({ reason: '只解锁定', password: 'my-own-password', source: 'pin_locks' });
   });
 });
 

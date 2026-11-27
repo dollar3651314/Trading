@@ -435,9 +435,13 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
         <div className={`addr-box${frozen || w.safety.securityEvents48h.length ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.safety.title')}>
           <b>{t('withdrawals.safety.title')}</b>{' '}
           {w.safety.accountFrozen ? <Pill tone="danger">{t('withdrawals.safety.accountFrozen')}</Pill> : null}{' '}
-          {w.safety.withdrawFrozen ? (
-            <Pill tone="danger">{t('withdrawals.safety.withdrawFrozen', { source: w.safety.withdrawFrozenSource ? t(`customers.wdSafety.source.${w.safety.withdrawFrozenSource}`) : '—' })}</Pill>
-          ) : null}
+          {w.safety.withdrawFrozen
+            ? (w.safety.withdrawFrozenSources ?? (w.safety.withdrawFrozenSource ? [w.safety.withdrawFrozenSource] : [])).map((src) => (
+                <Pill key={src} tone="danger">
+                  {t('withdrawals.safety.withdrawFrozen', { source: t(`customers.wdSafety.source.${src}`) })}
+                </Pill>
+              ))
+            : null}
           {frozen ? <div className="text-danger">{t('withdrawals.safety.blocked')}</div> : null}
           <div>
             {w.safety.securityEvents48h.length ? (

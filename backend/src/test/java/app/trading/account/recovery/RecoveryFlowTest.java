@@ -229,23 +229,92 @@ class RecoveryFlowTest {
     assertThat(revoked(s)).as("安全事件作废全部网页会话").isTrue();
     assertThat(freeze(uid)).as("申请结束解除 RECOVERY 冻结").isNull();
     verify(sender).sendToChat(eq(oldTg), contains("已按找回申请"), eq(TelegramSender.Priority.HIGH));
+    assertThat(jdbc.queryForList("SELECT channel FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_EXECUTED'", String.class, uid))
+        .as("换绑完成也发到原账户的邮箱").contains("EMAIL");
     assertThat(actions(id)).containsExactly("APPLY", "PROOF", "APPROVE", "EXECUTE");
     assertThat(telegram.byUserId(uid).orElseThrow().authorizedAt()).as("新 TG 不用再点重新授权").isAfterOrEqualTo(
         jdbc.queryForObject("SELECT MAX(created_at) FROM account_security_event WHERE user_id = ?", LocalDateTime.class, uid));
   }
 
+  /**
+   * 4b 审查 🔴R1：批准以后原 TG 的撤销（没有争议也一样）转 Amos 决定——暂停执行、RECOVERY 冻结保留；Amos 撤销才结束，维持就照常执行。
+   * 防止占着原 TG 的人在反对期里不出声、批准后一撤销就把真原主挡在外面
+   */
   @Test
-  void 正常路径_等待期内原TG直接撤销_冻结解除() {
+  void 批准后原TG撤销_没有争议也转Amos_暂停执行_冻结保留_Amos决定() {
     long uid = customer(null);
-    long id = toProof(uid, newTg());
+    long newTg = newTg();
+    long id = toProof(uid, newTg);
     recovery.approve(id, 1L, "视频");
-    assertThat(recovery.revokeByOwner(uid, id)).isEqualTo("已撤销这份申请。");
-    assertThat(row(id).status).isEqualTo("CANCELLED");
-    assertThat(row(id).closedBy).isEqualTo("ORIGINAL_TG");
-    assertThat(freeze(uid)).isNull();
+    assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定").contains("提现冻结保持不变");
+    assertThat(row(id).status).as("撤销不作废申请").isEqualTo("APPROVED");
+    assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
+    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    verify(mail).send(eq("ops@example.com"), eq("OPS_RECOVERY_REVOKE_REQ"), anyMap());
     time().advance(Duration.ofHours(25));
     recovery.execute(id);
-    assertThat(row(id).status).isEqualTo("CANCELLED");
+    assertThat(row(id).status).as("待 Amos 决定时不执行").isEqualTo("APPROVED");
+    assertThat(tgOf(uid)).isNotEqualTo(newTg);
+    // Amos 维持：照常执行
+    recovery.keep(id, 1L, "视频核对，原主就是申请人");
+    recovery.execute(id);
+    assertThat(row(id).status).isEqualTo("EXECUTED");
+    assertThat(tgOf(uid)).isEqualTo(newTg);
+
+    // 另一份：Amos 撤销才结束、冻结解除
+    long uid2 = customer(null);
+    long id2 = toProof(uid2, newTg());
+    recovery.approve(id2, 1L, "视频");
+    recovery.revokeByOwner(uid2, id2);
+    assertThat(freeze(uid2)).isEqualTo("RECOVERY");
+    recovery.revokeByAdmin(id2, 1L, "视频核对，申请人不是本人");
+    assertThat(row(id2).status).isEqualTo("CANCELLED");
+    assertThat(freeze(uid2)).isNull();
+  }
+
+  @Test
+  void 证明阶段原TG撤销_转Amos_冻结保留_不能批准直到Amos维持() {
+    long uid = customer(null);
+    long id = toProof(uid, newTg());
+    assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定");
+    assertThat(row(id).status).isEqualTo("PROOF");
+    assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
+    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    assertThat(code(() -> recovery.approve(id, 1L, "视频"))).isEqualTo("RECOVERY_REVOKE_PENDING");
+    recovery.keep(id, 1L, "视频核对后继续审核");
+    recovery.approve(id, 1L, "视频");
+    assertThat(row(id).status).isEqualTo("APPROVED");
+  }
+
+  @Test
+  void 反对期里原TG撤销_按不是我处理_不关申请() {
+    long uid = customer(null);
+    long id = apply(uid, newTg());
+    assertThat(recovery.revokeByOwner(uid, id)).startsWith("已记下");
+    assertThat(row(id).status).isEqualTo("PROOF");
+    assertThat(row(id).disputed).isTrue();
+    assertThat(row(id).closedAt).isNull();
+  }
+
+  // ---------- 4b 审查 🔴R2：冻结按来源 ----------
+
+  @Test
+  void 证明阶段冻结后又被提现密码锁冻结_申请驳回或撤销后仍冻结() {
+    long uid = customer(null);
+    long id = toProof(uid, newTg());
+    pins.freezeWithdraw(uid, "PIN_LOCKS", "30 天内提现密码被锁 2 次");
+    assertThat(pins.status(uid).freezes()).extracting(f -> f.source()).containsExactlyInAnyOrder("RECOVERY", "PIN_LOCKS");
+    recovery.reject(id, 1L, "视频对不上");
+    assertThat(pins.status(uid).withdrawFrozen()).as("只解除 RECOVERY").isTrue();
+    assertThat(pins.status(uid).freezes()).extracting(f -> f.source()).containsExactly("PIN_LOCKS");
+
+    long uid2 = customer(null);
+    long id2 = apply(uid2, newTg());
+    recovery.object(uid2, id2);
+    recovery.freezeNow(uid2, id2);
+    pins.freezeWithdraw(uid2, "WEB_REQUEST", "网页申请冻结");
+    recovery.revokeByAdmin(id2, 1L, "撤销");
+    assertThat(pins.status(uid2).freezes()).extracting(f -> f.source()).containsExactly("WEB_REQUEST");
   }
 
   @Test
@@ -324,7 +393,7 @@ class RecoveryFlowTest {
     recovery.object(uid, id);
     recovery.objectWithPin(uid, id, PinTestSupport.input(redis, uid, PIN));
     recovery.approve(id, 1L, "视频核对，原主确认是自己的新号");
-    assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员核对后决定").contains("不会执行换绑");
+    assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定").contains("不会执行换绑");
     assertThat(row(id).status).as("撤销不作废申请").isEqualTo("APPROVED");
     assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
     verify(mail).send(eq("ops@example.com"), eq("OPS_RECOVERY_REVOKE_REQ"), anyMap());

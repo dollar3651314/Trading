@@ -79,8 +79,8 @@ describe('找回申请', () => {
     fireEvent.click(await screen.findByTitle('已批准等执行'));
     fireEvent.click(await screen.findByText('31'));
     const det = await screen.findByRole('region', { name: '找回申请详情' });
-    expect(within(det).getByRole('group', { name: '争议' })).toHaveTextContent('任何撤销都转给你决定');
-    expect(det).toHaveTextContent('原 TG 请求撤销');
+    expect(within(det).getByRole('group', { name: '争议' })).toHaveTextContent('原 TG 点过"不是我"');
+    expect(within(det).getByRole('alert')).toHaveTextContent('换绑申请的撤销一律交你决定');
     expect(within(det).getByRole('button', { name: '维持批准' })).toBeEnabled();
     fireEvent.click(within(det).getByRole('button', { name: '撤销' }));
     const dialog = await screen.findByRole('dialog');
@@ -97,6 +97,16 @@ describe('找回申请', () => {
     const det = await screen.findByRole('region', { name: '找回申请详情' });
     expect(within(det).queryByRole('button', { name: '批准' })).not.toBeInTheDocument();
     expect(within(det).getByRole('button', { name: '驳回' })).toBeInTheDocument();
+  }, 30_000);
+
+  it('证明阶段收到原 TG 的撤销请求（没有争议）：不能批准，只能维持或撤销', async () => {
+    recoveries.push(base({ status: 'proof', revokeRequested: true, revokeRequestedAt: '2026-10-14 09:00:00' }));
+    renderAs(<RecoveriesPage />);
+    fireEvent.click(await screen.findByText('31'));
+    const det = await screen.findByRole('region', { name: '找回申请详情' });
+    expect(within(det).getByRole('alert')).toHaveTextContent('批准和执行都暂停、提现冻结保留');
+    expect(within(det).getByRole('button', { name: '批准' })).toBeDisabled();
+    expect(within(det).getByRole('button', { name: '维持批准' })).toBeEnabled();
   }, 30_000);
 });
 

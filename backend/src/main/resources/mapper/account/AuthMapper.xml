@@ -60,8 +60,9 @@
   </select>
 
   <!-- 冻结提现（只能人工解冻） -->
-  <select id="withdrawFreeze" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
-    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId}
+  <!-- 4b 审查 🔴R2：一个来源一行，有任何一行就是冻结；最早的在前 -->
+  <select id="withdrawFreezes" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
+    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId} ORDER BY created_at, source
   </select>
   <insert id="insertWithdrawFreeze">
     INSERT IGNORE INTO account_withdraw_freeze (user_id, source, reason, created_at) VALUES (#{userId}, #{source}, #{reason}, #{at})

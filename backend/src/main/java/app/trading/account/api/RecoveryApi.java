@@ -11,8 +11,9 @@ import java.util.Optional;
  *       48 小时反对期（没人反对不冻结）→ 期满进入证明阶段、冻结原账户提现到申请结束 → <b>Amos 一人审核</b>（再输后台密码、审计、告警邮件）→
  *       <b>24 小时执行等待期</b> → 换绑（提现密码、白名单清空，48 小时不能提现，安全事件作废全部网页会话）。</li>
  *   <li>原 TG 点「不是我」：争议路径，转加严人工；可以在网页输提现密码，输对不冻结，没输（30 分钟内）、输错或选"直接冻结"就冻结提现直到申请结束。</li>
- *   <li>撤销：正常路径原 TG 在等待期内直接撤销；<b>争议路径任何撤销都转 Amos 决定</b>（撤销请求记下、暂停执行，Amos 选撤销或维持）；
- *       <b>Amos 本人</b>在后台撤销直接生效。邮件里的签名撤销链接、服务器命令 {@code cancel-recovery} 是第 6 批（TB-37）。</li>
+ *   <li>撤销（4b 审查 🔴R1，比需求文档更严）：反对期里只能走"不是我"；证明阶段和批准以后，原 TG 的<b>任何撤销都转 Amos 决定</b>（不管有没有争议；
+ *       记撤销请求、暂停批准和执行、冻结保留，Amos 选撤销或维持）；<b>Amos 本人</b>在后台撤销直接生效。没邮箱人工重设提现密码本人可直接撤销。
+ *       邮件里的签名撤销链接、服务器命令 {@code cancel-recovery} 是第 6 批（TB-37）。</li>
  *   <li><b>没邮箱忘记提现密码（PIN_RESET）</b>：本人在网页申请 → 证明 + Amos 审核 → 48 小时等待期（本人随时可撤销）→ 提现密码作废、白名单清空、48 小时不能提现。</li>
  *   <li>驳回换绑：封申请人用过的新 TG（长期）。</li>
  * </ul>
@@ -37,7 +38,7 @@ public interface RecoveryApi {
   /** 原 TG 在网页输提现密码：输对不冻结（已经因为争议冻结的解除）；输错冻结并照常计数（抛提现密码的错） */
   void objectWithPin(long userId, long recoveryId, WithdrawPinApi.PinInput pin);
 
-  /** 原 TG（或本人）点「撤销」：正常路径直接撤销；争议路径记下撤销请求、暂停执行、转 Amos；返回给机器人回的话 */
+  /** 原 TG（或本人）点「撤销」：换绑在证明阶段和批准后一律记撤销请求、暂停、转 Amos；反对期按"不是我"；人工重设提现密码直接撤销。返回给机器人回的话 */
   String revokeByOwner(long userId, long recoveryId);
 
   /** 没邮箱的 TG 客户申请人工重设提现密码；返回申请编号 */
@@ -69,6 +70,6 @@ public interface RecoveryApi {
   /** Amos 本人撤销：没执行的都可以，直接生效 */
   void revokeByAdmin(long id, long adminId, String reason);
 
-  /** 争议路径上收到撤销请求后，Amos 视频核对后维持批准：清掉撤销请求，到执行时间就执行 */
+  /** 收到原 TG 的撤销请求后，Amos 视频核对后维持（证明阶段或已批准）：清掉撤销请求，继续审核 / 到执行时间就执行 */
   void keep(long id, long adminId, String reason);
 }

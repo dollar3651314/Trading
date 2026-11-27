@@ -65,7 +65,13 @@ class CustomerOps {
   /**
    * 提现安全（TG 机器人第 4 批）：提现密码设了没有、锁到什么时候、提现有没有被冻结（来源：PIN_LOCKS 30 天锁 2 次 / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY）
    */
-  record WithdrawSafety(boolean pinSet, String pinLockedUntil, boolean withdrawFrozen, String frozenSource, String frozenAt) {}
+  record WithdrawSafety(boolean pinSet, String pinLockedUntil, boolean withdrawFrozen, String frozenSource, String frozenAt, List<FreezeView> freezes) {}
+
+  /** 4b 审查 🔴R2：每个来源一条（来源小写、原因、时间） */
+  record FreezeView(String source, String reason, String at) {}
+
+  /** 能在后台单独解除的冻结来源（小写），空 = 全部 */
+  static final java.util.Set<String> SOURCES = java.util.Set.of("pin_locks", "web_request", "bot_self", "dispute", "recovery");
 
   /** 客户详情里最近的已平仓记录条数（部分平仓拆出来的记录标出原持仓编号） */
   static final int RECENT_CLOSED = 20;
@@ -181,23 +187,30 @@ class CustomerOps {
   private WithdrawSafety safety(long userId) {
     var s = pins.status(userId);
     return new WithdrawSafety(s.set(), Ops.time(s.lockedUntil()), s.withdrawFrozen(), s.frozenSource() == null ? null : s.frozenSource().toLowerCase(),
-        Ops.time(s.frozenAt()));
+        Ops.time(s.frozenAt()), s.freezes().stream().map(f -> new FreezeView(f.source().toLowerCase(), f.reason(), Ops.time(f.at()))).toList());
   }
 
   /**
    * 人工解冻提现（第 4 批：冻结提现只能人工解冻）。高危：先核对管理员自己的登录密码（不对 {@code CURRENT_PASSWORD_WRONG}），原因必填、写审计，
-   * 解除以后给告警邮箱（{@code FX_ALERT_EMAILS}）发邮件 {@value #UNFREEZE_MAIL}（收件人为空只记日志，写邮件任务失败不影响解除）。没冻结时报 NOT_FROZEN
+   * 解除以后给告警邮箱（{@code FX_ALERT_EMAILS}）发邮件 {@value #UNFREEZE_MAIL}（收件人为空只记日志，写邮件任务失败不影响解除）。没冻结时报 NOT_FROZEN。
+   * 4b 审查 🔴R2：source 为空解除全部来源；给了来源（小写）只解除那一个，别的来源照旧冻结。注意：解除 RECOVERY / DISPUTE 会让进行中的找回申请失去冻结保护，
+   * 后台页面要明确选择
    */
   @Transactional
-  void unfreezeWithdraw(AdminContext actor, long id, String reason, String password) {
+  void unfreezeWithdraw(AdminContext actor, long id, String reason, String password, String source) {
     String r = Audit.requireReason(reason);
+    String src = source == null || source.isBlank() || "all".equalsIgnoreCase(source) ? null : source.strip().toLowerCase();
+    if (src != null && !SOURCES.contains(src)) throw new ValidationException(List.of(new ValidationException.Field("source", "invalid")));
     auth.requirePassword(actor, password);
     String[] was = new String[1];
     audit.run("customer.withdraw_unfreeze", String.valueOf(id), true, r, () -> {
       customers.customer(id).orElseThrow(() -> new BizException("NOT_FOUND", "客户不存在"));
-      was[0] = pins.unfreezeWithdraw(id);
-      if (was[0] == null) throw new BizException("NOT_FROZEN", "这个客户的提现没有被冻结");
-      return Audit.Change.of(null, Map.of("withdrawFrozen", was[0].toLowerCase()), Map.of("withdrawFrozen", "no"));
+      List<String> before = pins.status(id).freezes().stream().map(f -> f.source().toLowerCase()).toList();
+      List<String> removed = pins.unfreezeWithdraw(id, src == null ? null : src.toUpperCase());
+      if (removed.isEmpty()) throw new BizException("NOT_FROZEN", src == null ? "这个客户的提现没有被冻结" : "这个客户没有这个来源的提现冻结");
+      was[0] = String.join(",", removed);
+      List<String> after = before.stream().filter(x -> !removed.contains(x.toUpperCase())).toList();
+      return Audit.Change.of(null, Map.of("withdrawFrozen", String.join(",", before)), Map.of("withdrawFrozen", after.isEmpty() ? "no" : String.join(",", after)));
     });
     String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
     Map<String, String> p = Map.of("customerId", String.valueOf(id), "source", was[0], "admin", who, "reason", r, "at",

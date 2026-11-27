@@ -133,8 +133,9 @@ export async function setCustomerFrozen(id: number, frozen: boolean, reason: str
 }
 
 /** 人工解除提现冻结（第 4 批，权限 withdraw:unfreeze；必须填原因、重新输入自己的登录密码；冻结提现只能人工解冻）；返回更新后的详情 */
-export function unfreezeCustomerWithdraw(id: number, reason: string, password: string): Promise<CustomerDetail> {
-  return request(`/customers/${id}/withdraw-unfreeze`, { method: 'POST', body: { reason, password } });
+/** source 为空或 'all' 解除全部来源，否则只解除那一个来源（4b 审查 🔴R2） */
+export function unfreezeCustomerWithdraw(id: number, reason: string, password: string, source = 'all'): Promise<CustomerDetail> {
+  return request(`/customers/${id}/withdraw-unfreeze`, { method: 'POST', body: { reason, password, source } });
 }
 
 /** 编辑客户资料（v2 E1，必须填原因）：姓名、出生日期、国籍；返回更新后的详情 */

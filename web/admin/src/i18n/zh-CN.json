@@ -486,7 +486,11 @@
       "confirmUnfreeze": "确认解除",
       "password": "你的登录密码",
       "passwordHint": "解除提现冻结要重新输入你自己的后台登录密码；解除后会给告警邮箱发邮件。",
-      "passwordRequired": "请输入你的登录密码"
+      "passwordRequired": "请输入你的登录密码",
+      "which": "解除哪个来源",
+      "whichRequired": "请选择要解除的来源",
+      "all": "全部来源",
+      "recoveryWarn": "其中有找回申请带来的冻结（证明阶段 / 争议）：解除后进行中的找回申请就失去冻结保护，请确认找回申请已经处理完。"
     },
     "held": {
       "title": "冻结时暂停的提现",
@@ -633,7 +637,8 @@
     "recoveryNotReady": "还在 48 小时反对期里，不能批准",
     "recoveryNotPending": "只能处理待审核的申请",
     "recoveryNotOpen": "这份申请已经结束了",
-    "recoveryNoRevokeRequest": "这份申请没有待决定的撤销请求"
+    "recoveryNoRevokeRequest": "这份申请没有待决定的撤销请求",
+    "recoveryRevokePending": "原 TG 请求了撤销：请先视频核对，选维持或撤销"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -2089,8 +2094,8 @@
     "disputedTag": "原 TG 点了不是我",
     "pinOk": "已输对提现密码",
     "disputeFrozen": "争议冻结提现",
-    "disputeRule": "争议路径：原 TG 或邮箱的任何撤销都转给你决定（撤销不作废申请，暂停执行）；只有你本人撤销直接生效。",
-    "revokeRequested": "{{time}} 原 TG 请求撤销，换绑暂停执行，等你视频核对后选\"撤销\"或\"维持批准\"",
+    "disputeRule": "争议路径：原 TG 点过\"不是我\"。",
+    "revokeRequested": "{{time}} 原 TG 请求撤销：换绑申请的撤销一律交你决定（不管有没有争议），批准和执行都暂停、提现冻结保留；请视频核对后选\"撤销\"或\"维持\"",
     "revokeRequestedTag": "待决定撤销",
     "proofNoteLine": "证明核对记录：{{note}}（{{by}} 批准）",
     "closeLine": "结束：{{by}}，{{reason}}",

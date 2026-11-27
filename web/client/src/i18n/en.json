@@ -1008,6 +1008,6 @@
     "pinOkDone": "Confirmed: withdrawals are not frozen. The request still goes to strict manual review.",
     "revoke": "Cancel this request",
     "revokeConfirm": "Cancel it?",
-    "revokeBody": "Normally this takes effect immediately. If you tapped \"Not me\", the reviewer decides after verification."
+    "revokeBody": "Manual PIN reset: cancelled immediately. Rebind: during the objection period it counts as \"Not me\"; after that, every cancellation goes to the reviewer, who verifies by video and decides. Nothing runs before that, and the withdrawal freeze stays."
   }
 }

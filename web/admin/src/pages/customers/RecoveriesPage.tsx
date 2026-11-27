@@ -151,7 +151,11 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
           <b>{t('recoveries.dispute')}</b> <Pill tone="danger">{t('recoveries.disputedTag')}</Pill>{' '}
           {r.disputePinOk ? <Pill tone="ok">{t('recoveries.pinOk')}</Pill> : null} {r.disputeFrozen ? <Pill tone="warn">{t('recoveries.disputeFrozen')}</Pill> : null}
           <div>{t('recoveries.disputeRule')}</div>
-          {r.revokeRequested ? <div className="text-danger">{t('recoveries.revokeRequested', { time: shortTime(r.revokeRequestedAt ?? '') })}</div> : null}
+        </div>
+      ) : null}
+      {r.revokeRequested ? (
+        <div className="addr-box" role="alert">
+          <span className="text-danger">{t('recoveries.revokeRequested', { time: shortTime(r.revokeRequestedAt ?? '') })}</span>
         </div>
       ) : null}
       {r.proofNote ? <div className="addr-box ok">{t('recoveries.proofNoteLine', { note: r.proofNote, by: r.approvedBy ?? '—' })}</div> : null}
@@ -159,7 +163,7 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
       {open ? (
         <div className="acts">
           {r.status === 'proof' ? (
-            <PermButton perm="recovery:review" type="primary" onClick={approve}>
+            <PermButton perm="recovery:review" type="primary" onClick={approve} disabled={r.revokeRequested} disabledReason={t('errors.recoveryRevokePending')}>
               {t('recoveries.approve')}
             </PermButton>
           ) : null}
@@ -168,7 +172,7 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
               {t('recoveries.reject')}
             </PermButton>
           ) : null}
-          {r.status === 'approved' && r.revokeRequested ? (
+          {(r.status === 'approved' || r.status === 'proof') && r.revokeRequested ? (
             <PermButton perm="recovery:review" type="primary" onClick={keep}>
               {t('recoveries.keep')}
             </PermButton>

@@ -79,6 +79,43 @@ describe('冻结的客户不能通过出金（审查 🔴4a-1）', () => {
   }, 30_000);
 });
 
+describe('客户详情：多个来源的提现冻结（4b 审查 🔴R2）', () => {
+  it('列出全部来源，解除时要选来源；只解除选的那个', async () => {
+    const c = db.customers[2];
+    const before = c.telegramId;
+    c.telegramId = '700000003';
+    withdrawSafety.set(c.id, {
+      pinSet: true, pinLockedUntil: null, withdrawFrozen: true, frozenSource: 'pin_locks', frozenAt: '2026-11-20T08:00:00Z',
+      freezes: [
+        { source: 'pin_locks', reason: '30 天内锁 2 次', at: '2026-11-20T08:00:00Z' },
+        { source: 'recovery', reason: '找回申请 #1 证明阶段', at: '2026-11-21T08:00:00Z' },
+      ],
+    });
+    try {
+      renderAs(
+        <Routes>
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
+        </Routes>,
+        { path: `/customers/${c.id}` },
+      );
+      expect(await screen.findByText('提现已冻结（30 天内提现密码锁了 2 次）')).toBeInTheDocument();
+      expect(screen.getByText('提现已冻结（换绑证明阶段）')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /解除提现冻结/ }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog).toHaveTextContent('其中有找回申请带来的冻结');
+      fireEvent.mouseDown(within(dialog).getByRole('combobox', { name: '解除哪个来源' }));
+      fireEvent.click(await screen.findByTitle('30 天内提现密码锁了 2 次'));
+      fireEvent.change(within(dialog).getByLabelText('你的登录密码'), { target: { value: 'pw' } });
+      confirmHighRisk(dialog, '视频核对本人', '确认解除');
+      await waitFor(() => expect(withdrawSafety.get(c.id)?.freezes?.map((f) => f.source)).toEqual(['recovery']), { timeout: 5000 });
+      expect(withdrawSafety.get(c.id)?.withdrawFrozen).toBe(true);
+    } finally {
+      c.telegramId = before;
+      withdrawSafety.delete(c.id);
+    }
+  }, 30_000);
+});
+
 describe('客户详情：提现安全', () => {
   it('显示冻结来源，人工解除要填原因，解除后不再显示冻结', async () => {
     const c = db.customers[0];

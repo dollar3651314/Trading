@@ -69,10 +69,16 @@ ALTER TABLE wallet_withdrawal
   ADD COLUMN held_reason   VARCHAR(64) NULL AFTER held_at,
   ADD COLUMN send_attempts INT         NOT NULL DEFAULT 0 COMMENT '交钱包提供方认领过几次' AFTER held_reason;
 
--- ③ 新的安全事件类型 REBIND（换绑 Telegram）
+-- ③ 4b 审查 🔴R2：提现冻结改成一个来源一行（主键 user_id + source）。原来一个客户一行、INSERT IGNORE，第二个来源的冻结被悄悄吞掉，
+--    之后按来源解除（例如找回申请结束解除 RECOVERY）会把客户整个解冻。现在：有任何一行就是冻结；按来源解除只删那个来源；后台可以解除全部或选一个来源。
+--    V38 已经合并进 staging（测试环境有没有跑过 V38 不能确定），所以不改 V38，在这里改主键（已有数据每个客户最多一行，不会冲突）
+ALTER TABLE account_withdraw_freeze DROP PRIMARY KEY, ADD PRIMARY KEY (user_id, source),
+  COMMENT = '冻结提现（一个来源一行，有任何一行就是冻结；只能人工解冻，找回申请结束时只解除它自己的 RECOVERY / DISPUTE）';
+
+-- ④ 新的安全事件类型 REBIND（换绑 Telegram）
 ALTER TABLE account_security_event MODIFY type VARCHAR(16) NOT NULL COMMENT 'PASSWORD_CHANGE / PASSWORD_RESET / EMAIL_CHANGE / FREEZE / UNFREEZE / PIN_SET / PIN_CHANGE / PIN_RESET / KYC_FIRST / REBIND';
 
--- ④ 通知模板（客户）：有人申请换绑（带「不是我」）、已批准等执行（带「撤销」）、已执行、已撤销 / 驳回；没邮箱忘记提现密码的申请、批准、执行
+-- ⑤ 通知模板（客户）：有人申请换绑（带「不是我」）、已批准等执行（带「撤销」）、已执行、已撤销 / 驳回；没邮箱忘记提现密码的申请、批准、执行
 INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, title_en, body_zh, body_en, variables, channels) VALUES
 ('RECOVERY_REQUESTED', 'USER', 'system', '有人申请换绑 Telegram（安全提醒）', 'Telegram rebind requested (security alert)', '有人申请把你的账户换绑到另一个 Telegram',
   'Someone asked to move your account to another Telegram',
@@ -81,8 +87,8 @@ INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, t
   'id', 'INBOX,PUSH,EMAIL,TELEGRAM'),
 ('RECOVERY_APPROVED', 'USER', 'system', '换绑已批准、等待执行（安全提醒）', 'Rebind approved, waiting (security alert)', '换绑申请已批准，{executeAt} 执行',
   'Rebind approved; it takes effect at {executeAt}',
-  '找回申请 #{id} 已经人工批准，将在 {executeAt} 执行（换绑后提现密码和白名单清空，48 小时内不能提现）。不是你本人申请的，请在机器人里点「撤销」。',
-  'Recovery #{id} was approved and takes effect at {executeAt} (the withdrawal PIN and whitelist are cleared, and withdrawals pause for 48 hours). If this was not you, tap "Cancel" in the bot.',
+  '找回申请 #{id} 已经人工批准，将在 {executeAt} 执行（换绑后提现密码和白名单清空，48 小时内不能提现）。不是你本人申请的，请在机器人里点「撤销」：撤销请求交审核员核对后决定，决定之前不会执行。',
+  'Recovery #{id} was approved and takes effect at {executeAt} (the withdrawal PIN and whitelist are cleared, and withdrawals pause for 48 hours). If this was not you, tap "Cancel" in the bot: the reviewer verifies and decides, and nothing runs before that.',
   'id,executeAt', 'INBOX,PUSH,EMAIL,TELEGRAM'),
 ('RECOVERY_EXECUTED', 'USER', 'system', '换绑已完成（安全提醒）', 'Rebind completed (security alert)', '账户已换绑到新的 Telegram',
   'Your account is now linked to a new Telegram',
@@ -108,15 +114,15 @@ INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, t
   'Request #{id} has taken effect: the old PIN no longer works, the whitelist was cleared and all web sessions were signed out. Withdrawals pause for 48 hours. Re-authorize in the bot and set a new PIN under Me → Withdrawal PIN.',
   'id', 'INBOX,PUSH,EMAIL,TELEGRAM');
 
--- ⑤ 告警邮件（发给 FX_ALERT_EMAILS，即 Amos）：批准换绑 / 人工重设提现密码；争议路径上原 TG 请求撤销（转 Amos 决定）
+-- ⑥ 告警邮件（发给 FX_ALERT_EMAILS，即 Amos）：批准换绑 / 人工重设提现密码；争议路径上原 TG 请求撤销（转 Amos 决定）
 INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, title_en, body_zh, body_en, variables, channels) VALUES
 ('OPS_RECOVERY_APPROVED', 'STAFF', NULL, '找回申请已批准', 'Recovery approved',
   '找回申请 #{id}（{kindZh}）已批准，{executeAt} 执行', 'Recovery #{id} ({kindEn}) approved; runs at {executeAt}',
   '找回申请 #{id}（{kindZh}，客户 {customerId}）已批准。\n操作人：{admin}\n核对记录：{note}\n执行时间（UTC）：{executeAt}\n如果不是你批准的，请立即在后台"找回申请"里撤销，并检查后台账号。',
   'Recovery #{id} ({kindEn}, customer {customerId}) was approved.\nBy: {admin}\nVerification note: {note}\nRuns at (UTC): {executeAt}\nIf you did not approve it, cancel it in the admin console (Recovery requests) right away and check the admin account.',
   'id,kindZh,kindEn,customerId,admin,note,executeAt', 'EMAIL'),
-('OPS_RECOVERY_REVOKE_REQ', 'STAFF', NULL, '争议换绑收到撤销请求', 'Revoke requested on a disputed rebind',
-  '争议中的找回申请 #{id} 收到撤销请求，待你决定', 'Disputed recovery #{id}: cancellation requested, your decision needed',
-  '找回申请 #{id}（客户 {customerId}）在争议路径上，{who}请求撤销。按规则这类撤销不直接生效，换绑暂停执行，等你视频核对后在后台"找回申请"里选择撤销或维持批准。',
-  'Recovery #{id} (customer {customerId}) is disputed and {whoEn} asked to cancel it. Such requests do not take effect by themselves; the rebind is on hold until you verify by video and choose Cancel or Keep in the admin console.',
+('OPS_RECOVERY_REVOKE_REQ', 'STAFF', NULL, '换绑收到撤销请求', 'Revoke requested on a rebind',
+  '找回申请 #{id} 收到撤销请求，待你决定', 'Recovery #{id}: cancellation requested, your decision needed',
+  '找回申请 #{id}（客户 {customerId}），{who}请求撤销。按规则换绑申请的撤销不直接生效（防止占着原 TG 的人挡住真原主），换绑暂停执行，等你视频核对后在后台"找回申请"里选择撤销或维持批准。',
+  'Recovery #{id} (customer {customerId}): {whoEn} asked to cancel it. Cancellations of rebinds do not take effect by themselves (so whoever holds the old Telegram cannot block the real owner); the rebind is on hold until you verify by video and choose Cancel or Keep in the admin console.',
   'id,customerId,who,whoEn', 'EMAIL');

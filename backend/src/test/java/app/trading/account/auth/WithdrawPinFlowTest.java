@@ -233,7 +233,7 @@ class WithdrawPinFlowTest {
     assertThat(code(() -> api.verify(uid, in(uid, "135790")))).as("冻结提现时输对也不行").isEqualTo("WITHDRAW_FROZEN");
     assertThat(code(() -> pins.change(uid, in(uid, "135790"), in(uid, "246802"), in(uid, "246802")))).as("冻结时不能改提现密码").isEqualTo("WITHDRAW_FROZEN");
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'WITHDRAW_FROZEN'", Integer.class, uid)).isPositive();
-    assertThat(api.unfreezeWithdraw(uid)).isEqualTo("PIN_LOCKS");
+    assertThat(api.unfreezeWithdraw(uid, null)).containsExactly("PIN_LOCKS");
     assertThat(code(() -> api.verify(uid, in(uid, "135790")))).isEqualTo("OK");
   }
 

@@ -107,7 +107,10 @@ class RecoveryService implements RecoveryApi {
     if (id == null || telegram.byUserId(customerNo).isEmpty() || !"APPROVED".equals(id.kycStatus())) return ApplyResult.ACCEPTED;
     if (!lastFourMatches(id.docNumber(), docLast4) || !nameMatches(id, name)) return ApplyResult.ACCEPTED;
     tx.executeWithoutResult(st -> {
-      // 同一目标账户：同时只能 1 份进行中、7 天内 1 份（争议转人工的是同一份继续，不另开）
+      // 同一目标账户：同时只能 1 份进行中、7 天内 1 份（争议转人工的是同一份继续，不另开）。
+      // 先查后写、没有加锁：依赖机器人的更新是单线程逐条处理的（TelegramBot 长轮询一个线程，UpdateHandler.consume 逐条处理），
+      // 同一时间不会有两份申请同时走到这里。以后改成多线程或多实例处理更新时，要在这里锁住目标客户（例如 SELECT … FOR UPDATE account_user）
+      // 或者加唯一约束兜底
       if (mapper.openCount(customerNo) > 0 || mapper.countSince(customerNo, REBIND, now.minus(TARGET_WINDOW)) > 0) return;
       RecoveryMapper.Row r = new RecoveryMapper.Row();
       r.kind = REBIND;
@@ -132,7 +135,7 @@ class RecoveryService implements RecoveryApi {
       if (!st0.set()) throw new BizException("PIN_NOT_SET", "还没有设置提现密码");
       // 有邮箱的用邮箱验证码重设；30 天内被锁 2 次冻结的也走人工（08 页第 3 节）
       boolean hasEmail = auth.email(userId).isPresent();
-      if (hasEmail && !SOURCE_PIN_LOCKS.equals(st0.frozenSource())) throw new BizException("HAS_EMAIL", "绑了邮箱的请用邮箱验证码重设");
+      if (hasEmail && !st0.frozenBy(SOURCE_PIN_LOCKS)) throw new BizException("HAS_EMAIL", "绑了邮箱的请用邮箱验证码重设");
       if (mapper.openCount(userId) > 0) throw new BizException("RECOVERY_OPEN", "已经有一份进行中的申请");
       LocalDateTime now = now();
       RecoveryMapper.Row r = new RecoveryMapper.Row();
@@ -218,6 +221,16 @@ class RecoveryService implements RecoveryApi {
     });
   }
 
+  /**
+   * 原 TG（或本人）点「撤销」（4b 审查 🔴R1）：
+   * <ul>
+   *   <li>没邮箱人工重设提现密码（PIN_RESET）：申请人就是本人，直接撤销。</li>
+   *   <li>换绑（REBIND）在反对期：按"不是我"处理（转争议、加严人工），不关申请——反对期只能走"不是我"。</li>
+   *   <li>换绑在证明阶段或已批准：<b>不管有没有争议，撤销都转 Amos 决定</b>，记撤销请求、暂停批准和执行，证明阶段的 RECOVERY 冻结保留，
+   *       发告警邮件。防止占着原 TG 的人在反对期里不出声、等批准后一撤销就把真原主永远挡在外面、顺带解冻提现。
+   *       需求文档 08 页"正常路径原 TG 或邮箱可直接撤销"这里<b>故意更严</b>，等 Amos 确认。</li>
+   * </ul>
+   */
   @Override
   public String revokeByOwner(long userId, long recoveryId) {
     String[] out = new String[1];
@@ -229,23 +242,22 @@ class RecoveryService implements RecoveryApi {
         return;
       }
       LocalDateTime now = now();
-      if (REBIND.equals(r.kind) && !"APPROVED".equals(r.status)) {
-        out[0] = null; // 还没批准的换绑：按"不是我"处理
+      if (PIN_RESET.equals(r.kind)) {
+        close(r, "CANCELLED", "ORIGINAL_TG", "本人撤销");
+        out[0] = "已撤销这份申请。";
         return;
       }
-      if (REBIND.equals(r.kind) && r.disputed) {
-        // 争议路径：任何撤销都转 Amos 决定，暂停执行（不作废申请）
-        if (r.revokeRequestedBy == null) {
-          mapper.requestRevoke(r.id, "ORIGINAL_TG", now);
-          mapper.insertEvent(r.id, "REVOKE_REQUEST", "user:" + userId, null, now);
-          after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who", "原 Telegram ",
-              "whoEn", "the original Telegram account"));
-        }
-        out[0] = "已收到撤销请求。这份申请有争议，按规则撤销要由审核员核对后决定；决定之前不会执行换绑。";
+      if ("OBJECTION".equals(r.status)) {
+        out[0] = null; // 反对期：按"不是我"处理
         return;
       }
-      close(r, "CANCELLED", "ORIGINAL_TG", "本人撤销");
-      out[0] = "已撤销这份申请。";
+      if (r.revokeRequestedBy == null) {
+        mapper.requestRevoke(r.id, "ORIGINAL_TG", now);
+        mapper.insertEvent(r.id, "REVOKE_REQUEST", "user:" + userId, null, now);
+        after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who", "原 Telegram ",
+            "whoEn", "the original Telegram account"));
+      }
+      out[0] = "已收到撤销请求。按规则换绑申请的撤销要由审核员视频核对后决定；决定之前不会批准、也不会执行换绑，提现冻结保持不变。";
     });
     if (after[0] != null) after[0].run();
     return out[0] == null ? object(userId, recoveryId) : out[0];
@@ -277,6 +289,7 @@ class RecoveryService implements RecoveryApi {
       RecoveryMapper.Row r = lockOrThrow(id);
       if ("OBJECTION".equals(r.status)) throw new BizException("RECOVERY_NOT_READY", "还在 48 小时反对期里，不能批准");
       if (!"PROOF".equals(r.status)) throw new BizException("RECOVERY_NOT_PENDING", "只能批准待审核的申请");
+      if (r.revokeRequestedBy != null) throw new BizException("RECOVERY_REVOKE_PENDING", "原 TG 请求了撤销：请先视频核对，选维持或撤销");
       LocalDateTime now = now();
       LocalDateTime at = now.plus(REBIND.equals(r.kind) ? REBIND_WAIT : PIN_RESET_WAIT);
       mapper.approve(r.id, adminId, cut(note, 500), now, at);
@@ -317,7 +330,9 @@ class RecoveryService implements RecoveryApi {
   public void keep(long id, long adminId, String reason) {
     tx.executeWithoutResult(st -> {
       RecoveryMapper.Row r = lockOrThrow(id);
-      if (!"APPROVED".equals(r.status) || r.revokeRequestedBy == null) throw new BizException("RECOVERY_NO_REVOKE_REQUEST", "这份申请没有待决定的撤销请求");
+      if (!("APPROVED".equals(r.status) || "PROOF".equals(r.status)) || r.revokeRequestedBy == null) {
+        throw new BizException("RECOVERY_NO_REVOKE_REQUEST", "这份申请没有待决定的撤销请求");
+      }
       mapper.clearRevoke(r.id);
       mapper.insertEvent(r.id, "KEEP", "admin:" + adminId, reason, now());
     });

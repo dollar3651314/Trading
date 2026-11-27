@@ -84,10 +84,13 @@ interface AuthMapper {
 
   record WithdrawFreezeRow(long userId, String source, String reason, java.time.LocalDateTime createdAt) {}
 
-  WithdrawFreezeRow withdrawFreeze(@Param("userId") long userId);
+  /** 4b 审查 🔴R2：这个客户全部来源的提现冻结（一个来源一行；空 = 没冻结），最早的在前 */
+  java.util.List<WithdrawFreezeRow> withdrawFreezes(@Param("userId") long userId);
 
+  /** 加一个来源的冻结（同一来源已有时不变，返回 0） */
   int insertWithdrawFreeze(@Param("userId") long userId, @Param("source") String source, @Param("reason") String reason, @Param("at") java.time.LocalDateTime at);
 
+  /** 解除全部来源的冻结 */
   int deleteWithdrawFreeze(@Param("userId") long userId);
 
   /** 第 4 批 4b：只解除指定来源的冻结 */

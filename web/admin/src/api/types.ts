@@ -236,6 +236,14 @@ export interface WithdrawSafety {
   withdrawFrozen: boolean;
   frozenSource: WithdrawFreezeSource | null;
   frozenAt: string | null;
+  /** 4b 审查 🔴R2：全部来源的冻结（一个来源一条；有任何一条就是冻结），最早的在前 */
+  freezes?: { source: WithdrawFreezeSource; reason: string | null; at: string }[];
+}
+
+/** 冻结的全部来源（后端给了 freezes 就用它，没有时用最早的那个来源） */
+export function freezesOf(s: WithdrawSafety): { source: WithdrawFreezeSource; reason: string | null; at: string }[] {
+  if (s.freezes) return s.freezes;
+  return s.withdrawFrozen && s.frozenSource ? [{ source: s.frozenSource, reason: null, at: s.frozenAt ?? '' }] : [];
 }
 
 /** 后台编辑客户资料（v2 E1）：只有这 5 项；邮箱不能改，状态只能用冻结 / 解冻改 */
@@ -481,6 +489,8 @@ export interface WithdrawalSafety {
   accountFrozen: boolean;
   withdrawFrozen: boolean;
   withdrawFrozenSource: WithdrawFreezeSource | null;
+  /** 4b 审查 🔴R2：全部冻结来源 */
+  withdrawFrozenSources?: WithdrawFreezeSource[];
   /** 类型小写（password_change、pin_set、kyc_first、freeze 等），最新的在前 */
   securityEvents48h: { type: string; at: string }[];
 }

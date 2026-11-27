@@ -486,7 +486,11 @@
       "confirmUnfreeze": "Unfreeze",
       "password": "Your login password",
       "passwordHint": "Re-enter your own admin login password to lift a withdrawal freeze. An alert email is sent afterwards.",
-      "passwordRequired": "Enter your login password"
+      "passwordRequired": "Enter your login password",
+      "which": "Which source to lift",
+      "whichRequired": "Choose a source",
+      "all": "All sources",
+      "recoveryWarn": "Some freezes come from a recovery request (verification or dispute). Lifting them removes that request's protection; make sure the request is settled first."
     },
     "held": {
       "title": "Withdrawals held by a freeze",
@@ -633,7 +637,8 @@
     "recoveryNotReady": "Still in the 48-hour objection period",
     "recoveryNotPending": "Only pending requests can be handled",
     "recoveryNotOpen": "This request is already closed",
-    "recoveryNoRevokeRequest": "There is no pending cancellation request"
+    "recoveryNoRevokeRequest": "There is no pending cancellation request",
+    "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -2089,8 +2094,8 @@
     "disputedTag": "Holder tapped Not me",
     "pinOk": "PIN confirmed",
     "disputeFrozen": "Withdrawals frozen (dispute)",
-    "disputeRule": "Disputed: any cancellation by the original Telegram or email goes to you (it does not close the request; execution pauses). Only your own cancellation takes effect immediately.",
-    "revokeRequested": "{{time}} the original Telegram asked to cancel. The rebind is on hold until you verify by video and choose Cancel or Keep",
+    "disputeRule": "Disputed: the original Telegram tapped \"Not me\".",
+    "revokeRequested": "{{time}} the original Telegram asked to cancel. Cancellations of rebinds always go to you (dispute or not): approval and execution pause and the freeze stays. Verify by video, then choose Cancel or Keep",
     "revokeRequestedTag": "Cancel requested",
     "proofNoteLine": "Verification note: {{note}} (approved by {{by}})",
     "closeLine": "Closed by {{by}}: {{reason}}",
