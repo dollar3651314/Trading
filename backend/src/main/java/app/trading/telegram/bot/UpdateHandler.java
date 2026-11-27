@@ -1,0 +1,353 @@
+package app.trading.telegram.bot;
+
+import app.trading.account.api.AccountApi;
+import app.trading.account.api.SecurityEvent;
+import app.trading.account.api.TelegramAccountApi;
+import app.trading.account.api.TelegramAccountApi.TgAccount;
+import app.trading.account.api.UserStatus;
+import app.trading.common.config.ConfigKey;
+import app.trading.common.config.SystemConfig;
+import app.trading.common.ratelimit.RateLimiter;
+import app.trading.notification.api.TelegramCategory;
+import app.trading.notification.api.TelegramPrefsApi;
+import app.trading.notification.api.TelegramSender.Priority;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
+import org.telegram.telegrambots.meta.api.objects.LoginUrl;
+import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.User;
+import org.telegram.telegrambots.meta.api.objects.message.MaybeInaccessibleMessage;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
+
+/**
+ * 处理机器人收到的消息和按钮（TG 机器人第 1 批；对话流程见需求文档 TG机器人-02 第 1 节，文案是草稿、交 Amos 看）。
+ * <ul>
+ *   <li><b>只认私聊</b>：群、频道里的消息一律不回应；机器人发的不理。</li>
+ *   <li>认人<b>只认 {@code from.id}</b>（TG 用户编号），用户名只用来显示。</li>
+ *   <li>每一次操作前先查：后台关了机器人吗？账户冻结了吗（冻结只回"账户已冻结，请联系客服"，不显示任何账户信息）？
+ *       授权之后出过安全事件吗（要先点「重新授权」）？</li>
+ *   <li>没开户的：后台开户名单（{@code telegram.signup.allowIds}）里有才给「授权开户」（TB-13：先只给 Amos 用）。</li>
+ *   <li>每个 TG 用户每分钟最多处理 {@code user-per-minute} 条，超过的不回应（Redis 计数，Redis 不可用时放行）。</li>
+ * </ul>
+ * 回复一律走发送队列（高优先级），按钮先 answerCallbackQuery（不排队）。
+ */
+public class UpdateHandler {
+
+  private static final Logger log = LoggerFactory.getLogger(UpdateHandler.class);
+
+  static final String CB_SIGNUP = "signup";
+  static final String CB_DECLINE = "decline";
+  static final String CB_REAUTH = "reauth";
+  static final String CB_MENU = "menu";
+  static final String CB_PREFS = "prefs";
+  static final String CB_PREF = "pref:";
+  static final String CB_NOOP = "noop";
+
+  static final String TEXT_FROZEN = "账户已冻结，请联系客服。";
+  static final String TEXT_PAUSED = "机器人暂停服务，请稍后再试。";
+  static final String TEXT_NOT_OPEN = "暂未开放开户，请稍后再来。";
+  static final String TEXT_DECLINED = "已取消，没有为你创建任何账户。想开户时再发 /start。";
+  static final String TEXT_CONSENT = """
+      欢迎使用 Trading 交易助手。
+
+      风险提示：差价合约（CFD）带杠杆交易，价格波动可能让你在短时间内损失全部保证金。请只用你能承受损失的资金。
+
+      ⚠️ 你的 Telegram 账号就是交易账户的钥匙，请打开 Telegram 两步验证（设置 → 隐私与安全 → 两步验证）。
+
+      点「授权开户」表示你已阅读并同意服务条款和隐私政策。""";
+  static final String TEXT_FAILED = "操作没有成功：账户服务暂时不可用，可以稍后再试；一直不行请联系客服。";
+
+  private final TelegramAccountApi accounts;
+  private final AccountApi account;
+  private final TelegramPrefsApi prefs;
+  private final SystemConfig config;
+  private final RateLimiter limiter;
+  private final TelegramProperties props;
+  private final TelegramOutbox outbox;
+  private final TelegramOutbox.Api api;
+
+  public UpdateHandler(TelegramAccountApi accounts, AccountApi account, TelegramPrefsApi prefs, SystemConfig config, RateLimiter limiter,
+      TelegramProperties props, TelegramOutbox outbox, TelegramOutbox.Api api) {
+    this.accounts = accounts;
+    this.account = account;
+    this.prefs = prefs;
+    this.config = config;
+    this.limiter = limiter;
+    this.props = props;
+    this.outbox = outbox;
+    this.api = api;
+  }
+
+  /** 一批更新逐条处理；某条出错只记日志（不含消息内容），不影响后面的 */
+  public void consume(List<Update> updates) {
+    for (Update u : updates) {
+      try {
+        handle(u);
+      } catch (RuntimeException e) {
+        log.warn("处理 Telegram 更新 {} 出错：{}", u.getUpdateId(), props.scrub(e.toString()));
+      }
+    }
+  }
+
+  void handle(Update u) {
+    if (u.hasMessage()) {
+      Message m = u.getMessage();
+      if (m.getChat() == null || !"private".equals(m.getChat().getType()) || m.getFrom() == null || Boolean.TRUE.equals(m.getFrom().getIsBot())) return;
+      if (!allow(m.getFrom().getId())) return;
+      onMessage(m.getFrom(), m.getText());
+    } else if (u.hasCallbackQuery()) {
+      CallbackQuery q = u.getCallbackQuery();
+      MaybeInaccessibleMessage m = q.getMessage();
+      if (m == null || m.getChat() == null || !"private".equals(m.getChat().getType()) || q.getFrom() == null) return;
+      if (!allow(q.getFrom().getId())) return;
+      answer(q.getId());
+      onCallback(q.getFrom(), m.getMessageId(), q.getData() == null ? "" : q.getData());
+    }
+    // 其他更新（群成员变动、编辑消息等）不处理
+  }
+
+  private boolean allow(long tgId) {
+    return limiter.hit("tg", String.valueOf(tgId), props.userPerMinute(), Duration.ofMinutes(1)) == 0;
+  }
+
+  // ---------- 消息 ----------
+
+  private void onMessage(User from, String text) {
+    long chat = from.getId();
+    if (!botEnabled()) {
+      send(chat, TEXT_PAUSED, null);
+      return;
+    }
+    Optional<TgAccount> acc = accounts.byTelegramId(from.getId());
+    if (acc.isEmpty()) {
+      if (!signupAllowed(from.getId())) send(chat, TEXT_NOT_OPEN, null);
+      else send(chat, TEXT_CONSENT, keyboard(List.of(row(cb("授权开户", CB_SIGNUP), cb("不同意", CB_DECLINE)))));
+      return;
+    }
+    TgAccount a = acc.get();
+    if (!gate(chat, a)) return;
+    syncUsername(a, from);
+    String cmd = text == null ? "" : text.strip();
+    if (cmd.startsWith("/settings")) send(chat, prefsText(), prefsKeyboard(a.userId()));
+    else send(chat, menuText(a), menuKeyboard());
+  }
+
+  // ---------- 按钮 ----------
+
+  private void onCallback(User from, Integer messageId, String data) {
+    long chat = from.getId();
+    if (!botEnabled()) {
+      send(chat, TEXT_PAUSED, null);
+      return;
+    }
+    Optional<TgAccount> acc = accounts.byTelegramId(from.getId());
+    if (acc.isEmpty()) {
+      switch (data) {
+        case CB_SIGNUP -> signup(from, messageId);
+        case CB_DECLINE -> edit(chat, messageId, TEXT_DECLINED, null);
+        default -> send(chat, signupAllowed(from.getId()) ? "请先发 /start 授权开户。" : TEXT_NOT_OPEN, null);
+      }
+      return;
+    }
+    TgAccount a = acc.get();
+    if (UserStatus.FROZEN == status(a)) {
+      send(chat, TEXT_FROZEN, null);
+      return;
+    }
+    if (CB_REAUTH.equals(data)) {
+      accounts.reauthorize(a.userId());
+      edit(chat, messageId, "已重新授权。", null);
+      send(chat, menuText(a), menuKeyboard());
+      return;
+    }
+    if (!gate(chat, a)) return;
+    if (CB_SIGNUP.equals(data) || CB_MENU.equals(data)) {
+      // 已经开过户又点了旧的「授权开户」：不再开户，回主菜单
+      send(chat, menuText(a), menuKeyboard());
+    } else if (CB_PREFS.equals(data)) {
+      send(chat, prefsText(), prefsKeyboard(a.userId()));
+    } else if (data.startsWith(CB_PREF)) {
+      togglePref(chat, messageId, a, data.substring(CB_PREF.length()));
+    } else if (!CB_DECLINE.equals(data) && !CB_NOOP.equals(data)) {
+      send(chat, menuText(a), menuKeyboard());
+    }
+  }
+
+  private void signup(User from, Integer messageId) {
+    long chat = from.getId();
+    if (!signupAllowed(from.getId())) {
+      edit(chat, messageId, TEXT_NOT_OPEN, null);
+      return;
+    }
+    TgAccount a;
+    try {
+      a = accounts.openAccount(from.getId(), from.getUserName());
+    } catch (RuntimeException e) {
+      log.warn("机器人开户失败 tg={}：{}", from.getId(), e.toString());
+      send(chat, TEXT_FAILED, null);
+      return;
+    }
+    edit(chat, messageId, "已授权开户。", null);
+    send(chat, welcomeText(a), menuKeyboard());
+  }
+
+  private void togglePref(long chat, Integer messageId, TgAccount a, String code) {
+    TelegramCategory c;
+    try {
+      c = TelegramCategory.valueOf(code);
+    } catch (IllegalArgumentException e) {
+      return;
+    }
+    if (!c.closable) {
+      send(chat, c.nameZh + "不能关闭。", null);
+      return;
+    }
+    Map<TelegramCategory, Boolean> now = prefs.telegramPrefs(a.userId());
+    prefs.setTelegramPref(a.userId(), c, !now.getOrDefault(c, true));
+    edit(chat, messageId, prefsText(), prefsKeyboard(a.userId()));
+  }
+
+  // ---------- 检查 ----------
+
+  private boolean botEnabled() {
+    return !"false".equalsIgnoreCase(config.text(ConfigKey.TELEGRAM_ENABLED, "true").strip());
+  }
+
+  /** 开户名单：空 = 谁都不能开户；* = 不限；否则逗号分隔的 TG 用户编号 */
+  boolean signupAllowed(long tgId) {
+    String v = config.text(ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS, "").replaceAll("\\s", "");
+    if (v.isEmpty()) return false;
+    if ("*".equals(v)) return true;
+    for (String s : v.split(",")) if (s.equals(String.valueOf(tgId))) return true;
+    return false;
+  }
+
+  private UserStatus status(TgAccount a) {
+    return account.status(a.userId());
+  }
+
+  /** 冻结、要重新授权时回应并返回 false */
+  private boolean gate(long chat, TgAccount a) {
+    if (UserStatus.FROZEN == status(a)) {
+      send(chat, TEXT_FROZEN, null);
+      return false;
+    }
+    Optional<SecurityEvent> ev = account.lastSecurityEventSince(a.userId(), a.authorizedAt());
+    if (ev.isPresent()) {
+      send(chat, "你的账户最近有安全变更（" + eventName(ev.get().type()) + "）。为了安全，请确认是你本人后重新授权。",
+          keyboard(List.of(row(cb("重新授权", CB_REAUTH)))));
+      return false;
+    }
+    return true;
+  }
+
+  static String eventName(String type) {
+    return switch (type) {
+      case SecurityEvent.PASSWORD_CHANGE -> "改了密码";
+      case SecurityEvent.PASSWORD_RESET -> "重置了密码";
+      case SecurityEvent.EMAIL_CHANGE -> "改了邮箱";
+      case SecurityEvent.FREEZE -> "账户被冻结过";
+      case SecurityEvent.UNFREEZE -> "账户刚解冻";
+      default -> "安全设置有变化";
+    };
+  }
+
+  private void syncUsername(TgAccount a, User from) {
+    String u = from.getUserName();
+    if (u != null && !u.equals(a.username())) accounts.updateUsername(a.userId(), u);
+  }
+
+  // ---------- 文案和按钮 ----------
+
+  private String welcomeText(TgAccount a) {
+    return "开户成功，客户号 #" + a.userId() + "。可以充值、交易了。" + noWebHint();
+  }
+
+  private String menuText(TgAccount a) {
+    return "客户号 #" + a.userId() + "。" + noWebHint();
+  }
+
+  private String noWebHint() {
+    return props.hasWebUrl() ? "" : "\n\n网页交易入口还没开通，开通后这里会出现「打开交易」等按钮。";
+  }
+
+  static String prefsText() {
+    return "Telegram 提醒设置（只影响你自己）。点一下开 / 关；保证金预警和强平、安全提醒不能关。";
+  }
+
+  /** 欢迎卡片 / 主菜单：「打开交易」和快捷入口是 login_url 按钮（网页地址没配置时不显示），「通知设置」 */
+  private InlineKeyboardMarkup menuKeyboard() {
+    List<InlineKeyboardRow> rows = new ArrayList<>();
+    if (props.hasWebUrl()) {
+      rows.add(row(login("打开交易", "/trade")));
+      rows.add(row(login("行情", "/markets"), login("持仓", "/positions"), login("充值", "/assets")));
+    }
+    rows.add(row(cb("通知设置", CB_PREFS)));
+    return keyboard(rows);
+  }
+
+  private InlineKeyboardMarkup prefsKeyboard(long userId) {
+    Map<TelegramCategory, Boolean> p = prefs.telegramPrefs(userId);
+    List<InlineKeyboardRow> rows = new ArrayList<>();
+    for (TelegramCategory c : TelegramCategory.values()) {
+      if (c.closable) rows.add(row(cb((p.getOrDefault(c, true) ? "✅ " : "⬜ ") + c.nameZh, CB_PREF + c.name())));
+      else rows.add(row(cb("🔒 " + c.nameZh + "（不能关）", CB_NOOP)));
+    }
+    rows.add(row(cb("返回", CB_MENU)));
+    return keyboard(rows);
+  }
+
+  /** login_url 按钮：网页地址 + 页面路径（批 2 的一键登录落地页做好后改成落地页地址） */
+  InlineKeyboardButton login(String text, String path) {
+    String base = props.webUrl().strip();
+    if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
+    return InlineKeyboardButton.builder().text(text).loginUrl(new LoginUrl(base + path)).build();
+  }
+
+  static InlineKeyboardButton cb(String text, String data) {
+    return InlineKeyboardButton.builder().text(text).callbackData(data).build();
+  }
+
+  static InlineKeyboardRow row(InlineKeyboardButton... b) {
+    return new InlineKeyboardRow(b);
+  }
+
+  static InlineKeyboardMarkup keyboard(List<InlineKeyboardRow> rows) {
+    return InlineKeyboardMarkup.builder().keyboard(rows).build();
+  }
+
+  // ---------- 发送 ----------
+
+  private void send(long chat, String text, InlineKeyboardMarkup kb) {
+    outbox.offer(chat, Priority.HIGH, SendMessage.builder().chatId(chat).text(text).replyMarkup(kb).build(), null);
+  }
+
+  private void edit(long chat, Integer messageId, String text, InlineKeyboardMarkup kb) {
+    if (messageId == null) {
+      send(chat, text, kb);
+      return;
+    }
+    outbox.offer(chat, Priority.HIGH, EditMessageText.builder().chatId(chat).messageId(messageId).text(text).replyMarkup(kb).build(), null);
+  }
+
+  private void answer(String callbackId) {
+    try {
+      api.execute(AnswerCallbackQuery.builder().callbackQueryId(callbackId).build());
+    } catch (Exception e) {
+      // 只是让按钮停止转圈；失败不影响处理
+      log.debug("answerCallbackQuery 失败：{}", props.scrub(e.toString()));
+    }
+  }
+}

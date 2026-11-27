@@ -15,7 +15,7 @@ import { DataTable } from '../../components/DataTable';
 import { ChainTag, Pill } from '../../components/Pill';
 import { Amount, Num } from '../../components/Num';
 import { depositTone } from '../../utils/status';
-import { fullTime, shortHash, shortTime } from '../../utils/display';
+import { contact, fullTime, shortHash, shortTime } from '../../utils/display';
 
 type Filters = Omit<DepositQuery, 'page' | 'pageSize'>;
 
@@ -75,7 +75,7 @@ export function DepositsPage() {
             render: (_, r) => (
               <div className="user-cell">
                 <b title={r.customerName}>{r.customerName}</b>
-                <small>{r.email}</small>
+                <small>{contact(r.email)}</small>
               </div>
             ),
           },

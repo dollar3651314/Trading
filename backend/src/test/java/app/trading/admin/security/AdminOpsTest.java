@@ -246,8 +246,11 @@ class AdminOpsTest extends AdminTestSupport {
     String original = jdbc.queryForObject("SELECT title_zh FROM notify_template WHERE code = 'DEPOSIT_CREDITED'", String.class);
     try {
       JsonNode ts = body(call(get("/api/admin/notify/templates"), a.cookie(), null));
-      assertThat(ts.get(0).get("code").asString()).isEqualTo("DEPOSIT_CREDITED");
-      assertThat(ts.get(0).get("channels").toString()).isEqualTo("[\"inbox\",\"push\",\"email\"]");
+      // 发给客户的在前、按编号排：V35（TG 机器人第 1 批）加的 ACCOUNT_FROZEN 排第一，只发 Telegram
+      assertThat(ts.get(0).get("code").asString()).isEqualTo("ACCOUNT_FROZEN");
+      assertThat(ts.get(0).get("channels").toString()).isEqualTo("[\"telegram\"]");
+      assertThat(ts.get(1).get("code").asString()).isEqualTo("DEPOSIT_CREDITED");
+      assertThat(ts.get(1).get("channels").toString()).isEqualTo("[\"inbox\",\"push\",\"email\",\"telegram\"]");
       assertThat(call(put("/api/admin/notify/templates/DEPOSIT_CREDITED"), a.cookie(), "{\"enabled\":false}").getContentAsString())
           .contains("BUILT_IN_CANNOT_DISABLE");
       assertThat(call(put("/api/admin/notify/templates/DEPOSIT_CREDITED"), a.cookie(), "{\"bodyZh\":\"到账 {amount} {secret}\"}").getContentAsString())

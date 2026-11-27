@@ -15,7 +15,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  */
 final class ModuleRules {
 
-  static final List<String> MODULES = List.of("account", "market", "trading", "risk", "wallet", "payment", "notification", "admin");
+  static final List<String> MODULES = List.of("account", "market", "trading", "risk", "wallet", "payment", "notification", "admin", "telegram");
 
   private ModuleRules() {}
 

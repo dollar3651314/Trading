@@ -17,6 +17,15 @@
     ON DUPLICATE KEY UPDATE push_enabled = VALUES(push_enabled), email_enabled = VALUES(email_enabled)
   </insert>
 
+  <select id="tgPrefs" resultType="app.trading.notification.service.Rows$TgPrefRow">
+    SELECT category, enabled FROM notify_tg_pref WHERE user_id = #{userId}
+  </select>
+
+  <insert id="upsertTgPref">
+    INSERT INTO notify_tg_pref (user_id, category, enabled) VALUES (#{userId}, #{category}, #{enabled})
+    ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)
+  </insert>
+
   <insert id="upsertLang">
     INSERT INTO notify_pref (user_id, lang) VALUES (#{userId}, #{lang})
     ON DUPLICATE KEY UPDATE lang = VALUES(lang)
@@ -60,6 +69,12 @@
   <select id="recordsOf" resultType="app.trading.notification.service.Rows$RecordRow">
     SELECT id, user_id, recipient, source, template_code, channel, title, status, error, operator_id, created_at
     FROM notify_record WHERE user_id = #{userId} ORDER BY id DESC LIMIT #{limit}
+  </select>
+
+  <!-- 还停在"发送中"的 Telegram 通知（走 idx_notify_record_status）；重启后补发用 -->
+  <select id="pendingTelegram" resultType="app.trading.notification.service.Rows$RecordRow">
+    SELECT id, user_id, recipient, source, template_code, channel, title, status, error, operator_id, created_at
+    FROM notify_record WHERE status = 'PENDING' AND channel = 'TELEGRAM' ORDER BY id LIMIT 10000
   </select>
 
   <select id="record" resultType="app.trading.notification.service.Rows$RecordRow">

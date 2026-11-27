@@ -128,7 +128,8 @@
     "name": "Name",
     "registeredAt": "Registered",
     "saved": "Profile saved",
-    "kycNote": "After verification, your name and date of birth must match your ID."
+    "kycNote": "After verification, your name and date of birth must match your ID.",
+    "noEmail": "Not linked (Telegram account)"
   },
   "market": {
     "search": "Search symbol or name",

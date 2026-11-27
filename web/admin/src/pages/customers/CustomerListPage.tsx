@@ -14,7 +14,7 @@ import { DataTable } from '../../components/DataTable';
 import { Pill } from '../../components/Pill';
 import { Amount, Num } from '../../components/Num';
 import { customerTone, kycTone } from '../../utils/status';
-import { shortTime } from '../../utils/display';
+import { contact, shortTime } from '../../utils/display';
 
 type Filters = Omit<CustomerQuery, 'page' | 'pageSize'>;
 
@@ -73,7 +73,7 @@ export function CustomerListPage() {
             render: (_, r) => (
               <div className="user-cell">
                 <b title={r.name}>{r.name}</b>
-                <small>{r.email}</small>
+                <small>{contact(r.email, r.telegramUsername)}</small>
               </div>
             ),
           },

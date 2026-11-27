@@ -11,7 +11,10 @@ export interface Session {
   /** 只有原型（mock 模式）有；真实环境的令牌在 HttpOnly Cookie 里，前端拿不到 */
   token?: string;
   userId: string;
-  email: string;
+  /** 机器人开户的客户（纯 Telegram，TG 机器人第 1 批）没有邮箱 */
+  email: string | null;
+  /** 有 TG 账户的客户的 Telegram 用户名（可能为空） */
+  telegramUsername?: string | null;
 }
 
 export type EmailCodePurpose = 'register' | 'resetPassword';
@@ -29,7 +32,8 @@ export interface RegisterRequest {
 
 export interface Profile {
   userId: string;
-  email: string;
+  /** 纯 Telegram 客户没有邮箱；姓名、生日、国籍在第一次保存前也是空的（接口返回 null，这里换成空字符串） */
+  email: string | null;
   firstName: string;
   middleName: string;
   lastName: string;

@@ -28,8 +28,8 @@ public class AuthAccess {
     return auth.status(userId);
   }
 
-  public String email(long userId) {
-    return auth.user(userId).email();
+  public Optional<String> email(long userId) {
+    return Optional.ofNullable(auth.user(userId).email());
   }
 
   public LocalDateTime registeredAt(long userId) {

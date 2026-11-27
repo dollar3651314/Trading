@@ -11,4 +11,8 @@ interface ProfileMapper {
 
   int update(@Param("userId") long userId, @Param("firstName") String firstName, @Param("middleName") String middleName, @Param("lastName") String lastName,
       @Param("birthDate") java.time.LocalDate birthDate, @Param("nationality") String nationality);
+
+  /** 没有资料的客户（机器人开户）第一次保存 */
+  int insert(@Param("userId") long userId, @Param("firstName") String firstName, @Param("middleName") String middleName, @Param("lastName") String lastName,
+      @Param("birthDate") java.time.LocalDate birthDate, @Param("nationality") String nationality);
 }

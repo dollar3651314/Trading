@@ -36,6 +36,23 @@
 
   <select id="registeredAt" resultType="java.time.LocalDateTime">SELECT created_at FROM account_user WHERE id = #{id}</select>
 
+  <!-- Telegram 账户（TG 机器人第 1 批）：只认 TG 用户编号 -->
+  <select id="tgByTelegramId" resultType="app.trading.account.api.TelegramAccountApi$TgAccount">
+    SELECT user_id, telegram_id, username, authorized_at FROM account_telegram WHERE telegram_id = #{telegramId}
+  </select>
+
+  <select id="tgByUserId" resultType="app.trading.account.api.TelegramAccountApi$TgAccount">
+    SELECT user_id, telegram_id, username, authorized_at FROM account_telegram WHERE user_id = #{userId}
+  </select>
+
+  <insert id="insertTelegram">
+    INSERT INTO account_telegram (user_id, telegram_id, username, source, authorized_at, created_at) VALUES (#{userId}, #{telegramId}, #{username}, #{source}, #{at}, #{at})
+  </insert>
+
+  <update id="updateTgAuthorizedAt">UPDATE account_telegram SET authorized_at = #{at} WHERE user_id = #{userId}</update>
+
+  <update id="updateTgUsername">UPDATE account_telegram SET username = #{username} WHERE user_id = #{userId}</update>
+
   <update id="touchLogin">UPDATE account_user SET last_login_at = UTC_TIMESTAMP(3) WHERE id = #{id}</update>
 
   <insert id="insertEmailCode">

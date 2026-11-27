@@ -10,6 +10,7 @@ import type { CustomerSummary, NotifyChannel } from '../../api/types';
 import { useHighRisk } from '../../hooks/useConfirmDialogs';
 import { useAuth } from '../../auth/AuthContext';
 import { PageHeader } from '../../components/PageHeader';
+import { contact } from '../../utils/display';
 
 interface Values {
   customerId: number;
@@ -67,12 +68,12 @@ export function SendPage() {
               onDropdownVisibleChange={(open) => open && !options.length && void search('')}
               notFoundContent={searching ? <Spin size="small" /> : t('common.empty')}
               placeholder={t('send.customerPh')}
-              options={options.map((c) => ({ value: c.id, label: `${c.name} · ${c.email} · ID ${c.id}` }))}
+              options={options.map((c) => ({ value: c.id, label: `${c.name} · ${contact(c.email, c.telegramUsername)} · ID ${c.id}` }))}
             />
           </Form.Item>
           <Form.Item name="channels" label={t('send.channels')} rules={[{ required: true, type: 'array', min: 1, message: t('send.channelsRequired') }]} extra={t('send.channelsHint')}>
             <Checkbox.Group
-              options={(['inbox', 'push', 'email'] as const).map((c) => ({ value: c, label: t(`channel.${c}`) }))}
+              options={(['inbox', 'push', 'email', 'telegram'] as const).map((c) => ({ value: c, label: t(`channel.${c}`) }))}
             />
           </Form.Item>
           <Form.Item name="title" label={t('send.titleLabel')} rules={[{ required: true, whitespace: true, message: t('validation.required') }, { max: 60 }]}>

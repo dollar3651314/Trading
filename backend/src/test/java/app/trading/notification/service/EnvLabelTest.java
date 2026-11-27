@@ -50,7 +50,7 @@ class EnvLabelTest {
     code.bodyZh = "您的验证码是 {code}";
     code.bodyEn = "Your code is {code}";
     when(mapper.template("EMAIL_CODE")).thenReturn(code);
-    when(accounts.email(7L)).thenReturn("a@example.com");
+    when(accounts.email(7L)).thenReturn(java.util.Optional.of("a@example.com"));
     Rows.PushSubRow sub = new Rows.PushSubRow();
     sub.id = 3L;
     sub.userId = 7L;

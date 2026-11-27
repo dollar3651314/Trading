@@ -5,11 +5,17 @@
 
   <select id="find" resultType="app.trading.account.profile.ProfileRow">
     SELECT u.id AS user_id, u.email, p.first_name, p.middle_name, p.last_name, p.birth_date, p.nationality, u.created_at AS registered_at
-    FROM account_user u JOIN account_profile p ON p.user_id = u.id WHERE u.id = #{userId}
+    FROM account_user u LEFT JOIN account_profile p ON p.user_id = u.id WHERE u.id = #{userId}
   </select>
 
+  <!-- 机器人开户的客户（纯 Telegram）开户时没有资料：第一次保存时插入（TG 机器人第 1 批，技术方案 07 页第 2b 节） -->
   <update id="update">
     UPDATE account_profile SET first_name = #{firstName}, middle_name = #{middleName}, last_name = #{lastName}, birth_date = #{birthDate}, nationality = #{nationality}
     WHERE user_id = #{userId}
   </update>
+
+  <insert id="insert">
+    INSERT INTO account_profile (user_id, first_name, middle_name, last_name, birth_date, nationality)
+    VALUES (#{userId}, #{firstName}, #{middleName}, #{lastName}, #{birthDate}, #{nationality})
+  </insert>
 </mapper>

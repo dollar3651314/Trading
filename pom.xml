@@ -31,5 +31,7 @@
     <java.version>25</java.version>
     <archunit.version>1.5.1</archunit.version>
     <mybatis.version>4.1.0</mybatis.version>
+    <!-- Telegram 机器人（TG 机器人第 1 批） -->
+    <telegrambots.version>10.4.0</telegrambots.version>
   </properties>
 </project>

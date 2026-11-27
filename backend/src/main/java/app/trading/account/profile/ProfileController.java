@@ -18,7 +18,10 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 个人资料：查看和修改。KYC 通过后锁定，不能再改（以证件为准）。 */
+/**
+ * 个人资料：查看和修改。KYC 通过后锁定，不能再改（以证件为准）。
+ * 机器人开户的客户（纯 Telegram）没有邮箱，开户时也没有资料：查看时这些字段为空（"未填写"），第一次保存时插入。
+ */
 @RestController
 class ProfileController {
 
@@ -54,7 +57,10 @@ class ProfileController {
   ProfileView update(@Valid @RequestBody ProfileUpdate u) {
     long id = CurrentUser.id();
     if (kyc.status(id) == KycStatus.APPROVED) throw new BizException("PROFILE_LOCKED", "身份认证通过后不能修改资料");
-    mapper.update(id, u.firstName().trim(), u.middleName() == null ? "" : u.middleName().trim(), u.lastName().trim(), u.birthDate(), u.nationality());
+    String middle = u.middleName() == null ? "" : u.middleName().trim();
+    if (mapper.update(id, u.firstName().trim(), middle, u.lastName().trim(), u.birthDate(), u.nationality()) == 0) {
+      mapper.insert(id, u.firstName().trim(), middle, u.lastName().trim(), u.birthDate(), u.nationality());
+    }
     return get();
   }
 

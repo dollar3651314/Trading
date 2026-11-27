@@ -82,6 +82,18 @@ public class TaskService {
     return mapper.retry(id) == 1;
   }
 
+  /** 某类还没完成的任务（待处理、处理中） */
+  @Transactional(readOnly = true)
+  public List<Task> active(String taskType) {
+    return mapper.active(taskType);
+  }
+
+  /** 某类最近 seconds 秒内到期并已成功的任务 */
+  @Transactional(readOnly = true)
+  public List<Task> recentSucceeded(String taskType, long seconds) {
+    return mapper.recentSucceeded(taskType, seconds);
+  }
+
   @Transactional(readOnly = true)
   public Task find(long id) {
     return mapper.find(id);

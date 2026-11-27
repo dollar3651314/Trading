@@ -128,7 +128,8 @@
     "name": "姓名",
     "registeredAt": "注册时间",
     "saved": "资料已保存",
-    "kycNote": "身份认证通过后，姓名和出生日期需与证件一致。"
+    "kycNote": "身份认证通过后，姓名和出生日期需与证件一致。",
+    "noEmail": "未绑定（Telegram 开户）"
   },
   "market": {
     "search": "搜索品种代码或名称",

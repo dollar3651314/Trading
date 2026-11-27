@@ -189,6 +189,25 @@ trading:
       vapid-subject: ${FX_PUSH_VAPID_SUBJECT:}
       ttl: 24h
       max-devices: 10
+  # Telegram 机器人（TG 机器人第 1 批，技术方案 TG机器人-05 / 11 页）。令牌只由 Amos 用 sudo trading set-key FX_TG_BOT_TOKEN 填进服务器；
+  # 没填令牌 = 不启动轮询线程、不发 Telegram 提醒（开发机、CI、测试机默认都不填）。用户名用 sudo trading set FX_TG_BOT_USERNAME 改：
+  # 测试 TradingAssistTestBot、生产 TradingAssistBot（应急登录机器人 TradingAssistLoginBot 是批 5 的事，这里不用）。
+  # 启动时用 getMe 核对令牌属于这个用户名，不一致就不启动（防止把生产令牌填到测试机）。开户名单、总开关在后台系统配置（telegram.*）里改
+  telegram:
+    token: ${FX_TG_BOT_TOKEN:}
+    username: ${FX_TG_BOT_USERNAME:}
+    api-url: ${FX_TG_API_URL:https://api.telegram.org}
+    # 网页客户端地址（login_url 按钮「打开交易」「查看」用）。批 2 做好一键登录落地页、绑好域名之前不填：不填就不显示这些按钮
+    web-url: ${FX_TG_WEB_URL:}
+    poll-timeout: 50s
+    # 发送：同一个聊天两条之间至少隔多久；全部聊天每秒最多几条（Telegram 的限制是每个聊天每秒 1 条、全部每秒约 30 条）
+    per-chat-interval: 1s
+    global-per-second: 25
+    queue-capacity: 5000
+    # 轮询连续失败多久算告警（alerts.telegram）；收到 409（另一个程序在用同一个令牌）立即告警
+    unhealthy-after: 10m
+    # 每个 Telegram 用户每分钟最多处理几条消息 / 按钮（超过的不回应；需求文档 TG机器人-03 页）
+    user-per-minute: 20
   # 后台（S16a，内部文档）。登录锁定次数和时长、IP 白名单在后台的系统配置里改
   admin:
     session-ttl: 8h
@@ -254,6 +273,9 @@ mybatis:
 logging:
   pattern:
     correlation: "[%X{traceId:--}] "
+  level:
+    # TelegramBots 库自己的日志可能带请求网址（网址里有机器人令牌）：关掉，轮询和发送的状态由 telegram 模块自己记（不含令牌）
+    org.telegram: "OFF"
 
 # 应用管理端点只在内网端口监听，Nginx 不转发（修复 fxsystem S3）。
 # 指标（v2 E10）：GET http://127.0.0.1:8081/actuator/prometheus（Prometheus 格式）、/actuator/metrics；自定义指标都以 fx_ 开头，

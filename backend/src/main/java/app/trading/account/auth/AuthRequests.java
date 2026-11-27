@@ -43,6 +43,9 @@ final class AuthRequests {
       @NotBlank(message = "REQUIRED") String currentPassword,
       @NotBlank(message = "REQUIRED") @Size(min = 8, max = 64, message = "PASSWORD_LENGTH") @Pattern(regexp = PASSWORD_MIX, message = "PASSWORD_MIX") String newPassword) {}
 
-  /** 登录后返回给前端的信息（令牌在 Cookie 里，不在响应体里） */
-  record SessionView(String userId, String email) {}
+  /**
+   * 登录后返回给前端的信息（令牌在 Cookie 里，不在响应体里）。
+   * 机器人开户的客户（纯 Telegram）{@code email} 为空；有 TG 账户的带 {@code telegramUsername}（没有用户名时为空）。
+   */
+  record SessionView(String userId, String email, String telegramUsername) {}
 }

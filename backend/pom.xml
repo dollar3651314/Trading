@@ -81,6 +81,17 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-mail</artifactId>
     </dependency>
+    <!-- Telegram 机器人（TG 机器人第 1 批，技术方案 05 页：长轮询 getUpdates，放进 trading-app；客户端 OkHttp） -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-longpolling</artifactId>
+      <version>${telegrambots.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-client</artifactId>
+      <version>${telegrambots.version}</version>
+    </dependency>
     <dependency>
       <groupId>com.mysql</groupId>
       <artifactId>mysql-connector-j</artifactId>

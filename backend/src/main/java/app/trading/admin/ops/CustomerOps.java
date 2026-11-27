@@ -32,9 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class CustomerOps {
 
-  /** 字段和原型 CustomerSummary 一致 */
+  /** 字段和原型 CustomerSummary 一致；TG 机器人第 1 批：email 可空（纯 Telegram 客户），加 telegramId、telegramUsername（列表显示"TG @用户名"） */
   record Summary(long id, String name, String email, String nationality, String status, String kycStatus, String balance, int openPositions,
-      String registeredAt, String lastLoginAt) {}
+      String registeredAt, String lastLoginAt, String telegramId, String telegramUsername) {}
 
   record Kyc(String status, String docType, String docNumber, String reviewedAt, String rejectReason) {}
 
@@ -50,7 +50,7 @@ class CustomerOps {
   record Detail(long id, String name, String email, String nationality, String status, String kycStatus, String balance, int openPositions,
       String registeredAt, String lastLoginAt, String lastLoginIp, String lastLoginIpAt, String firstName, String middleName, String lastName,
       String birthDate, String frozenReason, Kyc kyc, Account account, List<PositionView> positions, List<LedgerView> ledger,
-      List<TradingOps.ClosedView> closedPositions) {}
+      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername) {}
 
   /** 客户详情里最近的已平仓记录条数（部分平仓拆出来的记录标出原持仓编号） */
   static final int RECENT_CLOSED = 20;
@@ -100,7 +100,12 @@ class CustomerOps {
 
   Summary summary(CustomerAdminApi.Customer c, BigDecimal balance, Integer positions) {
     return new Summary(c.id(), c.name(), c.email(), c.nationality(), apiStatus(c.status()), apiStatus(c.kycStatus()), Ops.money(balance == null ? BigDecimal.ZERO : balance),
-        positions == null ? 0 : positions, Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()));
+        positions == null ? 0 : positions, Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()), tgId(c), c.telegramUsername());
+  }
+
+  /** TG 用户编号按字符串给前端（超过 JS 安全整数也不丢精度） */
+  static String tgId(CustomerAdminApi.Customer c) {
+    return c.telegramId() == null ? null : String.valueOf(c.telegramId());
   }
 
   @Transactional(readOnly = true)
@@ -139,7 +144,7 @@ class CustomerOps {
     LocalDate birth = d.birthDate();
     return new Detail(c.id(), c.name(), c.email(), c.nationality(), apiStatus(c.status()), apiStatus(c.kycStatus()), Ops.money(m.balance()), positions.size(),
         Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()), d.lastLoginIp(), Ops.time(d.lastLoginIpAt()), d.firstName(), d.middleName(), d.lastName(),
-        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed);
+        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername());
   }
 
   /**

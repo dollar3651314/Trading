@@ -38,7 +38,7 @@ class AccountFacade implements AccountApi {
   }
 
   @Override
-  public String email(long userId) {
+  public Optional<String> email(long userId) {
     return auth.email(userId);
   }
 

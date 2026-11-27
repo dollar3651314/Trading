@@ -100,6 +100,11 @@ describe('HTTP：同源、Cookie、错误转换', () => {
     expect(calls[0]).toMatchObject({ url: '/api/auth/login', method: 'POST', credentials: 'same-origin', body: { email: 'a@b.com', password: 'password1' } });
   });
 
+  it('会话：纯 Telegram 客户邮箱为 null、带 TG 用户名（TG 机器人第 1 批）', async () => {
+    stubFetch({ body: { userId: '8', email: null, telegramUsername: 'amos_tg' } });
+    expect(await auth.login('a@b.com', 'password1')).toEqual({ userId: '8', email: null, telegramUsername: 'amos_tg' });
+  });
+
   it('验证码用途换成后端的枚举；返回 204 时按 60 秒倒计时', async () => {
     stubFetch({ status: 204 });
     expect(await auth.sendEmailCode('a@b.com', 'resetPassword')).toEqual({ cooldownSeconds: 60 });

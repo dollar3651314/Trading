@@ -26,6 +26,12 @@ interface TaskMapper {
 
   Task find(@Param("id") long id);
 
+  /** 某类还没完成的任务（待处理、处理中） */
+  java.util.List<Task> active(@Param("taskType") String taskType);
+
+  /** 某类最近 seconds 秒内到期并已成功的任务（走 idx_common_task_pick） */
+  java.util.List<Task> recentSucceeded(@Param("taskType") String taskType, @Param("seconds") long seconds);
+
   List<Task> findByIds(@Param("ids") List<Long> ids);
 
   List<TaskItem> list(@Param("taskType") String taskType, @Param("status") String status, @Param("offset") int offset, @Param("limit") int limit);

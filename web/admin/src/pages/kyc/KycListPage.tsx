@@ -14,7 +14,7 @@ import { DataTable } from '../../components/DataTable';
 import { Pill } from '../../components/Pill';
 import { Num } from '../../components/Num';
 import { kycTone } from '../../utils/status';
-import { shortTime } from '../../utils/display';
+import { contact, shortTime } from '../../utils/display';
 
 type Filters = Omit<KycQuery, 'page' | 'pageSize'>;
 const INITIAL: Filters = { status: 'pending' };
@@ -62,7 +62,7 @@ export function KycListPage() {
             render: (_, r) => (
               <div className="user-cell">
                 <b title={r.name}>{r.name}</b>
-                <small>{r.email} · ID {r.customerId}</small>
+                <small>{contact(r.email)} · ID {r.customerId}</small>
               </div>
             ),
           },

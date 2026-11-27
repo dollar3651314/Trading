@@ -28,6 +28,8 @@ interface CustomerAdminMapper {
     String docNumber;
     LocalDateTime kycReviewedAt;
     String kycRejectReason;
+    Long telegramId;
+    String telegramUsername;
   }
 
   class KycRow {

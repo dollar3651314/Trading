@@ -15,6 +15,10 @@ interface NotifyMapper {
 
   void upsertPref(@Param("userId") long userId, @Param("push") boolean push, @Param("email") boolean email);
 
+  List<Rows.TgPrefRow> tgPrefs(@Param("userId") long userId);
+
+  void upsertTgPref(@Param("userId") long userId, @Param("category") String category, @Param("enabled") boolean enabled);
+
   void upsertLang(@Param("userId") long userId, @Param("lang") String lang);
 
   void insertMessage(Rows.MessageRow m);
@@ -37,6 +41,9 @@ interface NotifyMapper {
   List<Rows.RecordRow> recordsOf(@Param("userId") long userId, @Param("limit") int limit);
 
   Rows.RecordRow record(@Param("id") long id);
+
+  /** 还停在"发送中"的 Telegram 通知（最多 1 万条） */
+  List<Rows.RecordRow> pendingTelegram();
 
   /** 同一个推送地址已经有了就改成这个客户、更新密钥 */
   void upsertPushSub(@Param("userId") long userId, @Param("endpoint") String endpoint, @Param("hash") String hash, @Param("p256dh") String p256dh,

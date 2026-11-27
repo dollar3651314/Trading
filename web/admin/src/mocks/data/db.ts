@@ -753,6 +753,9 @@ export const systemConfigs: SystemConfig[] = [
   { key: hotWalletMinKey('ERC20', true), value: '0', unit: 'eth', group: 'hotWallet', updatedAt: null },
   { key: hotWalletMinKey('BSC', true), value: '0', unit: 'bnb', group: 'hotWallet', updatedAt: null },
   { key: hotWalletMinKey('TRC20', true), value: '0', unit: 'trx', group: 'hotWallet', updatedAt: null },
+  // Telegram 机器人（迁移 V35，TG 机器人第 1 批）：总开关；开户名单空 = 谁都不能开户，* = 不限（TB-13 先只给 Amos 用）
+  { key: 'telegram.enabled', value: 'true', unit: 'bool', group: 'telegram', updatedAt: null },
+  { key: 'telegram.signup.allowIds', value: '', unit: 'text', group: 'telegram', updatedAt: null },
 ];
 
 /** 热钱包余额（原型数据；地址是公开的测试地址，不是密钥）。下限在 systemConfigs 里 */

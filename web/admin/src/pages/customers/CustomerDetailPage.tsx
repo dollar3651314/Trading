@@ -24,7 +24,7 @@ import { customerTone, kycTone } from '../../utils/status';
 import { formatAmount, subtractAmounts } from '../../utils/money';
 import { DateFields } from '../../components/DateFields';
 import { adjustAmountProblems, birthDateProblems, nameProblems, nationalityProblems } from '../../utils/validators';
-import { fullTime, shortTime } from '../../utils/display';
+import { contact, fullTime, shortTime } from '../../utils/display';
 
 export function CustomerDetailPage() {
   const { t, i18n } = useTranslation();
@@ -42,7 +42,7 @@ export function CustomerDetailPage() {
       title: freezing ? t('customers.freeze') : t('customers.unfreeze'),
       description: (
         <>
-          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: c.email })}</div>
+          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: contact(c.email, c.telegramUsername) })}</div>
           <div>{freezing ? t('customers.freezeImpact') : t('customers.unfreezeImpact')}</div>
         </>
       ),
@@ -67,7 +67,7 @@ export function CustomerDetailPage() {
       title: t('customers.editProfile'),
       description: (
         <>
-          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: c.email })}</div>
+          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: contact(c.email, c.telegramUsername) })}</div>
           <div>{t('customers.editProfileImpact')}</div>
         </>
       ),
@@ -82,7 +82,7 @@ export function CustomerDetailPage() {
         <div className="profile-form">
           {kycApproved ? <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={t('customers.kycApprovedEditWarning')} /> : null}
           <Form.Item label={t('customers.email')} extra={t('customers.emailReadOnly')}>
-            <Input value={c.email} disabled />
+            <Input value={c.email ?? ''} disabled />
           </Form.Item>
           <div className="name-row">
             <Form.Item name="firstName" label={t('customers.firstName')} required rules={[rule((v) => nameProblems(v, true))]}>
@@ -245,7 +245,8 @@ export function CustomerDetailPage() {
             <h2 className="card-title">{t('customers.profile')}</h2>
             <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 3 }}>
               <Descriptions.Item label={t('customers.id')}><Num>{c.id}</Num></Descriptions.Item>
-              <Descriptions.Item label={t('customers.email')}>{c.email}</Descriptions.Item>
+              <Descriptions.Item label={t('customers.email')}>{c.email ?? '—'}</Descriptions.Item>
+              {c.telegramId && <Descriptions.Item label="Telegram">{contact(null, c.telegramUsername)} · {c.telegramId}</Descriptions.Item>}
               <Descriptions.Item label={t('customers.nationality')}>{c.nationality}</Descriptions.Item>
               <Descriptions.Item label={t('customers.firstName')}>{c.firstName || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('customers.middleName')}>{c.middleName || '—'}</Descriptions.Item>

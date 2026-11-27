@@ -288,7 +288,8 @@
   "channel": {
     "email": "Email",
     "inbox": "Inbox",
-    "push": "Push"
+    "push": "Push",
+    "telegram": "Telegram"
   },
   "common": {
     "actions": "Actions",
@@ -327,6 +328,8 @@
   },
   "config": {
     "alertOff": "0 (no alert)",
+    "allowIdsHint": "Comma-separated Telegram user IDs; empty = nobody can sign up; * = anyone",
+    "boolHint": "Must be true (on) or false (off)",
     "editDesc": "{{key}} is {{value}}; the change applies immediately.",
     "editTitle": "Edit: {{name}}",
     "group": "Group",
@@ -350,6 +353,7 @@
     "notify": "Notifications",
     "payment": "Wallet provider balance alert",
     "security": "Security",
+    "telegram": "Telegram bot",
     "withdraw": "Withdrawals"
   },
   "configKey": {
@@ -369,6 +373,8 @@
     "login_lockThreshold": "Failed sign-ins before lock",
     "notify_marginCallThrottleMinutes": "Margin call throttle",
     "payment_balance_minUsdt": "Wallet provider available balance alert threshold (USDT)",
+    "telegram_enabled": "Telegram bot switch",
+    "telegram_signup_allowIds": "Telegram user IDs allowed to sign up",
     "whitelist_effectiveHours": "Whitelist waiting period",
     "whitelist_maxAddresses": "Max whitelist addresses",
     "withdraw_coolingHours": "Cooling-off period",
