@@ -120,3 +120,30 @@
   body, #root { min-height: 100dvh; }
 }
 .auth-main { padding-bottom: calc(80px + var(--safe-b)); }
+
+/* ---------- TG 机器人第 3 批：手机交易界面（照原型 trade-ui，验收标准 UX-B1～B4） ---------- */
+/* UX-B1：手机下单抽屉的主按钮固定在弹层底部，内容再长也看得到（弹层的滚动区是 .modal-body） */
+.order-sheet .os-sticky { position: sticky; bottom: -1px; z-index: 2; margin: 4px -16px 0; padding: 10px 16px 2px; background: var(--s1); border-top: 1px solid var(--hair); box-shadow: 0 -8px 12px -10px rgba(15, 23, 42, 0.25); }
+.order-sheet .os-sticky .op-submit { margin-top: 0; }
+/* UX-B1：手机表单页（提现、身份认证、改密码、个人资料）的主按钮贴在底部导航上面，不跟着内容滚走 */
+@media (max-width: 1023px) {
+  .sticky-submit { position: sticky; bottom: calc(var(--bottom-h) + var(--safe-b) + 8px); z-index: 5; box-shadow: 0 6px 16px -6px rgba(15, 23, 42, 0.35); }
+  .btn-row.sticky-submit { background: var(--s1); padding: 8px 0; box-shadow: none; }
+}
+/* UX-B2：键盘弹出时（hooks/useKeyboardInset 写 data-kb、--kb、--vvh）
+ * - 底部导航、底部买卖栏先藏起来（安卓窗口变矮时它们会顶到键盘上面，挤占表单）；表单页的主按钮贴着键盘上沿；
+ * - iOS 键盘盖住页面：底部弹层整体抬高键盘的高度，最高不超过可见区域 */
+html[data-kb='1'] .bottomnav, html[data-kb='1'] .m-actbar { display: none; }
+@media (max-width: 1023px) {
+  html[data-kb='1'] .sticky-submit { bottom: calc(var(--kb, 0px) + 8px); }
+  .modal-sheet .modal-box { margin-bottom: var(--kb, 0px); max-height: calc(var(--vvh, 100vh) - var(--banner-h) - 24px); }
+}
+/* 跳价闪色：底部买卖按钮的价格每次跳动轻轻闪一下（按钮是实心底色，不改底色） */
+.px-tick { animation: px-tick 0.6s ease-out; }
+@keyframes px-tick { from { opacity: 0.55; } to { opacity: 1; } }
+.m-sym-px .p { border-radius: 6px; padding: 0 4px; margin-left: -4px; }
+/* 手机行情列表：今日走势小图一列 */
+.v-mobile.with-trend .sym-head, .v-mobile.with-trend .sym-row { grid-template-columns: minmax(0, 1fr) 56px auto 72px; }
+.sym-spark { display: flex; align-items: center; justify-content: center; }
+.chart-gesture { margin: 4px 12px 0; font-size: 11px; color: var(--subtle); }
+@media (prefers-reduced-motion: reduce) { .px-tick, .flash-up, .flash-down { animation: none; } }

@@ -209,7 +209,8 @@
     "ariaTick": "{{symbol}} tick chart (recent mid prices)",
     "emptyTick": "No ticks yet. They appear as new quotes arrive",
     "indicators": "Indicators",
-    "bidAsk": "Bid/Ask lines"
+    "bidAsk": "Bid/Ask lines",
+    "gestureHint": "Drag to scroll · pinch to zoom · long-press for OHLC"
   },
   "order": {
     "title": "Order",
@@ -265,7 +266,9 @@
     "detail": "Details",
     "noticeNotTradable": "This symbol is not open for trading yet: you can view quotes and charts but can't place orders",
     "noticeNoQuote": "No quote: quotes are temporarily interrupted, so new positions can't be opened. Existing positions won't be closed at stale prices; prices update automatically once quotes are back",
-    "notInPositions": "{{symbol}} won't appear in your positions"
+    "notInPositions": "{{symbol}} won't appear in your positions",
+    "btnPaused": "Opening paused",
+    "btnClosed": "Market closed"
   },
   "units": {
     "baseCcy": "{{n}} {{ccy}}/lot",

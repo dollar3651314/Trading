@@ -62,7 +62,7 @@ function Editor({ p, onSaved, onCancel }: { p: ProfileT; onSaved: (p: ProfileT) 
           {err}
         </div>
       )}
-      <div className="btn-row">
+      <div className="btn-row sticky-submit">
         <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
           {t('common.cancel')}
         </button>

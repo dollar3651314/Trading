@@ -172,7 +172,11 @@ export function SubmitButton({ f, symbol }: { f: OrderFormState; symbol: SymbolI
   const { t } = useTranslation();
   return (
     <button type="button" className={`btn btn-lg btn-block btn-${f.form.side} op-submit`} onClick={f.submit} disabled={f.blocked} aria-disabled={f.blocked}>
-      {t(f.form.side === 'buy' ? 'order.submitBuy' : 'order.submitSell', { lots: isDecimalString(f.form.lots) ? formatLots(f.form.lots) : f.form.lots || '0', symbol: symbol.code })}
+      {f.blockedReason === 'closed'
+        ? t('order.btnClosed')
+        : f.blockedReason === 'paused'
+          ? t('order.btnPaused')
+          : t(f.form.side === 'buy' ? 'order.submitBuy' : 'order.submitSell', { lots: isDecimalString(f.form.lots) ? formatLots(f.form.lots) : f.form.lots || '0', symbol: symbol.code })}
     </button>
   );
 }

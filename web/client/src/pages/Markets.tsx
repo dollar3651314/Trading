@@ -10,6 +10,7 @@ import { getSparklines } from '../api/market';
 import type { Quote, Side, SymbolInfo } from '../api/types';
 import { Icon } from '../components/Icon';
 import { InstallPrompt } from '../components/InstallPrompt';
+import { Sparkline } from '../components/Sparkline';
 import { PageHeader } from '../components/Layout';
 import { CatTabs, ListState, SearchBox, StatusTags, SymbolList } from '../components/SymbolList';
 import { useChange, useSymbolFilter } from '../hooks/useSymbolFilter';
@@ -19,20 +20,6 @@ import { quoteDirection, useQuotes } from '../hooks/useQuotes';
 import { useUnread } from '../hooks/useUnread';
 import { formatPercent, formatPrice } from '../lib/format';
 import { spreadPoints, symbolName } from '../lib/symbol';
-
-/** 迷你走势图：收盘价折线，颜色跟随今日涨跌 */
-export function Sparkline({ closes, up }: { closes?: string[]; up: boolean }) {
-  if (!closes || closes.length < 2) return <span className="spark-empty">—</span>;
-  const v = closes.map(Number);
-  const max = Math.max(...v);
-  const min = Math.min(...v);
-  const d = v.map((x, i) => `${i ? 'L' : 'M'}${((i * 80) / (v.length - 1)).toFixed(1)},${(22 - (20 * (x - min)) / (max - min || 1)).toFixed(1)}`).join('');
-  return (
-    <svg className={`spark ${up ? 'up' : 'down'}`} width="80" height="24" viewBox="0 0 80 24" aria-hidden="true">
-      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
 
 const TableRow = memo(function TableRow({ s, q, closes, fav, onFav, onOpen, lang }: { s: SymbolInfo; q?: Quote; closes?: string[]; fav: boolean; onFav: (c: string) => void; onOpen: (c: string, side?: Side) => void; lang: string }) {
   const { t } = useTranslation();
@@ -162,7 +149,7 @@ function MobileMarkets() {
         <InstallPrompt />
       </div>
       <div className="flush-list">
-        <SymbolList onSelect={(c) => navigate(`/trade/${c}`)} />
+        <SymbolList onSelect={(c) => navigate(`/trade/${c}`)} trend />
       </div>
       <p className="footnote">{t('market.footnote')}</p>
     </div>

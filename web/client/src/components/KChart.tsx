@@ -32,6 +32,7 @@ import { useTheme } from '../app/contexts';
 import { useScenarioVersion } from '../hooks/useAsync';
 import { useQuote } from '../hooks/useQuotes';
 import { errorKey } from '../api/errors';
+import { CHART_GESTURES } from '../lib/chartGestures';
 import { boll, ema, INDICATOR_LABEL, macd, PARAMS, rsi, sma, SUB_PANE, type IndicatorKey, type Series } from '../lib/indicators';
 
 interface Props {
@@ -170,6 +171,7 @@ export function KChart({ symbol, period, digits, indicators = [], showBidAsk = f
         ...(isTick ? { timeFormatter: (time: Time) => hms(tickMs[(time as number) - 1]) } : {}),
       },
       crosshair: { mode: 0 },
+      ...CHART_GESTURES,
     });
     const priceFormat = { type: 'price' as const, precision: digits, minMove: 1 / 10 ** digits };
     let candle: ISeriesApi<'Candlestick'> | null = null;

@@ -1,10 +1,14 @@
 /**
  * 品种列表（UI 风格 C）。
- * - variant="mobile"：手机行情页、手机切换品种面板。每行：品种 | 卖价 / 买价上下两行 | 涨跌色块。
+ * - variant="mobile"：手机行情页、手机切换品种面板。每行：品种 | （trend 时）走势小图 | 卖价 / 买价上下两行 | 涨跌色块。
+ *   TG 机器人第 3 批（照原型 trade-ui）：手机行情页加今日走势小图；跳价时价格闪一下涨跌色（flash-up / flash-down）。
  * - variant="side"：桌面交易页左栏。每行：品种 | 卖价 | 买价 | 涨跌。
  * 桌面行情页是宽表格，见 pages/Markets.tsx，分类和搜索用这里导出的 useSymbolFilter / FilterBar。
  */
 import { memo } from 'react';
+import { getSparklines } from '../api/market';
+import { useAsync } from '../hooks/useAsync';
+import { Sparkline } from './Sparkline';
 import { useTranslation } from 'react-i18next';
 import type { Quote, SymbolInfo } from '../api/types';
 import { useChange, useSymbolFilter, type Category, type SymbolFilter } from '../hooks/useSymbolFilter';
@@ -63,7 +67,7 @@ export function ListState({ f }: { f: SymbolFilter }) {
   return null;
 }
 
-const Row = memo(function Row({ s, q, selected, onSelect, lang, variant }: { s: SymbolInfo; q?: Quote; selected: boolean; onSelect: (c: string) => void; lang: string; variant: 'mobile' | 'side' }) {
+const Row = memo(function Row({ s, q, selected, onSelect, lang, variant, trend, closes }: { s: SymbolInfo; q?: Quote; selected: boolean; onSelect: (c: string) => void; lang: string; variant: 'mobile' | 'side'; trend?: boolean; closes?: string[] }) {
   const { chg, up } = useChange(q);
   const dir = quoteDirection(s.code);
   const flash = dir === 'up' ? 'flash-up' : dir === 'down' ? 'flash-down' : '';
@@ -77,6 +81,11 @@ const Row = memo(function Row({ s, q, selected, onSelect, lang, variant }: { s: 
             <StatusTags s={s} />
           </small>
         </span>
+        {trend && (
+          <span className="sym-spark" data-testid="sym-spark">
+            <Sparkline closes={closes} up={up} width={56} height={22} />
+          </span>
+        )}
         {variant === 'mobile' ? (
           <span key={q?.bid} className={`sym-ba num ${flash}`}>
             <span className="down">{q ? formatPrice(q.bid, s.digits) : '—'}</span>
@@ -98,16 +107,22 @@ const Row = memo(function Row({ s, q, selected, onSelect, lang, variant }: { s: 
   );
 });
 
-export function SymbolList({ selected, onSelect, autoFocus, initialCategory = 'all', variant = 'mobile' }: { selected?: string; onSelect: (code: string) => void; autoFocus?: boolean; initialCategory?: Category; variant?: 'mobile' | 'side' }) {
+const noSparks = (): Promise<Record<string, string[]>> => Promise.resolve({});
+
+/** trend：每行加今日走势小图（手机行情页用；切换品种面板不加，保持紧凑） */
+export function SymbolList({ selected, onSelect, autoFocus, initialCategory = 'all', variant = 'mobile', trend = false }: { selected?: string; onSelect: (code: string) => void; autoFocus?: boolean; initialCategory?: Category; variant?: 'mobile' | 'side'; trend?: boolean }) {
   const { t, i18n } = useTranslation();
   const quotes = useQuotes();
   const f = useSymbolFilter(initialCategory);
+  // 不要走势图时不请求（切换品种面板、电脑左栏）
+  const sparks = useAsync(trend ? getSparklines : noSparks, trend ? 'sparklines' : 'sparklines-off');
   return (
-    <div className={`sym-list v-${variant}`}>
+    <div className={`sym-list v-${variant}${trend ? ' with-trend' : ''}`}>
       <SearchBox f={f} autoFocus={autoFocus} />
       <CatTabs f={f} />
       <div className="sym-head" aria-hidden="true">
         <span>{t('market.symbol')}</span>
+        {trend && <span>{t('market.trend')}</span>}
         {variant === 'mobile' ? (
           <span>{t('market.bidAsk')}</span>
         ) : (
@@ -123,7 +138,7 @@ export function SymbolList({ selected, onSelect, autoFocus, initialCategory = 'a
       ) : (
         <ul className="sym-rows">
           {f.filtered.map((s) => (
-            <Row key={s.code} s={s} q={quotes[s.code]} selected={s.code === selected} onSelect={onSelect} lang={i18n.language} variant={variant} />
+            <Row key={s.code} s={s} q={quotes[s.code]} selected={s.code === selected} onSelect={onSelect} lang={i18n.language} variant={variant} trend={trend} closes={trend ? sparks.data?.[s.code] : undefined} />
           ))}
         </ul>
       )}

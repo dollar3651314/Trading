@@ -94,7 +94,10 @@ function SheetBody({ symbol, side, onDone }: { symbol: SymbolInfo; side: Side; o
       </dl>
 
       <RejectAndSummary f={f} />
-      <SubmitButton f={f} symbol={symbol} />
+      {/* 主按钮固定在弹层底部（UX-B1）：内容再长、键盘弹出时也看得到 */}
+      <div className="os-sticky" data-testid="os-sticky">
+        <SubmitButton f={f} symbol={symbol} />
+      </div>
       <NotTradableNote f={f} symbol={symbol} />
       <OrderConfirm f={f} symbol={symbol} />
     </div>
