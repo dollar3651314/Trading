@@ -81,6 +81,21 @@ class TgWithdrawFlowTest {
     ((MutableClock) clock).reset();
   }
 
+  /** 这个测试类建的客户（收尾用） */
+  final java.util.List<Long> users = new java.util.ArrayList<>();
+
+  /**
+   * 收尾：没有广播器时审核通过的提现留在"已审核待放款"，后面别的测试类跑提现推进会把它交给自己的假广播器（共用一个库），
+   * 所以把这个类的客户还在途的提现标成已撤销（只改测试数据，不影响本类的断言）
+   */
+  @AfterEach
+  void closeInFlight() {
+    for (Long u : users) {
+      jdbc.update("UPDATE wallet_withdrawal SET status = 'CANCELLED' WHERE user_id = ? AND status IN ('COOLING', 'REVIEWING', 'DELAYED', 'APPROVED')", u);
+    }
+    users.clear();
+  }
+
   LocalDateTime now() {
     return LocalDateTime.now(clock.withZone(ZoneOffset.UTC));
   }
@@ -95,6 +110,7 @@ class TgWithdrawFlowTest {
     jdbc.update("INSERT INTO account_kyc_application (user_id, doc_type, doc_number, front_key, back_key, selfie_key, status) VALUES (?, 'PASSPORT', ?, 'f', 'b', 's', 'APPROVED')",
         uid, "TP" + uid);
     PinTestSupport.setPin(jdbc, uid, PIN);
+    users.add(uid);
     return uid;
   }
 
