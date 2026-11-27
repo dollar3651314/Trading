@@ -947,7 +947,22 @@
     "recoverTitle": "Recover a Telegram account",
     "recoverSteps": "Recovery (moving the account to a new Telegram) is requested in the bot only: open the bot with your new Telegram, tap \"Recover my account\" and send your customer number, your name as verified, and the last 4 characters of your ID number. The current holder is notified; after a 48-hour objection period a reviewer verifies you by video, and an approved request runs 24 hours later. Support will never DM you for passwords or codes.",
     "recoverOpenBot": "Open the bot with your new Telegram",
-    "recoverNoBot": "The bot link is unavailable. Search for our bot in Telegram and send /recover."
+    "recoverNoBot": "The bot link is unavailable. Search for our bot in Telegram and send /recover.",
+    "emergency": {
+      "notice": "⚠️ Emergency mode: the Telegram bot is temporarily unavailable. You can sign in on the web with your Telegram account for now. For your safety, withdrawals are paused for 24 hours after signing in this way; viewing, trading and deposits are not affected.",
+      "button": "Sign in with Telegram",
+      "done": "You just signed in with Telegram. For your safety, withdrawals are available after {{time}} (24 hours); viewing and trading are not affected.",
+      "enter": "Start trading",
+      "reason": {
+        "disabled": "Emergency sign-in is not available right now. Please try later or contact support.",
+        "invalid": "Sign-in failed: the Telegram authorization could not be verified. Please try again.",
+        "expired": "Sign-in failed: the Telegram authorization was not completed or has expired. Please try again.",
+        "used": "This authorization was already used. Please try again.",
+        "no_account": "This Telegram account has no Trading account yet.",
+        "frozen": "The account is frozen. Please contact support.",
+        "network": "Network error. Please try again later."
+      }
+    }
   },
   "pin": {
     "title": "Withdrawal PIN",

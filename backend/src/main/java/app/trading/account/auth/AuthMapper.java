@@ -143,6 +143,26 @@ interface AuthMapper {
 
   int revokeUserSessions(@Param("userId") long userId, @Param("exceptTokenHash") String exceptTokenHash);
 
+  // ---------- 第 5 批：应急开关（TB-34） ----------
+
+  /** 应急开关下用 Telegram 登录的网页会话（和网页会话一样 ttlHours 小时、用着自动续期；开关关上就作废） */
+  int insertEmergencySession(@Param("userId") long userId, @Param("tokenHash") String tokenHash, @Param("ip") String ip, @Param("userAgent") String userAgent,
+      @Param("ttlHours") int ttlHours);
+
+  /** 作废某一种的全部会话（应急开关关上时作废全部 EMERGENCY） */
+  int revokeSessionsOfKind(@Param("kind") String kind);
+
+  /** 开关的最新一条记录；没有记录 = 关 */
+  Rows.EmergencyChange latestEmergency();
+
+  /** 加锁读最新一条（开、关在同一个事务里先锁再写，两个人同时点只有一个算数） */
+  Rows.EmergencyChange latestEmergencyForUpdate();
+
+  int insertEmergencyLog(@Param("on") boolean on, @Param("actor") String actor, @Param("actorName") String actorName, @Param("reason") String reason,
+      @Param("at") java.time.LocalDateTime at);
+
+  java.util.List<Rows.EmergencyChange> emergencyHistory(@Param("limit") int limit);
+
   /** 插入用户时 MyBatis 回填 id */
   final class UserInsert {
     Long id;

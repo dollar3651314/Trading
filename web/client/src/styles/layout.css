@@ -112,6 +112,9 @@
 .tg-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 16px 0 4px; }
 .tg-entries { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .tg-entries h2 { font-size: 14px; color: var(--muted); }
+/* 第 5 批应急开关：登录页 / 提示页上方的「用 Telegram 登录」（Telegram 官方登录小部件，按钮在它自己的 iframe 里） */
+.tg-emergency { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.tg-emergency-widget { min-height: 48px; display: flex; justify-content: center; align-items: center; }
 .tg-entry { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); color: inherit; text-decoration: none; }
 .tg-link-wait { padding: 40px 16px; }
 

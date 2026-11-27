@@ -74,6 +74,8 @@ export const PERMISSIONS = [
   { code: 'audit:view', module: 'system', highRisk: false },
   { code: 'config:view', module: 'system', highRisk: false },
   { code: 'config:edit', module: 'system', highRisk: true },
+  // 第 5 批：看"应急开关"页（TB-34），默认只有超管；能开关的只有 Amos 的后台账号（后端配置写死编号），不靠权限点
+  { code: 'emergency:view', module: 'system', highRisk: true },
 ] as const satisfies readonly PermissionDef[];
 
 export type PermissionCode = (typeof PERMISSIONS)[number]['code'];

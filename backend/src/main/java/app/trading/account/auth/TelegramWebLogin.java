@@ -129,6 +129,12 @@ class TelegramWebLogin {
 
   /** Telegram 登录数据的 hash：机器人令牌的 SHA-256 作密钥，HMAC-SHA256(data-check-string)，十六进制；恒定时间比较 */
   boolean validHash(Map<String, String> params, String hash) {
+    return validHash(params, hash, botToken);
+  }
+
+  /** 同上，指定机器人令牌（第 5 批应急登录用另一个只管登录的机器人，见 {@link EmergencyLogin}）；令牌为空一律不通过 */
+  static boolean validHash(Map<String, String> params, String hash, String botToken) {
+    if (botToken == null || botToken.isEmpty() || hash == null) return false;
     TreeMap<String, String> data = new TreeMap<>(params);
     data.remove("hash");
     data.remove(NEXT);

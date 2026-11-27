@@ -947,7 +947,22 @@
     "recoverTitle": "找回 Telegram 账户",
     "recoverSteps": "找回（换绑到新的 Telegram）只在机器人里申请：用你的新 Telegram 打开机器人，点「找回原账户」，按提示发送客户号、身份认证时的姓名和证件号后 4 位。原账户持有人会收到通知，48 小时反对期后由审核员视频核对，批准后再等 24 小时执行。客服不会私信要你的密码或验证码。",
     "recoverOpenBot": "用新 Telegram 打开机器人申请",
-    "recoverNoBot": "机器人地址暂时取不到，请在 Telegram 里搜索我们的机器人，发 /recover。"
+    "recoverNoBot": "机器人地址暂时取不到，请在 Telegram 里搜索我们的机器人，发 /recover。",
+    "emergency": {
+      "notice": "⚠️ 应急模式：Telegram 机器人暂时不可用，你可以先用 Telegram 账号登录网页。为了安全，这样登录后 24 小时内不能提现；查询、交易、充值不受影响。",
+      "button": "用 Telegram 登录",
+      "done": "你刚用 Telegram 登录。为了安全，24 小时后（{{time}}）才能提现；查询、交易不受影响。",
+      "enter": "进入交易",
+      "reason": {
+        "disabled": "应急登录现在没有开放，请稍后再试或联系客服。",
+        "invalid": "没登录上：Telegram 授权信息校验没有通过，请再点一次。",
+        "expired": "没登录上：Telegram 授权没完成或已过期，请再点一次。",
+        "used": "这次授权已经用过了，请再点一次。",
+        "no_account": "这个 Telegram 账号还没有开户。",
+        "frozen": "账户已冻结，请联系客服。",
+        "network": "网络不通，请稍后再试。"
+      }
+    }
   },
   "pin": {
     "title": "提现密码",

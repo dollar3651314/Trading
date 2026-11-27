@@ -272,3 +272,9 @@ export const releaseHeldWithdrawal: typeof real.releaseHeldWithdrawal = IS_MOCK 
 export const cancelHeldWithdrawal: typeof real.cancelHeldWithdrawal = IS_MOCK ? mock.cancelHeldWithdrawal : real.cancelHeldWithdrawal;
 /** POST /api/admin/customers/{id}/telegram（第 4 批 4c：只有超管；高危、后台密码、告警邮件） */
 export const changeCustomerTelegram: typeof real.changeCustomerTelegram = IS_MOCK ? mock.changeCustomerTelegram : real.changeCustomerTelegram;
+
+// ---------- 第 5 批：应急开关（TB-34） ----------
+/** GET /api/admin/emergency */
+export const getEmergency: typeof real.getEmergency = IS_MOCK ? mock.getEmergency : real.getEmergency;
+/** POST /api/admin/emergency（只有 Amos 的后台账号；后台密码 + 原因；审计、告警邮件） */
+export const setEmergency: typeof real.setEmergency = IS_MOCK ? mock.setEmergency : real.setEmergency;

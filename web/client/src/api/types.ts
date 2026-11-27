@@ -13,7 +13,14 @@ export interface AuthOptions {
   /** 机器人用户名（不带 @）；没配置时为空 */
   botUsername: string | null;
   loginMode: 'login-url' | 'link';
+  /** 第 5 批应急开关（TB-34）：开着、登录机器人配好时为 true，登录页显示「用 Telegram 登录」 */
+  emergencyLogin?: boolean;
+  /** 只管登录的机器人用户名（应急开关开着时才有） */
+  loginBotUsername?: string | null;
 }
+
+/** Telegram 登录小部件给的身份（原样交给后端验签，字段不能增减） */
+export type TelegramWidgetUser = Record<string, string | number>;
 
 /** 从机器人进入网页没有成功的原因（后端 TelegramWebLogin.Outcome，提示页 /tg?r=… 按它显示文案） */
 /** security（第 4 批）：刚出了安全事件（设置 / 修改提现密码、第一次提交 KYC 等），网页会话已全部作废 */

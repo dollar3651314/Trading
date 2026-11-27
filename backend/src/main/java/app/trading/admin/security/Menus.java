@@ -47,7 +47,8 @@ public final class Menus {
           leaf("menus", "menu.menus", "/system/menus", Permission.MENU_VIEW),
           leaf("permissions", "menu.permissions", "/system/permissions", Permission.PERMISSION_VIEW),
           leaf("audit", "menu.audit", "/system/audit", Permission.AUDIT_VIEW),
-          leaf("config", "menu.config", "/system/config", Permission.CONFIG_VIEW)));
+          leaf("config", "menu.config", "/system/config", Permission.CONFIG_VIEW),
+          leaf("emergency", "menu.emergency", "/system/emergency", Permission.EMERGENCY_VIEW)));
 
   private Menus() {}
 

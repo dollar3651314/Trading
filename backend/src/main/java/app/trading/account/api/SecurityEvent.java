@@ -22,4 +22,6 @@ public record SecurityEvent(String type, LocalDateTime at) {
   /** 第 4 批 4b：人工换绑 Telegram（48 小时不能提现） */
   public static final String REBIND = "REBIND";
   public static final String KYC_FIRST = "KYC_FIRST";
+  /** 第 5 批：应急开关下用 Telegram 登录网页（TB-34，24 小时不能提现） */
+  public static final String TG_WEB_LOGIN = "TG_WEB_LOGIN";
 }

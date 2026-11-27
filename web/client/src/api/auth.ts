@@ -82,7 +82,7 @@ export const PROTOTYPE_EMAIL_CODE = mock.MOCK_EMAIL_CODE;
 /** 登录方式（TG 机器人第 2 批）。原型：不限制（照常显示注册、登录），机器人用户名是测试机器人 */
 let optionsPromise: Promise<AuthOptions> | null = null;
 export function getAuthOptions(): Promise<AuthOptions> {
-  if (IS_MOCK) return Promise.resolve({ telegramOnly: false, botUsername: 'TradingAssistTestBot', loginMode: 'login-url' });
+  if (IS_MOCK) return Promise.resolve({ telegramOnly: false, botUsername: 'TradingAssistTestBot', loginMode: 'login-url', emergencyLogin: false, loginBotUsername: null });
   if (!optionsPromise) {
     optionsPromise = real.getAuthOptions().catch((e) => {
       optionsPromise = null;
@@ -95,3 +95,7 @@ export function getAuthOptions(): Promise<AuthOptions> {
 /** 一次性链接换会话（退路模式）。原型里没有这个流程 */
 export const tgLink = (token: string): Promise<{ next: string } | { reason: TgLoginReason }> =>
   IS_MOCK ? Promise.resolve({ reason: 'disabled' as TgLoginReason }) : real.tgLink(token);
+
+/** 应急开关下用 Telegram 登录（第 5 批）。原型里没有这个流程 */
+export const tgEmergencyLogin = (user: Record<string, string | number>): Promise<{ withdrawAt: string } | { reason: string }> =>
+  IS_MOCK ? Promise.resolve({ reason: 'disabled' }) : real.tgEmergencyLogin(user);

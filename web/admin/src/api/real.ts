@@ -7,6 +7,7 @@
  */
 import { API_BASE, request, withQuery } from './http';
 import type {
+  EmergencyState,
   Recovery,
   RecoveryDetail,
   AdjustLimits,
@@ -590,4 +591,11 @@ export function cancelHeldWithdrawal(id: string, reason: string): Promise<Withdr
 /** 第 4 批 4c：解除（telegramId 为空）或更换 Telegram 关联；只有超管，要原因和自己的后台密码 */
 export function changeCustomerTelegram(id: number, telegramId: string | null, username: string | null, reason: string, password: string): Promise<CustomerDetail> {
   return request(`/customers/${id}/telegram`, { method: 'POST', body: { telegramId, username, reason, password } });
+}
+
+// ---------- 第 5 批：应急开关（admin/ops/EmergencyController；看要 emergency:view，开关只限 Amos 的后台账号） ----------
+export const getEmergency = (): Promise<EmergencyState> => request('/emergency');
+/** 打开 / 关闭：原因必填、再输自己的后台密码 */
+export function setEmergency(on: boolean, reason: string, password: string): Promise<EmergencyState> {
+  return request('/emergency', { method: 'POST', body: { on, reason, password } });
 }

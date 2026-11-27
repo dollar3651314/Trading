@@ -37,6 +37,14 @@ class SessionService {
     return token;
   }
 
+  /** 新建应急登录会话（第 5 批：应急开关下用 Telegram 登录网页），和网页会话一样的有效期；开关关上就失效 */
+  @Transactional
+  String createEmergency(long userId, String ip, String userAgent) {
+    String token = Secrets.newToken();
+    mapper.insertEmergencySession(userId, Secrets.sha256(token), ip, truncate(userAgent, 255), props.sessionTtlHours());
+    return token;
+  }
+
   /** 有效时返回用户 ID，否则返回 null */
   @Transactional
   Long resolve(String token) {

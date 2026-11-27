@@ -158,6 +158,7 @@
     SELECT s.id, s.user_id, TIMESTAMPDIFF(SECOND, s.last_seen_at, UTC_TIMESTAMP(3)) AS idle_seconds, s.kind
     FROM account_session s JOIN account_user u ON u.id = s.user_id
     WHERE s.token_hash = #{tokenHash} AND s.revoked_at IS NULL AND s.expires_at &gt; UTC_TIMESTAMP(3) AND u.status = 'ACTIVE'
+      AND (s.kind &lt;&gt; 'EMERGENCY' OR COALESCE((SELECT e.turned_on FROM account_tg_emergency_log e ORDER BY e.id DESC LIMIT 1), 0) = 1)
   </select>
 
   <!-- 续期：网页会话再给 ttlHours 小时；机器人会话再给 botIdleMinutes 分钟，但不超过最长到期时间 -->
@@ -171,6 +172,32 @@
   <update id="revokeSession">
     UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE token_hash = #{tokenHash} AND revoked_at IS NULL
   </update>
+
+  <!-- 第 5 批应急开关：EMERGENCY 会话（上面 findActiveSession 另外要求开关现在是开的：服务器终端关开关时没走应用，也一样失效） -->
+  <insert id="insertEmergencySession">
+    INSERT INTO account_session (user_id, token_hash, kind, ip, user_agent, created_at, last_seen_at, expires_at)
+    VALUES (#{userId}, #{tokenHash}, 'EMERGENCY', #{ip}, #{userAgent}, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3), DATE_ADD(UTC_TIMESTAMP(3), INTERVAL #{ttlHours} HOUR))
+  </insert>
+
+  <update id="revokeSessionsOfKind">
+    UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE kind = #{kind} AND revoked_at IS NULL
+  </update>
+
+  <select id="latestEmergency" resultType="app.trading.account.auth.Rows$EmergencyChange">
+    SELECT id, turned_on, actor, actor_name, reason, created_at FROM account_tg_emergency_log ORDER BY id DESC LIMIT 1
+  </select>
+
+  <select id="latestEmergencyForUpdate" resultType="app.trading.account.auth.Rows$EmergencyChange">
+    SELECT id, turned_on, actor, actor_name, reason, created_at FROM account_tg_emergency_log ORDER BY id DESC LIMIT 1 FOR UPDATE
+  </select>
+
+  <insert id="insertEmergencyLog">
+    INSERT INTO account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) VALUES (#{on}, #{actor}, #{actorName}, #{reason}, #{at})
+  </insert>
+
+  <select id="emergencyHistory" resultType="app.trading.account.auth.Rows$EmergencyChange">
+    SELECT id, turned_on, actor, actor_name, reason, created_at FROM account_tg_emergency_log ORDER BY id DESC LIMIT #{limit}
+  </select>
 
   <update id="revokeUserSessions">
     UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3)

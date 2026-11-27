@@ -137,7 +137,9 @@ cat > "$tmp/fakebin/docker" << 'FAKE'
 #!/usr/bin/env bash
 case "$1" in
   events) exit "${FAKE_EVENTS_RC:-1}" ;;
-  compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac; exit 0 ;;
+  # compose exec：FAKE_SQL_LOG 时把参数记下来（应急开关的 SQL）；查应急开关状态时回 FAKE_EM_STATE（默认 0 = 关）
+  compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) [ -z "${FAKE_SQL_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_SQL_LOG"
+      case "$*" in *"SELECT COALESCE((SELECT turned_on"*) echo "${FAKE_EM_STATE:-0}" ;; *START\ TRANSACTION*) ;; *) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac ;; esac; exit 0 ;;
   # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
   ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; *project=trading*) [ -z "${FAKE_TRADING_RUNNING:-}" ] || echo fake-trading-id ;; esac; exit 0 ;;
   # 报价服务容器的健康状态（wait_healthy 用）：FAKE_QUOTE_HEALTHY=1 时 healthy
@@ -367,5 +369,26 @@ check "trading-app 内存：生产拒绝 set TR_MEM_APP / TR_META_APP，什么�
 # TG 机器人第 2 批：一键登录落地页的访问日志不记参数（两个模板都是）；全站不带 Referer；网页地址、进入方式、只走 Telegram 的 set 校验；官网去机器人的默认值
 check "一键登录落地页 /api/tg/login：访问日志用不带参数的格式（\$uri），错误日志只留 emerg；全站 Referrer-Policy no-referrer" bash -c 'for f in deploy/nginx/site.conf.template deploy/nginx/gateway.conf.template; do awk "/location = \\/api\\/tg\\/login/{f=1} f&&/}/{exit} f" "$f" > "$tmp/loc"; grep -qE "access_log .*(main_noq|tr_gw_noq);" "$tmp/loc" && grep -q "error_log .* emerg;" "$tmp/loc" || exit 1; done; grep -q "log_format main_noq .*\$request_method \$uri \$server_protocol" deploy/nginx/nginx.conf && ! grep "log_format main_noq" deploy/nginx/nginx.conf | grep -q "\$request\b\|\$args\|\$request_uri" && grep -q "log_format tr_gw_noq .*\$request_method \$uri" deploy/nginx/gateway.conf.template && grep -q "^add_header Referrer-Policy no-referrer always;" deploy/nginx/security.inc'
 check "TG 第 2 批 set：FX_TG_WEB_URL 只认 https://域名、FX_TG_LOGIN_MODE 只认 login-url / link、FX_PHASE1_TELEGRAM_ONLY 只认 true / false" bash -c 'echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env"; tr_run bash deploy/kit/trading set FX_TG_WEB_URL https://app.example.test > /dev/null && grep -q "^FX_TG_WEB_URL=https://app.example.test$" "$tmp/tr/.env" && tr_run bash deploy/kit/trading set FX_TG_LOGIN_MODE link > /dev/null && tr_run bash deploy/kit/trading set FX_PHASE1_TELEGRAM_ONLY false > /dev/null && for kv in "FX_TG_WEB_URL http://app.example.test" "FX_TG_WEB_URL https://a.test/x?y" "FX_TG_LOGIN_MODE oidc" "FX_PHASE1_TELEGRAM_ONLY yes"; do set -- $kv; tr_run bash deploy/kit/trading set "$1" "$2" > /dev/null 2>&1 && exit 1; done; true'
+# 第 5 批应急开关（TB-34）的服务器备用办法：只认 on / off、原因必填；写开关记录和审计（原因只以十六进制进 SQL）、关的时候作废应急登录会话、发告警邮件；已经是这个状态就不写；Trading 停着时不改
+em_run() { : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" FAKE_CURL_ARGS="$tmp/curl-args" FAKE_TRADING_RUNNING=1 "$@" 2>&1; }
+export -f em_run
+check "应急开关备用办法：sudo trading set TR_TG_EMERGENCY_LOGIN on|off \"原因\" 写开关记录、审计（原因十六进制）、关时作废应急会话、发告警邮件；值不对、没原因、已经是这个状态、Trading 停着都不写" bash -c '
+  mail_env ""
+  em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN maybe "x" > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
+  em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on " " < /dev/null > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
+  em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "bot banned'"'"'); DROP TABLE x; --" > /dev/null || exit 1
+  grep -q "INSERT INTO trading.account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) VALUES (1, '"'"'server'"'"', '"'"'server:root'"'"', CONVERT(UNHEX('"'"'626f742062616e6e656427293b2044524f50205441424c4520783b202d2d'"'"') USING utf8mb4)" "$tmp/em-sql" || exit 1
+  grep -q "DROP TABLE" "$tmp/em-sql" && exit 1; grep -q "kind = '"'"'EMERGENCY'"'"'" "$tmp/em-sql" && exit 1
+  grep -q "'"'"'telegram.emergency_on'"'"'" "$tmp/em-sql" && grep -q "已发邮件：\[测试\] Trading 应急开关已打开" "$tmp/tr/logs/trading.log" || exit 1
+  em_run env FAKE_EM_STATE=1 bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN off "机器人恢复了" > /dev/null || exit 1
+  grep -q "UPDATE trading.account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE kind = '"'"'EMERGENCY'"'"' AND revoked_at IS NULL" "$tmp/em-sql" && grep -q "'"'"'telegram.emergency_off'"'"'" "$tmp/em-sql" || exit 1
+  grep -q "已发邮件：\[测试\] Trading 应急开关已关闭" "$tmp/tr/logs/trading.log" || exit 1
+  em_run env FAKE_EM_STATE=1 bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "再开" > /dev/null || exit 1; grep -q "START TRANSACTION" "$tmp/em-sql" && exit 1
+  : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "停着" > /dev/null 2>&1 && exit 1
+  [ -s "$tmp/em-sql" ] && exit 1; true'
+check "第 5 批 set：登录机器人用户名、Amos 的后台账号编号在 set 清单（编号只认正整数）；登录机器人令牌只在 set-key 清单；compose 传给 trading-app、默认空" bash -c 'grep -q "^KEY_ALLOWED=\".* FX_TG_LOGIN_BOT_TOKEN .*\"$" deploy/kit/trading && ! grep -q "^SET_ALLOWED=.*FX_TG_LOGIN_BOT_TOKEN" deploy/kit/trading && grep -q "^SET_ALLOWED=\".* FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID .*\"$" deploy/kit/trading \
+  && echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env" && tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID 12 > /dev/null && grep -q "^FX_ADMIN_OWNER_ID=12$" "$tmp/tr/.env" && ! tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID amos > /dev/null \
+  && tr_run bash deploy/kit/trading set FX_TG_LOGIN_BOT_USERNAME @TradingLoginBot > /dev/null && grep -q "^FX_TG_LOGIN_BOT_USERNAME=TradingLoginBot$" "$tmp/tr/.env" \
+  && for f in "$1" "$2"; do for k in FX_TG_LOGIN_BOT_TOKEN FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID; do [ "$(jq -r ".services[\"trading-app\"].environment.$k" "$f")" = "" ] || exit 1; done; done' _ "$tmp/prod-notg.json" "$tmp/test-notg.json"
 check "TG 第 2 批 compose：.env 没写时不只走 Telegram（默认关，Amos 验收时打开）、一键登录、网页地址空；官网机器人地址（测试 TradingAssistTestBot、生产 TradingAssistBot）" bash -c 'for f in "$1" "$2"; do [ "$(jq -r ".services[\"trading-app\"].environment.FX_PHASE1_TELEGRAM_ONLY" "$f")" = false ] && [ "$(jq -r ".services[\"trading-app\"].environment.FX_TG_LOGIN_MODE" "$f")" = login-url ] && [ "$(jq -r ".services[\"trading-app\"].environment.FX_TG_WEB_URL" "$f")" = "" ] && [ "$(jq -r ".services[\"trading-web\"].environment.FX_NGINX_TG_ONLY" "$f")" = false ] || exit 1; done; [ "$(jq -r ".services[\"trading-web\"].environment.FX_NGINX_BOT_URL" "$1")" = https://t.me/TradingAssistBot ] && [ "$(jq -r ".services[\"trading-web\"].environment.FX_NGINX_BOT_URL" "$2")" = https://t.me/TradingAssistTestBot ]' _ "$tmp/prod-notg.json" "$tmp/test-notg.json"
 exit $fail

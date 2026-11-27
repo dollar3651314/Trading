@@ -141,6 +141,12 @@ services:
       # 默认关（第 2 批审查 🟡1），Amos 统一验收时 sudo trading set FX_PHASE1_TELEGRAM_ONLY true 打开
       FX_TG_LOGIN_MODE: ${FX_TG_LOGIN_MODE:-login-url}
       FX_PHASE1_TELEGRAM_ONLY: ${FX_PHASE1_TELEGRAM_ONLY:-false}
+      # 第 5 批应急开关（TB-34）：另一个只管登录的机器人（网页「用 Telegram 登录」）。用户名 sudo trading set FX_TG_LOGIN_BOT_USERNAME，
+      # 令牌只由 Amos 用 sudo trading set-key FX_TG_LOGIN_BOT_TOKEN 填；都没填 = 开关打开了网页也不显示「用 Telegram 登录」。
+      # 能在后台开关的只有 Amos 的后台账号：sudo trading set FX_ADMIN_OWNER_ID <他的后台账号编号>（不写用户名）；没填 = 只能用 sudo trading set TR_TG_EMERGENCY_LOGIN
+      FX_TG_LOGIN_BOT_TOKEN: ${FX_TG_LOGIN_BOT_TOKEN:-}
+      FX_TG_LOGIN_BOT_USERNAME: ${FX_TG_LOGIN_BOT_USERNAME:-}
+      FX_ADMIN_OWNER_ID: ${FX_ADMIN_OWNER_ID:-}
       # 测试管理员（做法 07）：只存令牌的 SHA-256，trading gen-test-admin 生成、test-admin-off 删除
       TEST_ADMIN_TOKEN_SHA256: ${TEST_ADMIN_TOKEN_SHA256:-}
     volumes:

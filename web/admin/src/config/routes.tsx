@@ -35,6 +35,7 @@ import { MenusPage } from '../pages/system/MenusPage';
 import { PermissionsPage } from '../pages/system/PermissionsPage';
 import { AuditPage } from '../pages/system/AuditPage';
 import { ConfigPage } from '../pages/system/ConfigPage';
+import { EmergencyPage } from '../pages/system/EmergencyPage';
 
 export interface RouteDef {
   path: string;
@@ -79,4 +80,5 @@ export const APP_ROUTES: RouteDef[] = [
   { path: '/system/permissions', menuKey: 'permissions', element: <PermissionsPage /> },
   { path: '/system/audit', menuKey: 'audit', element: <AuditPage /> },
   { path: '/system/config', menuKey: 'config', element: <ConfigPage /> },
+  { path: '/system/emergency', menuKey: 'emergency', element: <EmergencyPage /> },
 ];

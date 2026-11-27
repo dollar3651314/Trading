@@ -15,6 +15,9 @@ final class Rows {
   /** kind：WEB 网页登录 / BOT 从机器人一键登录（TG 机器人第 2 批） */
   record SessionRow(long id, long userId, long idleSeconds, String kind) {}
 
+  /** 应急开关的一条记录（第 5 批） */
+  record EmergencyChange(long id, boolean turnedOn, String actor, String actorName, String reason, java.time.LocalDateTime createdAt) {}
+
 
   record Profile(long userId, String firstName, String middleName, String lastName, LocalDate birthDate, String nationality) {}
 }

@@ -7,6 +7,7 @@ import { IS_MOCK } from '../../api/mode';
 import { useAuth } from '../../app/contexts';
 import { PasswordField, TextField } from '../../components/Form';
 import { hasErrors, validateLogin } from '../../lib/validators';
+import { EmergencyLogin } from '../tg/EmergencyLogin';
 import { AuthLayout } from './AuthLayout';
 
 export default function Login() {
@@ -49,6 +50,8 @@ export default function Login() {
         </>
       }
     >
+      {/* 第 5 批：应急开关开着时（没开"只走 Telegram"也一样）显示「用 Telegram 登录」 */}
+      <EmergencyLogin />
       <form onSubmit={onSubmit} noValidate>
         {IS_MOCK && <div className="proto-hint">{t('auth.loginProtoHint')}</div>}
         <TextField label={t('auth.email')} type="email" autoComplete="email" value={email} onChange={setEmail} errors={shown.email} />
