@@ -97,7 +97,13 @@ public enum ConfigKey {
    * TG 客户能不能加白名单、提现（TB-1"TG 提现默认关"，第 2 批审查 🔴B2-1，迁移 V37 默认 false）：false 时有 TG 账户的客户（不管从哪种会话进来）
    * 加白名单、提交提现一律拒绝。第 4 批的提现密码、额度、人工审核等保护做完、验收后由 Amos 在后台打开
    */
-  TELEGRAM_WITHDRAW_ENABLED("telegram.withdraw.enabled", Unit.BOOL, "telegram", null);
+  TELEGRAM_WITHDRAW_ENABLED("telegram.withdraw.enabled", Unit.BOOL, "telegram", null),
+  /**
+   * TG 客户每天提现额度（USDT，网页和机器人合并算，在锁账户的同一个事务里检查；TB-6、TB-22，迁移 V38）：没邮箱 500、有邮箱 2,000。
+   * 上限 2,000（TB-37：每天额度设上限）
+   */
+  TELEGRAM_WITHDRAW_DAILY_LIMIT("telegram.withdraw.dailyLimit", Unit.USDT, "telegram", BigDecimal.ZERO, true, BigDecimal.valueOf(2000)),
+  TELEGRAM_WITHDRAW_DAILY_LIMIT_EMAIL("telegram.withdraw.dailyLimitEmail", Unit.USDT, "telegram", BigDecimal.ZERO, true, BigDecimal.valueOf(2000));
 
   /**
    * 第 4 批（冻结、找回流程）上线前不能对所有人开放开户：后台保存 {@code telegram.signup.allowIds = *} 时拒绝（第 2 批审查 🟡2）。

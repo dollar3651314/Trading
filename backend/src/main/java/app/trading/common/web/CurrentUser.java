@@ -11,11 +11,23 @@ import org.springframework.web.context.request.RequestContextHolder;
 public final class CurrentUser {
 
   static final String ATTR = "fx.userId";
+  static final String ATTR_BOT = "fx.botSession";
 
   private CurrentUser() {}
 
   public static void set(HttpServletRequest request, long userId) {
     request.setAttribute(ATTR, userId);
+  }
+
+  /** 这次请求的会话是不是从机器人一键登录的（TG 机器人第 2、4 批：提现单记入口 BOT / WEB） */
+  public static void setBotSession(HttpServletRequest request, boolean bot) {
+    request.setAttribute(ATTR_BOT, bot);
+  }
+
+  /** 当前请求是不是机器人会话；不在请求里时为 false */
+  public static boolean botSession() {
+    RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+    return attrs != null && Boolean.TRUE.equals(attrs.getAttribute(ATTR_BOT, RequestAttributes.SCOPE_REQUEST));
   }
 
   /** 指定请求上的用户 ID（WebSocket 握手时用）；没有登录时为空。 */

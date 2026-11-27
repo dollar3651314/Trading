@@ -10,6 +10,18 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 interface WithdrawMapper {
 
+  long completedCount(@Param("userId") long userId);
+
+  int markFirstChecked(@Param("id") long id, @Param("adminId") long adminId);
+
+  java.util.List<WhitelistRow> whitelistToNotifySoon(@Param("now") java.time.LocalDateTime now, @Param("soon") java.time.LocalDateTime soon);
+
+  java.util.List<WhitelistRow> whitelistToNotifyActive(@Param("now") java.time.LocalDateTime now, @Param("since") java.time.LocalDateTime since);
+
+  int markWhitelistSoon(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
+  int markWhitelistActive(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
   // ---------- 白名单 ----------
   List<WhitelistRow> whitelist(@Param("userId") long userId);
 
@@ -55,6 +67,9 @@ interface WithdrawMapper {
   List<Long> due(@Param("status") String status, @Param("timeColumn") String timeColumn, @Param("now") LocalDateTime now);
 
   List<Long> withStatus(@Param("status") String status);
+
+  /** 第 4 批审查 🔴4a-1：这个客户在这些状态里的提现（冻结时处理在途的） */
+  List<Long> idsOfUserIn(@Param("userId") long userId, @Param("statuses") List<String> statuses);
 
   /** 一笔提现的一次状态变化（客户端资金记录里每一步的时间） */
   record EventRow(long withdrawalId, String toStatus, LocalDateTime at) {}

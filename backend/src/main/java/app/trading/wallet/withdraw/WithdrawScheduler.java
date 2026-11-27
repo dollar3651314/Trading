@@ -14,9 +14,11 @@ class WithdrawScheduler {
   private static final Logger log = LoggerFactory.getLogger(WithdrawScheduler.class);
 
   private final WithdrawService service;
+  private final WhitelistService whitelist;
 
-  WithdrawScheduler(WithdrawService service) {
+  WithdrawScheduler(WithdrawService service, WhitelistService whitelist) {
     this.service = service;
+    this.whitelist = whitelist;
   }
 
   @Scheduled(fixedDelay = 30_000, initialDelay = 30_000)
@@ -26,6 +28,11 @@ class WithdrawScheduler {
       service.track();
     } catch (RuntimeException e) {
       log.error("提现状态推进失败", e);
+    }
+    try {
+      whitelist.notifyWhitelist();
+    } catch (RuntimeException e) {
+      log.error("白名单通知失败", e);
     }
   }
 }

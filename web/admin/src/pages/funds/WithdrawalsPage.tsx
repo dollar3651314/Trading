@@ -4,7 +4,7 @@
  * → 1 分钟内交 TopUP，"等待放款审核" → Amos 在 TopUP 后台审核放款 → TopUP 回成功（已完成）/ 失败、驳回（自动退回）/ 未知（红色置顶，只能重新查询，不能退款）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, App, Button, Empty, Form, Grid, Input, Select, Skeleton, Tooltip } from 'antd';
+import { Alert, App, Button, Checkbox, Empty, Form, Grid, Input, Select, Skeleton, Tooltip } from 'antd';
 import { StopOutlined, FileTextOutlined, WarningOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -223,6 +223,12 @@ export function WithdrawalsPage() {
                 <div className="user-cell">
                   <b title={r.customerName}>{r.customerName}</b>
                   <small>{contact(r.email)}</small>
+                  {r.ruleType === 'tg' ? (
+                    <span>
+                      <Pill tone="warn">{t('withdrawals.tg.rule')}</Pill>
+                      {r.firstCheck && !r.firstChecked ? <Pill tone="danger">{t('withdrawals.tg.firstCheck')}</Pill> : null}
+                    </span>
+                  ) : null}
                 </div>
               ),
             },
@@ -276,12 +282,15 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
   const [form] = Form.useForm<{ reason: string }>();
   const [busy, setBusy] = useState(false);
   const [rejectError, setRejectError] = useState<unknown>(null);
+  // 第 4 批：首笔核实单要先勾"已人工核实"才能通过
+  const [checked, setChecked] = useState(false);
   const fetcher = useCallback(() => (id ? getWithdrawal(id) : Promise.resolve(null)), [id]);
   const { data: w, loading, error, reload } = useApi<WithdrawalDetail | null>(fetcher);
 
   useEffect(() => {
     form.resetFields();
     setRejectError(null);
+    setChecked(false);
   }, [id, form]);
 
   const after = () => {
@@ -313,6 +322,9 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
   }
 
   const large = compareAmounts(w.amount, '3000') >= 0;
+  const needCheck = !!w.firstCheck && !w.firstChecked;
+  // 第 4 批审查 🔴4a-1：客户账户冻结或提现冻结时不能通过（后端也拒绝 WITHDRAW_FROZEN）
+  const frozen = !!w.safety && (w.safety.accountFrozen || w.safety.withdrawFrozen);
   const approve = () =>
     modal.confirm({
       title: t('withdrawals.approveConfirm'),
@@ -322,7 +334,7 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
       onOk: () =>
         run(
           async () => {
-            const r = await approveWithdrawal(w.id);
+            const r = await approveWithdrawal(w.id, needCheck && checked);
             if (r.payoutNo) void message.success(t('withdrawals.approvedToProvider', { no: r.payoutNo }));
             return r;
           },
@@ -411,6 +423,38 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
         <br />
         {t('withdrawals.whitelistAt', { time: shortTime(w.whitelistAddedAt) })}
       </div>
+      {w.ruleType === 'tg' ? (
+        <div className="addr-box" role="group" aria-label={t('withdrawals.tg.title')}>
+          <b>{t('withdrawals.tg.title')}</b> <Pill tone="warn">{t('withdrawals.tg.rule')}</Pill>{' '}
+          <Pill tone="muted">{t(`withdrawals.tg.source.${w.source ?? 'web'}`)}</Pill>
+          <div>{t('withdrawals.tg.manualNote')}</div>
+          {w.firstCheck ? <div>{w.firstChecked ? t('withdrawals.tg.firstCheckedDone') : <b>{t('withdrawals.tg.firstCheckNote')}</b>}</div> : null}
+        </div>
+      ) : null}
+      {w.safety ? (
+        <div className={`addr-box${frozen || w.safety.securityEvents48h.length ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.safety.title')}>
+          <b>{t('withdrawals.safety.title')}</b>{' '}
+          {w.safety.accountFrozen ? <Pill tone="danger">{t('withdrawals.safety.accountFrozen')}</Pill> : null}{' '}
+          {w.safety.withdrawFrozen ? (
+            <Pill tone="danger">{t('withdrawals.safety.withdrawFrozen', { source: w.safety.withdrawFrozenSource ? t(`customers.wdSafety.source.${w.safety.withdrawFrozenSource}`) : '—' })}</Pill>
+          ) : null}
+          {frozen ? <div className="text-danger">{t('withdrawals.safety.blocked')}</div> : null}
+          <div>
+            {w.safety.securityEvents48h.length ? (
+              <>
+                {t('withdrawals.safety.events')}：
+                {w.safety.securityEvents48h.map((e, i) => (
+                  <div key={i}>
+                    <span className="num">{shortTime(e.at)}</span> · {t(`withdrawals.safety.type.${e.type}`, { defaultValue: e.type })}
+                  </div>
+                ))}
+              </>
+            ) : (
+              t('withdrawals.safety.noEvents')
+            )}
+          </div>
+        </div>
+      ) : null}
       <AutoReviewCard detail={w.autoReviewDetail} />
       {w.payoutNo ? (
         <div className={`addr-box${w.payoutStatus === 'unknown' ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.payoutTitle')}>
@@ -481,8 +525,13 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
             </Form.Item>
           </Form>
           {rejectError ? <div role="alert" className="text-danger">{errorText(t, rejectError)}</div> : null}
+          {needCheck ? (
+            <Checkbox checked={checked} onChange={(e) => setChecked(e.target.checked)}>
+              {t('withdrawals.tg.firstCheckBox')}
+            </Checkbox>
+          ) : null}
           <div className="acts">
-            <PermButton perm="withdrawal:review" type="primary" onClick={approve}>
+            <PermButton perm="withdrawal:review" type="primary" onClick={approve} disabled={frozen || (needCheck && !checked)} disabledReason={frozen ? t('errors.customerWithdrawFrozen') : t('withdrawals.tg.firstCheckNote')}>
               {t('withdrawals.approve')}
             </PermButton>
             <PermButton perm="withdrawal:review" className="btn-reject" loading={busy} onClick={() => void reject()}>

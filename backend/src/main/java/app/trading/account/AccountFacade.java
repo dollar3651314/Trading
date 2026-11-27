@@ -53,6 +53,11 @@ class AccountFacade implements AccountApi {
   }
 
   @Override
+  public java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since) {
+    return auth.securityEventsSince(userId, since);
+  }
+
+  @Override
   public KycStatus kycStatus(long userId) {
     return kyc.status(userId);
   }

@@ -1,5 +1,7 @@
 package app.trading.account.auth;
 
+import app.trading.account.api.WithdrawBlocked;
+import org.springframework.context.ApplicationEventPublisher;
 import app.trading.account.api.SecurityEvent;
 import app.trading.account.api.UserStatus;
 import app.trading.account.auth.AuthMapper.UserInsert;
@@ -34,8 +36,12 @@ class AuthService {
   private final Clock clock;
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(10);
 
+  /** 冻结时通知钱包处理在途提现（{@link WithdrawBlocked}） */
+  private final ApplicationEventPublisher events;
+
   AuthService(AuthMapper mapper, EmailCodeService codes, SessionService sessions, LoginLimiter limiter, SendCodeLimiter codeLimiter, LedgerApi ledger,
-      NotifyApi notify, Clock clock) {
+      NotifyApi notify, Clock clock, ApplicationEventPublisher events) {
+    this.events = events;
     this.mapper = mapper;
     this.codes = codes;
     this.sessions = sessions;
@@ -54,6 +60,20 @@ class AuthService {
    */
   private void securityEvent(long userId, String type) {
     mapper.insertSecurityEvent(userId, type, LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));
+  }
+
+  /**
+   * 安全事件（第 4 批）：记一条，并作废这个账户的全部网页会话（含 BOT 会话）。机器人那边授权时间早于这次事件，要先「重新授权」才能继续，
+   * 一键登录也会拒绝（TelegramWebLogin），所以客户回机器人重新授权、再点「打开交易」。
+   */
+  @Transactional
+  void securityEventAndLogout(long userId, String type) {
+    securityEvent(userId, type);
+    sessions.revokeAll(userId, null);
+  }
+
+  java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since) {
+    return mapper.securityEventsSince(userId, since);
   }
 
   LocalDateTime registeredAt(long userId) {
@@ -156,6 +176,8 @@ class AuthService {
     sessions.revokeAll(userId, null);
     // 安全提醒（TG 机器人第 1 批）：模板 ACCOUNT_FROZEN 只发 Telegram（只发给有 TG 账户的客户；网页客户冻结后本来就登录不了），不能关
     notify.toUser(userId, "ACCOUNT_FROZEN", Map.of());
+    // 第 4 批审查 🔴4a-1：在途的提现（冷静期、待审核、大额延迟中、已审核待放款）不能继续走
+    events.publishEvent(new WithdrawBlocked(userId, "账户已冻结"));
   }
 
   @Transactional

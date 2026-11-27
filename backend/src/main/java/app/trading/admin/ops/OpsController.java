@@ -26,6 +26,9 @@ class OpsController {
 
   record FreezeBody(Boolean frozen, String reason) {}
 
+  /** 第 4 批：firstChecked = 首笔人工核实已做（没邮箱 TG 客户的首笔必须为 true） */
+  record ApproveBody(Boolean firstChecked) {}
+
   record AdjustBody(String direction, String amount, String reason) {}
 
   record ReasonBody(String reason) {}
@@ -79,6 +82,17 @@ class OpsController {
   @PostMapping("/api/admin/customers/{id}/freeze")
   CustomerOps.Detail freeze(@PathVariable long id, @RequestBody FreezeBody body) {
     customers.setFrozen(id, body != null && Boolean.TRUE.equals(body.frozen()), body == null ? null : body.reason());
+    return customers.detail(id);
+  }
+
+  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解除）。请求体 {reason, password}：原因必填、重新输入自己的登录密码 */
+  record WithdrawUnfreezeBody(String reason, String password) {}
+
+  /** 第 4 批：人工解冻提现（冻结提现只能人工解冻；权限 withdraw:unfreeze，默认只有超管；高危、原因、管理员密码、告警邮件） */
+  @RequiresPermission(Permission.WITHDRAW_UNFREEZE)
+  @PostMapping("/api/admin/customers/{id}/withdraw-unfreeze")
+  CustomerOps.Detail unfreezeWithdraw(@PathVariable long id, @RequestBody(required = false) WithdrawUnfreezeBody body) {
+    customers.unfreezeWithdraw(AdminContext.current(), id, body == null ? null : body.reason(), body == null ? null : body.password());
     return customers.detail(id);
   }
 
@@ -191,8 +205,8 @@ class OpsController {
 
   @RequiresPermission(Permission.WITHDRAWAL_REVIEW)
   @PostMapping("/api/admin/withdrawals/{id}/approve")
-  FundsOps.WithdrawalView approve(@PathVariable long id) {
-    return funds.approve(AdminContext.current(), id);
+  FundsOps.WithdrawalView approve(@PathVariable long id, @RequestBody(required = false) ApproveBody body) {
+    return funds.approve(AdminContext.current(), id, body != null && Boolean.TRUE.equals(body.firstChecked()));
   }
 
   @RequiresPermission(Permission.WITHDRAWAL_REVIEW)

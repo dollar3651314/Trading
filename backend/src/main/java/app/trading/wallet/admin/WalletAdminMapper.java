@@ -44,6 +44,10 @@ interface WalletAdminMapper {
     String txHash;
     /** 进入当前状态的时间（最后一条提现事件） */
     LocalDateTime statusAt;
+    String ruleType;
+    String source;
+    boolean firstCheck;
+    Long firstCheckedBy;
   }
 
   class BucketRow {

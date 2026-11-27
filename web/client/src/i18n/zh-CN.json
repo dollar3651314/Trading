@@ -528,7 +528,20 @@
       "awaitingRelease": "等待放款审核",
       "paying": "放款中"
     },
-    "doneTitle": "已提交这笔提现（单号 {{id}}）"
+    "doneTitle": "已提交这笔提现（单号 {{id}}）",
+    "tg": {
+      "title": "Telegram 账户的提现规则",
+      "quotaEmail": "每天最多提 {{limit}} USDT（网页和机器人合并计算）。",
+      "quotaNoEmail": "每天最多提 {{limit}} USDT（网页和机器人合并计算）；绑定邮箱后提高到 2,000 USDT。",
+      "manual": "每一笔都由人工审核；第一笔提现还会人工核实一次。",
+      "disabled": "Telegram 账户的提现暂未开放，请稍后再来。",
+      "frozen": "这个账户的提现已冻结，需要人工核实后解冻，请联系客服。",
+      "pinNotSet": "还没有设置提现密码，设置后才能加白名单和提现。",
+      "setPin": "去设置",
+      "pinLocked": "提现密码输错次数太多，已锁到 {{time}}。",
+      "forgotPin": "忘记了？",
+      "hold": "为了安全，{{time}} 以后才能提现（新开户、设置或修改提现密码后都要等一段时间）。"
+    }
   },
   "whitelist": {
     "title": "提现白名单",
@@ -551,7 +564,8 @@
     "removeBody": "确定删除\"{{label}}\"吗？删除后需要重新添加并等待 24 小时。",
     "removed": "地址已删除",
     "empty": "还没有白名单地址",
-    "emptyHint": "提现只能转到白名单地址"
+    "emptyHint": "提现只能转到白名单地址",
+    "ruleTg": "Telegram 账户新加的地址至少 24 小时后才生效；加好后、生效前 1 小时、生效时都会通知你。如果不是你本人加的，请马上冻结提现并联系客服。"
   },
   "me": {
     "account": "账户",
@@ -572,7 +586,8 @@
     "upDown": "涨跌颜色",
     "upDownGreen": "绿涨红跌",
     "upDownRed": "红涨绿跌",
-    "onboarding": "新手引导"
+    "onboarding": "新手引导",
+    "withdrawPin": "提现密码"
   },
   "kyc": {
     "intro": "只在提现前需要身份认证；注册、充值和交易不受影响。",
@@ -709,7 +724,16 @@
     "networkClosed": "这条网络暂时不能充值",
     "symbolNotTradable": "该品种暂不开放交易",
     "telegramOnly": "现在只能从 Telegram 机器人进入",
-    "tgWithdrawDisabled": "Telegram 账户提现暂未开放"
+    "tgWithdrawDisabled": "Telegram 账户提现暂未开放",
+    "pinWrong": "提现密码不对。连续输错 5 次会锁定 24 小时",
+    "pinLocked": "提现密码输错太多次，已锁定 24 小时",
+    "pinNotSet": "还没有设置提现密码，请先到\"我的 → 提现密码\"设置",
+    "pinKeypadExpired": "键盘已失效，请重新输入",
+    "pinAlreadySet": "已经设置过提现密码",
+    "withdrawFrozen": "提现已冻结：要人工核对本人后才能解冻，请联系客服",
+    "withdrawHold": "为了安全，现在还不能提现（开户满 24 小时、安全变更后 24 小时、重设提现密码后 48 小时）",
+    "tgDailyLimit": "超过今天的提现额度",
+    "noEmail": "没有绑定邮箱：忘记提现密码要走人工找回"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -764,7 +788,11 @@
     "docNumberInvalid": "证件号码格式不正确",
     "addressInvalid": "地址格式不正确",
     "closeLotsMax": "不能超过持仓手数",
-    "closeRemainMin": "剩余手数会小于最小手数，请改成全部平仓"
+    "closeRemainMin": "剩余手数会小于最小手数，请改成全部平仓",
+    "pinLength": "请输入 6 位数字",
+    "pinMismatch": "两次输入的提现密码不一样",
+    "pinTooSimple": "太简单了：不能 6 位相同或连续（例如 111111、123456）",
+    "withdrawTgDaily": "超过今天的提现额度（网页和机器人合并计算）"
   },
   "countries": {
     "CN": "中国大陆",
@@ -906,7 +934,37 @@
       "no_account": "你还没有开户。请先在机器人里发 /start，点「授权开户」。",
       "frozen": "账户已冻结，请联系客服。",
       "reauth": "你的账户最近有安全变更。请先回到机器人，点「重新授权」，再打开交易。",
-      "disabled": "这个进入方式现在没有开放。请回到机器人重新点按钮。"
+      "disabled": "这个进入方式现在没有开放。请回到机器人重新点按钮。",
+      "security": "为了安全，这个账户的网页已全部退出（刚设置或修改了提现密码、提交了身份认证等安全变更），之后一段时间内不能提现。请回到 Telegram 机器人，点「重新授权」，再点「打开交易」。"
     }
+  },
+  "pin": {
+    "title": "提现密码",
+    "entered": "已输入 {{n}} / {{total}} 位",
+    "clear": "清空",
+    "backspace": "删除一位",
+    "note": "键盘上数字的位置每次都不一样；我们不会让你打字输入提现密码。",
+    "old": "原提现密码",
+    "new": "设置 6 位提现密码",
+    "newPin": "新的提现密码",
+    "confirm": "再输一次",
+    "rule": "设置或修改后，为了安全，这个账户的网页会全部退出、24 小时内不能提现。",
+    "ruleReset": "重设后，为了安全，这个账户的网页会全部退出、48 小时内不能提现；白名单地址保留。",
+    "setIntro": "Telegram 账户加白名单、提现都要输提现密码。请设一个只有你知道的 6 位数字。",
+    "emailCode": "邮箱验证码",
+    "sendCode": "发送验证码",
+    "codeSent": "已发送",
+    "forgotNoEmail": "你没有绑定邮箱：忘记提现密码要走人工找回（提交本人信息、视频核对），这项功能会在后续版本开放。",
+    "submit": {
+      "set": "设置提现密码",
+      "change": "修改提现密码",
+      "forgot": "重设提现密码"
+    },
+    "mode": {
+      "change": "修改",
+      "forgot": "忘记了"
+    },
+    "withdrawLabel": "提现密码",
+    "whitelistLabel": "提现密码（加白名单要输）"
   }
 }

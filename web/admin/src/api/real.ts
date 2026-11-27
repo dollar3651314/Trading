@@ -130,6 +130,11 @@ export async function setCustomerFrozen(id: number, frozen: boolean, reason: str
   await request(`/customers/${id}/freeze`, { method: 'POST', body: { frozen, reason } });
 }
 
+/** 人工解除提现冻结（第 4 批，权限 withdraw:unfreeze；必须填原因、重新输入自己的登录密码；冻结提现只能人工解冻）；返回更新后的详情 */
+export function unfreezeCustomerWithdraw(id: number, reason: string, password: string): Promise<CustomerDetail> {
+  return request(`/customers/${id}/withdraw-unfreeze`, { method: 'POST', body: { reason, password } });
+}
+
 /** 编辑客户资料（v2 E1，必须填原因）：姓名、出生日期、国籍；返回更新后的详情 */
 export function updateCustomerProfile(id: number, input: CustomerProfileInput, reason: string): Promise<CustomerDetail> {
   return request(`/customers/${id}/profile`, { method: 'PUT', body: { ...input, reason } });
@@ -208,8 +213,9 @@ export async function getWithdrawal(id: string): Promise<WithdrawalDetail> {
   return { ...withdrawal, ...rest };
 }
 
-export function approveWithdrawal(id: string): Promise<Withdrawal> {
-  return request(`/withdrawals/${enc(id)}/approve`, { method: 'POST' });
+/** firstChecked：首笔核实单（没邮箱 TG 客户的第一笔）要带 true，否则后端回 FIRST_CHECK_REQUIRED */
+export function approveWithdrawal(id: string, firstChecked = false): Promise<Withdrawal> {
+  return request(`/withdrawals/${enc(id)}/approve`, firstChecked ? { method: 'POST', body: { firstChecked } } : { method: 'POST' });
 }
 
 export function rejectWithdrawal(id: string, reason: string): Promise<Withdrawal> {

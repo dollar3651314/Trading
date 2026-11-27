@@ -64,6 +64,7 @@ class AutoApproveFlowTest {
   @Autowired LedgerApi ledger;
   @Autowired SystemConfig config;
   @Autowired JdbcTemplate jdbc;
+  @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
   @Autowired Clock clock;
   @MockitoBean MailApi mail;
   @MockitoBean HotWalletApi hot;
@@ -194,6 +195,27 @@ class AutoApproveFlowTest {
   }
 
   @Test
+  void TG规则一律人工_规则全部通过也不自动通过() {
+    save(true, Map.of("R8.enabled", "false"));
+    long[] c = customer("1000");
+    app.trading.support.PinTestSupport.makeTg(jdbc, c[0]);
+    app.trading.support.PinTestSupport.setPin(jdbc, c[0], "135790");
+    config.setBySystem(ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "true", java.time.LocalDateTime.now());
+    try {
+      WithdrawalRow w = withdraws.submit(c[0], String.valueOf(c[1]), "100", app.trading.support.PinTestSupport.input(redis, c[0], "135790"), "BOT");
+      coolDown();
+      withdraws.advance();
+      assertThat(checks(w.id)).as("判定照记（后台参考）").containsExactly("PRECHECK AUTO_APPROVED", "FINAL AUTO_APPROVED");
+      assertThat(status(w.id)).isEqualTo("REVIEWING");
+      assertThat(events(w.id)).contains("COOLING→REVIEWING system");
+      assertThat(jdbc.queryForObject("SELECT note FROM wallet_withdraw_event WHERE withdrawal_id = ? AND to_status = 'REVIEWING'", String.class, w.id))
+          .contains("TG 规则，一律人工审核");
+    } finally {
+      config.setBySystem(ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "false", java.time.LocalDateTime.now());
+    }
+  }
+
+  @Test
   void 自动通过_小额立即上链_两条事件_审核人为空_客户收到的通知和人工通过一样() {
     WithdrawFlowTest.FakeSender s = new WithdrawFlowTest.FakeSender();
     senders.register(Chain.TRC20, s);
@@ -244,14 +266,17 @@ class AutoApproveFlowTest {
     assertThat(rule(next.id, "R2").values()).as("自动通过后被紧急取消的也算（AA-3）").containsEntry("used", "3000").containsEntry("total", "3100");
   }
 
+  /**
+   * 冷静期内出了安全事件 → 复判触发 R6 转人工。第 4 批审查 🔴4a-1 以后账户冻结会直接取消在途提现（见下一个用例），
+   * 所以这里的安全事件不再用"冻结再解冻"，改成直接记一条解冻事件（R6 只看事件，不看是怎么来的）。
+   */
   @Test
-  void 冷静期内解冻_复判触发R6转人工_详情里有和复判不同的预判() {
+  void 冷静期内出安全事件_复判触发R6转人工_详情里有和复判不同的预判() {
     long[] c = customer("1000");
     WithdrawalRow w = submit(c, "100");
     assertThat(checks(w.id)).containsExactly("PRECHECK AUTO_APPROVED");
     time().advance(Duration.ofHours(1));
-    accounts.freeze(c[0]);
-    accounts.unfreeze(c[0]);
+    jdbc.update("INSERT INTO account_security_event (user_id, type, created_at) VALUES (?, 'UNFREEZE', ?)", c[0], LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));
     time().advance(Duration.ofHours(1).plusSeconds(1));
     withdraws.advance();
     assertThat(status(w.id)).isEqualTo("REVIEWING");
@@ -265,6 +290,21 @@ class AutoApproveFlowTest {
     assertThat(d.precheck().failed()).isEmpty();
     withdraws.reject(w.id, 9L, "核对后驳回");
     assertThat(row(w.id).get("review_mode")).as("驳回也记 MANUAL").isEqualTo("MANUAL");
+  }
+
+  @Test
+  void 冷静期内账户冻结_在途提现取消退回_解冻后不恢复_不做复判() {
+    long[] c = customer("1000");
+    WithdrawalRow w = submit(c, "100");
+    time().advance(Duration.ofHours(1));
+    accounts.freeze(c[0]);
+    assertThat(status(w.id)).isEqualTo("CANCELLED");
+    accounts.unfreeze(c[0]);
+    time().advance(Duration.ofHours(1).plusSeconds(1));
+    withdraws.advance();
+    assertThat(status(w.id)).isEqualTo("CANCELLED");
+    assertThat(checks(w.id)).containsExactly("PRECHECK AUTO_APPROVED");
+    assertThat(events(w.id)).containsExactly("-→COOLING user:" + c[0], "COOLING→CANCELLED system");
   }
 
   @Test

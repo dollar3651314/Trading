@@ -39,4 +39,16 @@ public class AuthAccess {
   public Optional<SecurityEvent> lastSecurityEventSince(long userId, LocalDateTime since) {
     return auth.lastSecurityEventSince(userId, since);
   }
+
+  public java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since) {
+    return auth.securityEventsSince(userId, since);
+  }
+
+  /**
+   * 记一条安全事件，并作废这个账户的<b>全部</b>网页会话（包括从机器人一键登录的 BOT 会话；第 2 批备忘）。
+   * KYC 等 account 模块其他包用（第 4 批：TG 客户第一次提交 KYC）
+   */
+  public void securityEvent(long userId, String type) {
+    auth.securityEventAndLogout(userId, type);
+  }
 }

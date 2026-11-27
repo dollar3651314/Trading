@@ -528,7 +528,20 @@
       "awaitingRelease": "Awaiting payout review",
       "paying": "Paying out"
     },
-    "doneTitle": "Withdrawal submitted (no. {{id}})"
+    "doneTitle": "Withdrawal submitted (no. {{id}})",
+    "tg": {
+      "title": "Withdrawal rules for Telegram accounts",
+      "quotaEmail": "Up to {{limit}} USDT per day (web and bot combined).",
+      "quotaNoEmail": "Up to {{limit}} USDT per day (web and bot combined). Link an email to raise it to 2,000 USDT.",
+      "manual": "Every withdrawal is reviewed by a person; the first one is also verified manually.",
+      "disabled": "Withdrawals for Telegram accounts are not open yet. Please come back later.",
+      "frozen": "Withdrawals on this account are frozen and need a manual check to unfreeze. Please contact support.",
+      "pinNotSet": "Set a withdrawal PIN before adding addresses or withdrawing.",
+      "setPin": "Set it now",
+      "pinLocked": "Too many wrong PIN entries; locked until {{time}}.",
+      "forgotPin": "Forgot it?",
+      "hold": "For security, you can withdraw after {{time}} (new accounts and PIN changes have a waiting period)."
+    }
   },
   "whitelist": {
     "title": "Withdrawal whitelist",
@@ -551,7 +564,8 @@
     "removeBody": "Delete \"{{label}}\"? You will need to add it again and wait 24 hours.",
     "removed": "Address deleted",
     "empty": "No whitelisted addresses",
-    "emptyHint": "Withdrawals can only go to whitelisted addresses"
+    "emptyHint": "Withdrawals can only go to whitelisted addresses",
+    "ruleTg": "For Telegram accounts a new address takes effect after at least 24 hours. You will be notified when it is added, 1 hour before it takes effect, and when it does. If you did not add it, freeze withdrawals right away and contact support."
   },
   "me": {
     "account": "Account",
@@ -572,7 +586,8 @@
     "upDown": "Up / down colors",
     "upDownGreen": "Green up, red down",
     "upDownRed": "Red up, green down",
-    "onboarding": "Getting started"
+    "onboarding": "Getting started",
+    "withdrawPin": "Withdrawal PIN"
   },
   "kyc": {
     "intro": "Verification is only required before withdrawing.",
@@ -709,7 +724,16 @@
     "networkClosed": "Deposits on this network are paused",
     "symbolNotTradable": "This symbol is not open for trading yet",
     "telegramOnly": "Only available from the Telegram bot for now",
-    "tgWithdrawDisabled": "Withdrawals for Telegram accounts are not open yet"
+    "tgWithdrawDisabled": "Withdrawals for Telegram accounts are not open yet",
+    "pinWrong": "Wrong withdrawal PIN. 5 wrong tries in a row lock it for 24 hours",
+    "pinLocked": "Too many wrong tries. The withdrawal PIN is locked for 24 hours",
+    "pinNotSet": "Set a withdrawal PIN first (Me → Withdrawal PIN)",
+    "pinKeypadExpired": "The keypad expired. Please enter again",
+    "pinAlreadySet": "A withdrawal PIN is already set",
+    "withdrawFrozen": "Withdrawals are frozen. Contact support to verify your identity",
+    "withdrawHold": "For security, withdrawals are not available yet (24 hours after sign-up or a security change, 48 hours after resetting the PIN)",
+    "tgDailyLimit": "Over today's withdrawal limit",
+    "noEmail": "No email linked: a forgotten PIN needs manual recovery"
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",
@@ -764,7 +788,11 @@
     "docNumberInvalid": "Invalid document number",
     "addressInvalid": "Invalid address format",
     "closeLotsMax": "Cannot exceed the position lots",
-    "closeRemainMin": "The remaining lots would be below the minimum. Close all instead"
+    "closeRemainMin": "The remaining lots would be below the minimum. Close all instead",
+    "pinLength": "Enter 6 digits",
+    "pinMismatch": "The two PINs do not match",
+    "pinTooSimple": "Too simple: no 6 identical or consecutive digits (e.g. 111111, 123456)",
+    "withdrawTgDaily": "Over today's withdrawal quota (web and bot combined)"
   },
   "countries": {
     "CN": "Mainland China",
@@ -906,7 +934,37 @@
       "no_account": "You do not have an account yet. Send /start to the bot and tap \"Sign up\".",
       "frozen": "Your account is frozen. Please contact support.",
       "reauth": "There was a recent security change on your account. Go back to the bot, tap \"Re-authorize\", then open trading.",
-      "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again."
+      "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again.",
+      "security": "For security, all web sessions of this account have been signed out (you just set or changed your withdrawal PIN, submitted identity verification or made another security change), and withdrawals pause for a while. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\"."
     }
+  },
+  "pin": {
+    "title": "Withdrawal PIN",
+    "entered": "{{n}} of {{total}} digits entered",
+    "clear": "Clear",
+    "backspace": "Delete one digit",
+    "note": "Digit positions change every time. We will never ask you to type your withdrawal PIN.",
+    "old": "Current PIN",
+    "new": "Set a 6-digit withdrawal PIN",
+    "newPin": "New PIN",
+    "confirm": "Enter it again",
+    "rule": "After setting or changing it, all web sessions of this account are signed out and withdrawals pause for 24 hours.",
+    "ruleReset": "After resetting, all web sessions are signed out and withdrawals pause for 48 hours. Whitelist addresses are kept.",
+    "setIntro": "Telegram accounts need a withdrawal PIN to add whitelist addresses and withdraw. Choose 6 digits only you know.",
+    "emailCode": "Email code",
+    "sendCode": "Send code",
+    "codeSent": "Sent",
+    "forgotNoEmail": "No email linked: a forgotten PIN needs manual recovery (your details and a video check). This opens in a later release.",
+    "submit": {
+      "set": "Set PIN",
+      "change": "Change PIN",
+      "forgot": "Reset PIN"
+    },
+    "mode": {
+      "change": "Change",
+      "forgot": "Forgot"
+    },
+    "withdrawLabel": "Withdrawal PIN",
+    "whitelistLabel": "Withdrawal PIN (needed to add an address)"
   }
 }

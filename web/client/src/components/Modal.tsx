@@ -88,6 +88,8 @@ export function ConfirmDialog(props: {
   confirmText: string;
   tone?: 'primary' | 'buy' | 'sell' | 'danger';
   busy?: boolean;
+  /** 确认按钮暂不可点（例如提现密码还没输满 6 位） */
+  disabled?: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -104,7 +106,7 @@ export function ConfirmDialog(props: {
           <button type="button" className="btn btn-ghost" onClick={props.onClose} disabled={props.busy}>
             {t('common.cancel')}
           </button>
-          <button type="button" className={`btn btn-${props.tone ?? 'primary'}`} onClick={props.onConfirm} disabled={props.busy} data-autofocus>
+          <button type="button" className={`btn btn-${props.tone ?? 'primary'}`} onClick={props.onConfirm} disabled={props.busy || props.disabled} data-autofocus>
             {props.busy ? t('common.submitting') : props.confirmText}
           </button>
         </div>

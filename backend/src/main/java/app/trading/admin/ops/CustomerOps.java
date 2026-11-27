@@ -1,10 +1,13 @@
 package app.trading.admin.ops;
 
 import app.trading.account.api.CustomerAdminApi;
+import app.trading.admin.security.AdminAuthService;
 import app.trading.admin.security.AdminContext;
 import app.trading.admin.security.AdminNames;
 import app.trading.admin.security.Audit;
 import app.trading.common.config.ConfigKey;
+import app.trading.common.health.AlertProperties;
+import app.trading.notification.api.MailApi;
 import app.trading.common.config.SystemConfig;
 import app.trading.common.error.BizException;
 import app.trading.common.error.ValidationException;
@@ -50,7 +53,12 @@ class CustomerOps {
   record Detail(long id, String name, String email, String nationality, String status, String kycStatus, String balance, int openPositions,
       String registeredAt, String lastLoginAt, String lastLoginIp, String lastLoginIpAt, String firstName, String middleName, String lastName,
       String birthDate, String frozenReason, Kyc kyc, Account account, List<PositionView> positions, List<LedgerView> ledger,
-      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername) {}
+      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername, WithdrawSafety withdrawSafety) {}
+
+  /**
+   * 提现安全（TG 机器人第 4 批）：提现密码设了没有、锁到什么时候、提现有没有被冻结（来源：PIN_LOCKS 30 天锁 2 次 / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY）
+   */
+  record WithdrawSafety(boolean pinSet, String pinLockedUntil, boolean withdrawFrozen, String frozenSource, String frozenAt) {}
 
   /** 客户详情里最近的已平仓记录条数（部分平仓拆出来的记录标出原持仓编号） */
   static final int RECENT_CLOSED = 20;
@@ -72,9 +80,21 @@ class CustomerOps {
   private final AdjustMapper adjusts;
   private final Audit audit;
   private final Clock clock;
+  private final app.trading.account.api.WithdrawPinApi pins;
+  private final AdminAuthService auth;
+  private final MailApi mail;
+  private final AlertProperties alerts;
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CustomerOps.class);
+  /** 解除提现冻结时发给告警邮箱的邮件模板（迁移 V38） */
+  static final String UNFREEZE_MAIL = "OPS_WITHDRAW_UNFREEZE";
 
   CustomerOps(CustomerAdminApi customers, TradingAdminApi trading, LedgerApi ledger, FundsApi funds, SystemConfig config, AdminNames names,
-      AdjustMapper adjusts, Audit audit, Clock clock) {
+      AdjustMapper adjusts, Audit audit, Clock clock, app.trading.account.api.WithdrawPinApi pins, AdminAuthService auth, MailApi mail,
+      AlertProperties alerts) {
+    this.pins = pins;
+    this.auth = auth;
+    this.mail = mail;
+    this.alerts = alerts;
     this.customers = customers;
     this.trading = trading;
     this.ledger = ledger;
@@ -144,7 +164,42 @@ class CustomerOps {
     LocalDate birth = d.birthDate();
     return new Detail(c.id(), c.name(), c.email(), c.nationality(), apiStatus(c.status()), apiStatus(c.kycStatus()), Ops.money(m.balance()), positions.size(),
         Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()), d.lastLoginIp(), Ops.time(d.lastLoginIpAt()), d.firstName(), d.middleName(), d.lastName(),
-        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername());
+        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername(), safety(c.id()));
+  }
+
+  private WithdrawSafety safety(long userId) {
+    var s = pins.status(userId);
+    return new WithdrawSafety(s.set(), Ops.time(s.lockedUntil()), s.withdrawFrozen(), s.frozenSource() == null ? null : s.frozenSource().toLowerCase(),
+        Ops.time(s.frozenAt()));
+  }
+
+  /**
+   * 人工解冻提现（第 4 批：冻结提现只能人工解冻）。高危：先核对管理员自己的登录密码（不对 {@code CURRENT_PASSWORD_WRONG}），原因必填、写审计，
+   * 解除以后给告警邮箱（{@code FX_ALERT_EMAILS}）发邮件 {@value #UNFREEZE_MAIL}（收件人为空只记日志，写邮件任务失败不影响解除）。没冻结时报 NOT_FROZEN
+   */
+  @Transactional
+  void unfreezeWithdraw(AdminContext actor, long id, String reason, String password) {
+    String r = Audit.requireReason(reason);
+    auth.requirePassword(actor, password);
+    String[] was = new String[1];
+    audit.run("customer.withdraw_unfreeze", String.valueOf(id), true, r, () -> {
+      customers.customer(id).orElseThrow(() -> new BizException("NOT_FOUND", "客户不存在"));
+      was[0] = pins.unfreezeWithdraw(id);
+      if (was[0] == null) throw new BizException("NOT_FROZEN", "这个客户的提现没有被冻结");
+      return Audit.Change.of(null, Map.of("withdrawFrozen", was[0].toLowerCase()), Map.of("withdrawFrozen", "no"));
+    });
+    String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
+    Map<String, String> p = Map.of("customerId", String.valueOf(id), "source", was[0], "admin", who, "reason", r, "at",
+        now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString());
+    List<String> to = alerts.recipients();
+    if (to.isEmpty()) log.warn("没有配置告警邮箱（FX_ALERT_EMAILS），客户 {} 解除提现冻结只记了日志（操作人 {}）", id, who);
+    for (String email : to) {
+      try {
+        mail.send(email, UNFREEZE_MAIL, p);
+      } catch (RuntimeException e) {
+        log.error("解除提现冻结的告警邮件写入发送任务失败", e);
+      }
+    }
   }
 
   /**

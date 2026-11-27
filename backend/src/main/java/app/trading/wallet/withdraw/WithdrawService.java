@@ -2,6 +2,8 @@ package app.trading.wallet.withdraw;
 
 import app.trading.account.api.AccountApi;
 import app.trading.account.api.KycStatus;
+import app.trading.account.api.UserStatus;
+import app.trading.account.api.WithdrawPinApi;
 import app.trading.common.error.BizException;
 import app.trading.common.error.ValidationException;
 import app.trading.common.id.Snowflake;
@@ -20,6 +22,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -62,10 +65,15 @@ public class WithdrawService implements WithdrawAdminApi {
   private final Snowflake ids;
 
   private final TelegramWithdrawGate tgGate;
+  private final WithdrawPinApi pins;
+
+  /** 冻结时直接取消并退回的在途状态（第 4 批审查 🔴4a-1）；已审核待放款（APPROVED）不取消，只暂停交出去，见 {@link #blockInFlight} */
+  static final List<String> CANCEL_ON_FREEZE = List.of("COOLING", "REVIEWING", "DELAYED");
 
   WithdrawService(WithdrawMapper mapper, LedgerApi ledger, FundsApi funds, AccountApi account, UserEventsApi events, NotifyApi notify, WithdrawSenders senders,
-      WithdrawLimits limits, AutoApproveService auto, TransactionTemplate tx, Clock clock, Snowflake ids, TelegramWithdrawGate tgGate) {
+      WithdrawLimits limits, AutoApproveService auto, TransactionTemplate tx, Clock clock, Snowflake ids, TelegramWithdrawGate tgGate, WithdrawPinApi pins) {
     this.tgGate = tgGate;
+    this.pins = pins;
     this.mapper = mapper;
     this.ledger = ledger;
     this.funds = funds;
@@ -95,7 +103,18 @@ public class WithdrawService implements WithdrawAdminApi {
    * 提交提现（AC-17）。顺序：字段 → KYC → 白名单（存在、已生效）→ 最小、单笔 → 锁账户后查当日累计和可提金额 → 冻结。
    */
   WithdrawalRow submit(long userId, String whitelistId, String amountText) {
+    return submit(userId, whitelistId, amountText, null, "WEB");
+  }
+
+  /**
+   * TG 客户（第 4 批，{@link TelegramWithdrawGate}）：总开关 → 字段 → 提现密码 → KYC → 开户满 24 小时、安全事件禁提 → 白名单 → 锁账户后查 TG 每天额度。
+   * 记规则（TG：一律人工审核）、入口（WEB / BOT）、没邮箱的首笔标人工核实。
+   *
+   * @param source 提交入口：WEB 网页登录的会话 / BOT 从机器人进入的会话
+   */
+  WithdrawalRow submit(long userId, String whitelistId, String amountText, app.trading.account.api.WithdrawPinApi.PinInput pin, String source) {
     tgGate.check(userId); // TB-1：TG 客户提现默认关（第 4 批验收后打开）
+    boolean tg = tgGate.isTg(userId);
     ValidationException.Collector errs = new ValidationException.Collector();
     BigDecimal amount = null;
     String a = amountText == null ? "" : amountText.trim();
@@ -112,7 +131,11 @@ public class WithdrawService implements WithdrawAdminApi {
     if (wid == null) errs.add("whitelistId", "selectAddress");
     errs.throwIfAny();
 
+    // TG 规则：先核对提现密码（输错计数），再查其他条件
+    TelegramWithdrawGate.TgContext tgc = tg ? tgGate.context(userId) : null;
+    if (tg) tgGate.verifyPin(userId, pin);
     if (account.kycStatus(userId) != KycStatus.APPROVED) throw new BizException("KYC_REQUIRED", "提现前需要通过身份认证");
+    if (tg) tgGate.checkHold(userId, now());
     WhitelistRow w = mapper.whitelistById(userId, wid);
     if (w == null) throw new BizException("NOT_WHITELISTED", "只能提到白名单地址");
     if (w.activeAt.isAfter(now())) throw new BizException("WHITELIST_NOT_ACTIVE", "白名单地址添加满 24 小时后才能使用");
@@ -126,7 +149,13 @@ public class WithdrawService implements WithdrawAdminApi {
     WithdrawalRow r = tx.execute(st -> {
       ledger.lock(userId);
       // 当日累计必须严格小于上限（需求 4.4-4，和客户端一致）；锁住账户后再算，并发提交不会一起超过
-      if (usedToday(userId).add(amt).compareTo(props().dailyLimit()) >= 0) throw new BizException("DAILY_LIMIT_EXCEEDED", "超过当日提现累计上限");
+      BigDecimal used = usedToday(userId);
+      if (used.add(amt).compareTo(props().dailyLimit()) >= 0) throw new BizException("DAILY_LIMIT_EXCEEDED", "超过当日提现累计上限");
+      // TG 每天额度（网页和机器人合并：今天所有没撤销、没驳回、没失败的提现都算），和上面同一把锁里
+      if (tgc != null && used.add(amt).compareTo(tgc.dailyQuota()) > 0) {
+        throw new BizException("TG_DAILY_LIMIT", "超过今天的提现额度（每天 " + tgc.dailyQuota().stripTrailingZeros().toPlainString() + " USDT，还能提 "
+            + tgc.dailyQuota().subtract(used).max(BigDecimal.ZERO).stripTrailingZeros().toPlainString() + "）");
+      }
       if (amt.compareTo(funds.withdrawable(userId)) > 0) throw new BizException("INSUFFICIENT_BALANCE", "可提金额不足");
       WithdrawalRow n = new WithdrawalRow();
       n.publicNo = ids.next();
@@ -136,6 +165,10 @@ public class WithdrawService implements WithdrawAdminApi {
       n.amount = amt;
       n.fee = fee;
       n.status = "COOLING";
+      n.ruleType = tg ? "TG" : "WEB";
+      n.source = "BOT".equals(source) ? "BOT" : "WEB";
+      // 没邮箱的 TG 客户：首笔（还没有完成过的提现）一律人工核实，没有豁免（03 页第 0 节、08 页第 0 节）
+      n.firstCheck = tgc != null && !tgc.hasEmail() && mapper.completedCount(userId) == 0;
       n.createdAt = now();
       n.coolingEndsAt = n.createdAt.plus(props().cooling());
       mapper.insertWithdrawal(n);
@@ -168,8 +201,21 @@ public class WithdrawService implements WithdrawAdminApi {
 
   @Override
   public void approve(long withdrawalId, long adminId) {
+    approve(withdrawalId, adminId, false);
+  }
+
+  /** 首笔人工核实（第 4 批）：标了 first_check 的，审核员要确认"已核实"（firstChecked = true）才能通过 */
+  @Override
+  public void approve(long withdrawalId, long adminId, boolean firstChecked) {
     WithdrawalRow r = tx.execute(st -> {
       WithdrawalRow w = reviewing(withdrawalId);
+      // 第 4 批审查 🔴4a-1：账户冻结或提现冻结时不能通过（在途的也算，08 页第 2 节）
+      String frozen = frozenReason(w.userId);
+      if (frozen != null) throw new BizException("WITHDRAW_FROZEN", "客户已冻结提现，请先核对（" + frozen + "）");
+      if (w.firstCheck) {
+        if (!firstChecked) throw new BizException("FIRST_CHECK_REQUIRED", "这是没邮箱客户的首笔提现：要先人工核实（视频核对本人、来源证明）再通过");
+        mapper.markFirstChecked(w.id, adminId);
+      }
       boolean large = w.amount.compareTo(props().largeAmount()) >= 0;
       LocalDateTime delay = large ? now().plus(props().largeDelay()) : null;
       mapper.setReview(w.id, adminId, now(), null, delay);
@@ -183,8 +229,8 @@ public class WithdrawService implements WithdrawAdminApi {
 
   @Override
   public void reject(long withdrawalId, long adminId, String reason) {
-    if (reason == null || reason.isBlank()) throw new ValidationException(java.util.List.of(new ValidationException.Field("reason", "required")));
-    if (reason.length() > 500) throw new ValidationException(java.util.List.of(new ValidationException.Field("reason", "tooLong")));
+    if (reason == null || reason.isBlank()) throw new ValidationException(List.of(new ValidationException.Field("reason", "required")));
+    if (reason.length() > 500) throw new ValidationException(List.of(new ValidationException.Field("reason", "tooLong")));
     WithdrawalRow r = tx.execute(st -> {
       WithdrawalRow w = reviewing(withdrawalId);
       mapper.setReview(w.id, adminId, now(), reason.trim(), null);
@@ -198,7 +244,7 @@ public class WithdrawService implements WithdrawAdminApi {
 
   @Override
   public void emergencyCancel(long withdrawalId, long adminId, String reason) {
-    if (reason == null || reason.isBlank()) throw new ValidationException(java.util.List.of(new ValidationException.Field("reason", "required")));
+    if (reason == null || reason.isBlank()) throw new ValidationException(List.of(new ValidationException.Field("reason", "required")));
     WithdrawalRow r = tx.execute(st -> {
       WithdrawalRow w = mapper.lock(withdrawalId);
       if (w == null) throw new BizException("NOT_FOUND", "提现不存在");
@@ -223,7 +269,7 @@ public class WithdrawService implements WithdrawAdminApi {
   void advance() {
     LocalDateTime now = now();
     for (Long id : mapper.due("COOLING", "cooling_ends_at", now)) coolingEnded(id);
-    for (Long id : mapper.due("DELAYED", "delay_ends_at", now)) systemMove(id, "DELAYED", "APPROVED", "延迟期结束，进入上链");
+    for (Long id : mapper.due("DELAYED", "delay_ends_at", now)) delayEnded(id);
     for (Long id : mapper.withStatus("APPROVED")) send(id);
   }
 
@@ -241,8 +287,14 @@ public class WithdrawService implements WithdrawAdminApi {
         WithdrawalRow w = mapper.lock(id);
         if (w == null || !"COOLING".equals(w.status) || now().isBefore(w.coolingEndsAt)) return null;
         AutoApproveService.Decision d = auto.decideFinal(w, s);
-        move(w, "REVIEWING", "system", "冷静期结束");
-        if (d.approved()) autoApprove(w, d);
+        // 第 4 批审查 🔴4a-1：冻结了就取消退回，不进审核。要在复判之后查：复判在全局锁里做第一条一致性读（R2 / R3 现算），
+        // 先读冻结会提前建立快照，看不到前一笔刚提交的自动通过（并发测试会超 R3）
+        String frozen = frozenReason(w.userId);
+        if (frozen != null) return cancelFrozen(w, frozen);
+        // TG 规则一律人工审核（TB-20、TB-22）：判定照记（后台参考），不自动通过
+        boolean tgRule = "TG".equals(w.ruleType);
+        move(w, "REVIEWING", "system", tgRule ? "冷静期结束（TG 规则，一律人工审核）" : "冷静期结束");
+        if (d.approved() && !tgRule) autoApprove(w, d);
         return w;
       });
     } catch (RuntimeException e) {
@@ -286,11 +338,14 @@ public class WithdrawService implements WithdrawAdminApi {
     }
   }
 
-  private void systemMove(long id, String from, String to, String note) {
+  /** 大额延迟期满 → 待上链；冻结了就取消退回（第 4 批审查 🔴4a-1） */
+  private void delayEnded(long id) {
     WithdrawalRow r = tx.execute(st -> {
       WithdrawalRow w = mapper.lock(id);
-      if (w == null || !from.equals(w.status)) return null;
-      move(w, to, "system", note);
+      if (w == null || !"DELAYED".equals(w.status)) return null;
+      String frozen = frozenReason(w.userId);
+      if (frozen != null) return cancelFrozen(w, frozen);
+      move(w, "APPROVED", "system", "延迟期结束，进入上链");
       return w;
     });
     if (r != null) notify(r);
@@ -300,6 +355,13 @@ public class WithdrawService implements WithdrawAdminApi {
   void send(long id) {
     WithdrawalRow w = mapper.byId(id);
     if (w == null || !"APPROVED".equals(w.status)) return;
+    // 第 4 批审查 🔴4a-1：冻结期间不交钱包提供方（留在已审核待放款，解除冻结后继续）。不在这里取消退回：
+    // 另一个线程可能正在交出去（审核通过的线程和定时任务都会调 send），这时退回会重复出金
+    String frozen = frozenReason(w.userId);
+    if (frozen != null) {
+      log.warn("提现 {} 的客户{}，暂停交钱包提供方", id, frozen);
+      return;
+    }
     var sender = senders.get(Chain.valueOf(w.network));
     if (sender.isEmpty()) {
       log.debug("{} 没有广播器，提现 {} 留在待上链", w.network, id);
@@ -459,6 +521,45 @@ public class WithdrawService implements WithdrawAdminApi {
     };
   }
 
+  /** 账户冻结或提现冻结时的原因（"账户已冻结" / "提现已冻结"）；都没有时为空。冻结只能人工解除 */
+  String frozenReason(long userId) {
+    if (account.status(userId) == UserStatus.FROZEN) return "账户已冻结";
+    if (pins.status(userId).withdrawFrozen()) return "提现已冻结";
+    return null;
+  }
+
+  /** 在调用方的事务里（已锁住提现单）：冻结 → 取消并退回余额，通知客户（CANCELLED 会通知） */
+  private WithdrawalRow cancelFrozen(WithdrawalRow w, String reason) {
+    move(w, "CANCELLED", "system", "冻结，自动取消并退回：" + reason);
+    refund(w);
+    return w;
+  }
+
+  /**
+   * 冻结时处理这个客户在途的提现（第 4 批审查 🔴4a-1，由 {@link WithdrawFreezeHandler} 在冻结的事务提交以后调用）：
+   * 冷静期、待审核、大额延迟中的取消并退回余额（每笔一个事务，锁住再看状态）；已审核待放款的不取消——可能正有线程在交给钱包提供方，
+   * 退回会重复出金——留在原状态，{@link #send} 看到冻结就不交出去，后台详情标"提现已冻结"；放款中（已交提供方）的拦不住，后台同样标出来，
+   * 提供方那边还有第二道人工放款审核。返回取消的笔数。
+   */
+  public int blockInFlight(long userId, String reason) {
+    // 在冻结事务的 afterCommit 里被调用：原事务的资源还绑着，必须开新事务（REQUIRES_NEW），推送也直接推（不能再登记 afterCommit）
+    TransactionTemplate fresh = new TransactionTemplate(tx.getTransactionManager());
+    fresh.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    int n = 0;
+    for (Long id : mapper.idsOfUserIn(userId, CANCEL_ON_FREEZE)) {
+      WithdrawalRow r = fresh.execute(st -> {
+        WithdrawalRow w = mapper.lock(id);
+        if (w == null || !CANCEL_ON_FREEZE.contains(w.status)) return null;
+        return cancelFrozen(w, reason);
+      });
+      if (r != null) {
+        push(r);
+        n++;
+      }
+    }
+    return n;
+  }
+
   /** 退回：提现冻结 → 余额 */
   private void refund(WithdrawalRow w) {
     ledger.apply(new LedgerCommand(w.userId, Bucket.WITHDRAW_FROZEN, w.amount.negate(), LedgerEntryType.WITHDRAW_UNFREEZE, BIZ_WITHDRAW,
@@ -478,10 +579,7 @@ public class WithdrawService implements WithdrawAdminApi {
     e.put("status", apiStatus(w.status));
     e.put("amount", w.amount.stripTrailingZeros().toPlainString());
     long userId = w.userId;
-    Runnable push = () -> {
-      events.send(userId, e);
-      events.send(userId, Map.of("type", "account"));
-    };
+    Runnable push = () -> push(userId, e);
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
         @Override
@@ -492,6 +590,20 @@ public class WithdrawService implements WithdrawAdminApi {
     } else {
       push.run();
     }
+  }
+
+  /** 马上推 withdraw 和 account 事件（见 {@link #notify}） */
+  private void push(WithdrawalRow w) {
+    Map<String, Object> e = new LinkedHashMap<>();
+    e.put("type", "withdraw");
+    e.put("status", apiStatus(w.status));
+    e.put("amount", w.amount.stripTrailingZeros().toPlainString());
+    push(w.userId, e);
+  }
+
+  private void push(long userId, Map<String, Object> e) {
+    events.send(userId, e);
+    events.send(userId, Map.of("type", "account"));
   }
 
   /** 数据库状态 → 客户端状态名（WithdrawStatus） */

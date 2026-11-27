@@ -758,6 +758,9 @@ export const systemConfigs: SystemConfig[] = [
   { key: 'telegram.signup.allowIds', value: '', unit: 'text', group: 'telegram', updatedAt: null },
   // TG 客户提现（迁移 V37，TB-1 默认关）：第 4 批验收后由 Amos 打开
   { key: 'telegram.withdraw.enabled', value: 'false', unit: 'bool', group: 'telegram', updatedAt: null },
+  // TG 每天提现额度（迁移 V38，第 4 批）：没邮箱 500 / 有邮箱 2,000，网页和机器人合并；上限 2,000
+  { key: 'telegram.withdraw.dailyLimit', value: '500', unit: 'usdt', group: 'telegram', updatedAt: null },
+  { key: 'telegram.withdraw.dailyLimitEmail', value: '2000', unit: 'usdt', group: 'telegram', updatedAt: null },
 ];
 
 /** 热钱包余额（原型数据；地址是公开的测试地址，不是密钥）。下限在 systemConfigs 里 */

@@ -29,6 +29,7 @@
   <!-- 第一次往这个地址提现：之前没有同一客户、同一网络、同一地址（以太坊体系不分大小写）的已完成或上链中的提现 -->
   <sql id="withdrawalSelect">
     SELECT w.id, w.public_no, w.user_id, w.amount, w.fee, w.network, w.address, w.status, w.delay_ends_at, w.created_at, w.reviewer_id, w.reject_reason, w.tx_hash,
+      w.rule_type, w.source, w.first_check, w.first_checked_by,
       (SELECT MAX(e.created_at) FROM wallet_withdraw_event e WHERE e.withdrawal_id = w.id) AS status_at,
       NOT EXISTS (SELECT 1 FROM wallet_withdrawal p WHERE p.user_id = w.user_id AND p.network = w.network AND p.id &lt; w.id
         AND p.status IN ('BROADCASTING', 'COMPLETED')

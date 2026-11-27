@@ -26,7 +26,8 @@ class WithdrawController {
 
   record WhitelistView(String id, String network, String address, String label, String createdAt, String activeAt) {}
 
-  record AddWhitelist(String network, String address, String label) {}
+  /** pin：TG 客户要输提现密码（随机键盘，第 4 批） */
+  record AddWhitelist(String network, String address, String label, app.trading.account.api.WithdrawPinApi.PinInput pin) {}
 
   /**
    * 一笔提现。第 1 批加：payoutNo 钱包提供方付款编号；payoutStatus 两道审的第二道走到哪了——awaitingRelease 等待放款审核 / paying 放款中
@@ -37,7 +38,7 @@ class WithdrawController {
 
   record Step(String status, String at) {}
 
-  record SubmitWithdraw(String whitelistId, String amount) {}
+  record SubmitWithdraw(String whitelistId, String amount, app.trading.account.api.WithdrawPinApi.PinInput pin) {}
 
   record Page<T>(List<T> items, long total, int page, int pageSize) {}
 
@@ -48,9 +49,16 @@ class WithdrawController {
   private final AccountApi account;
   private final FundsApi funds;
   private final PaymentApi payments;
+  private final TelegramWithdrawGate tgGate;
+  private final app.trading.account.api.WithdrawPinApi pins;
+  private final app.trading.common.config.SystemConfig config;
 
   WithdrawController(WhitelistService whitelist, WithdrawService withdraws, WithdrawMapper mapper, WithdrawLimits limits, AccountApi account,
-      FundsApi funds, PaymentApi payments) {
+      FundsApi funds, PaymentApi payments, TelegramWithdrawGate tgGate, app.trading.account.api.WithdrawPinApi pins,
+      app.trading.common.config.SystemConfig config) {
+    this.tgGate = tgGate;
+    this.pins = pins;
+    this.config = config;
     this.payments = payments;
     this.whitelist = whitelist;
     this.withdraws = withdraws;
@@ -58,6 +66,10 @@ class WithdrawController {
     this.limits = limits;
     this.account = account;
     this.funds = funds;
+  }
+
+  private boolean isOpen() {
+    return "true".equalsIgnoreCase(config.text(app.trading.common.config.ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "false").strip());
   }
 
   @GetMapping("/api/wallet/whitelist")
@@ -68,7 +80,7 @@ class WithdrawController {
   @UserWriteLimited
   @PostMapping("/api/wallet/whitelist")
   WhitelistView addWhitelist(@RequestBody AddWhitelist req) {
-    return view(whitelist.add(CurrentUser.id(), req.network(), req.address(), req.label()));
+    return view(whitelist.add(CurrentUser.id(), req.network(), req.address(), req.label(), req.pin()));
   }
 
   @UserWriteLimited
@@ -95,13 +107,28 @@ class WithdrawController {
     for (Chain c : Chain.values()) fees.put(c.name(), money(props().fee(c)));
     m.put("fees", fees);
     m.put("maxWhitelist", props().maxWhitelist());
+    // TG 客户（第 4 批）：按 TG 规则——每天额度（网页和机器人合并）、要提现密码、什么时候以后才能提
+    if (tgGate.isTg(uid)) {
+      var c = tgGate.context(uid);
+      var pin = pins.status(uid);
+      LocalDateTime hold = tgGate.holdUntil(uid, withdraws.now());
+      Map<String, Object> tg = new LinkedHashMap<>();
+      tg.put("dailyLimit", money(c.dailyQuota()));
+      tg.put("hasEmail", c.hasEmail());
+      tg.put("pinSet", pin.set());
+      tg.put("pinLockedUntil", pin.lockedUntil() == null ? null : pin.lockedUntil().toInstant(ZoneOffset.UTC).toString());
+      tg.put("withdrawFrozen", pin.withdrawFrozen());
+      tg.put("holdUntil", hold == null ? null : hold.toInstant(ZoneOffset.UTC).toString());
+      tg.put("enabled", isOpen());
+      m.put("tg", tg);
+    }
     return m;
   }
 
   @UserWriteLimited
   @PostMapping("/api/wallet/withdrawals")
   WithdrawalView submit(@RequestBody SubmitWithdraw req) {
-    return views(List.of(withdraws.submit(CurrentUser.id(), req.whitelistId(), req.amount()))).getFirst();
+    return views(List.of(withdraws.submit(CurrentUser.id(), req.whitelistId(), req.amount(), req.pin(), CurrentUser.botSession() ? "BOT" : "WEB"))).getFirst();
   }
 
   @GetMapping("/api/wallet/withdrawals")

@@ -33,7 +33,7 @@ class WalletAdmin implements WalletAdminApi {
 
   private static Withdrawal withdrawal(WalletAdminMapper.WithdrawalRow r) {
     return new Withdrawal(r.id, r.publicNo, r.userId, r.amount, r.fee, r.network, r.address, r.firstUse, r.whitelistAddedAt, r.status, r.delayEndsAt, r.createdAt,
-        r.reviewerId, r.rejectReason, r.txHash, r.statusAt);
+        r.reviewerId, r.rejectReason, r.txHash, r.statusAt, r.ruleType, r.source, r.firstCheck, r.firstCheckedBy);
   }
 
   /** 客户筛选结果为空、也没有按编号找时直接返回空页（避免 IN () 的 SQL） */

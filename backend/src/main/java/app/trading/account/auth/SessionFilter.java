@@ -58,7 +58,8 @@ class SessionFilter extends OncePerRequestFilter {
 
   @Override
   protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws ServletException, IOException {
-    Long userId = sessions.resolve(token(req, props.cookieName()));
+    Rows.SessionRow s = sessions.resolveSession(token(req, props.cookieName()));
+    Long userId = s == null ? null : s.userId();
     if (userId == null) {
       res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       res.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -67,6 +68,7 @@ class SessionFilter extends OncePerRequestFilter {
       return;
     }
     CurrentUser.set(req, userId);
+    CurrentUser.setBotSession(req, "BOT".equals(s.kind()));
     chain.doFilter(req, res);
   }
 }

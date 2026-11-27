@@ -14,6 +14,13 @@ class WithdrawalRow {
   BigDecimal amount;
   BigDecimal fee;
   String status;
+  /** WEB 原规则 / TG TG 规则（一律人工审核，第 4 批） */
+  String ruleType = "WEB";
+  /** 提交入口：WEB 网页登录的会话 / BOT 从机器人进入的会话 */
+  String source = "WEB";
+  /** 没邮箱的 TG 客户的首笔：审核前要人工核实（08 页第 0 节） */
+  boolean firstCheck;
+  Long firstCheckedBy;
   LocalDateTime coolingEndsAt;
   LocalDateTime delayEndsAt;
   String txHash;

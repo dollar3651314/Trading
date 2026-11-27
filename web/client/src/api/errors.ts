@@ -47,6 +47,15 @@ export type ApiErrorReason =
   | 'fileTooLarge'
   | 'telegramOnly'
   | 'tgWithdrawDisabled'
+  | 'pinWrong'
+  | 'pinLocked'
+  | 'pinNotSet'
+  | 'pinKeypadExpired'
+  | 'pinAlreadySet'
+  | 'withdrawFrozen'
+  | 'withdrawHold'
+  | 'tgDailyLimit'
+  | 'noEmail'
   | OrderRejectReason;
 
 export class ApiError extends Error {
@@ -98,6 +107,16 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   TELEGRAM_ONLY: 'telegramOnly',
   // TB-1：Telegram 账户提现默认关（第 4 批验收后打开）
   TG_WITHDRAW_DISABLED: 'tgWithdrawDisabled',
+  // 提现密码和 TG 提现规则（第 4 批）
+  PIN_WRONG: 'pinWrong',
+  PIN_LOCKED: 'pinLocked',
+  PIN_NOT_SET: 'pinNotSet',
+  PIN_KEYPAD_EXPIRED: 'pinKeypadExpired',
+  PIN_ALREADY_SET: 'pinAlreadySet',
+  WITHDRAW_FROZEN: 'withdrawFrozen',
+  WITHDRAW_HOLD: 'withdrawHold',
+  TG_DAILY_LIMIT: 'tgDailyLimit',
+  NO_EMAIL: 'noEmail',
   USER_FROZEN: 'accountFrozen',
   FORBIDDEN: 'forbidden',
   LOGIN_LOCKED: 'accountLocked',
@@ -189,6 +208,10 @@ export const FIELD_CODES: Record<string, string> = {
   closeLotsMax: 'validation.closeLotsMax',
   closeRemainMin: 'validation.closeRemainMin',
   leverageInteger: 'validation.leverageInteger',
+  // 提现密码（第 4 批）
+  pinLength: 'validation.pinLength',
+  pinMismatch: 'validation.pinMismatch',
+  pinTooSimple: 'validation.pinTooSimple',
   priceDigits: 'validation.priceDigits',
   tpBuy: 'validation.tpBuy',
   tpSell: 'validation.tpSell',

@@ -1,14 +1,16 @@
-/** 提现白名单：最多 10 个，新地址 24 小时后生效，可添加 / 删除。 */
+/** 提现白名单：最多 10 个，新地址 24 小时后生效，可添加 / 删除。TG 客户（第 4 批）加地址要输提现密码（随机键盘），加了会发通知、生效前 1 小时和生效时再发。 */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { errorKey } from '../../api/errors';
-import { addWhitelist, listWhitelist, removeWhitelist } from '../../api/wallet';
-import type { Network, WhitelistAddress } from '../../api/types';
+import { addWhitelist, getWithdrawInfo, listWhitelist, removeWhitelist } from '../../api/wallet';
+import type { Network, PinInput, WhitelistAddress, WithdrawTgInfo } from '../../api/types';
 import { useToast } from '../../app/contexts';
 import { AsyncView, EmptyState } from '../../components/AsyncView';
 import { FieldErrors, Segmented, TextField } from '../../components/Form';
 import { Icon } from '../../components/Icon';
 import { PageHeader } from '../../components/Layout';
+import { PinPad } from '../../components/PinPad';
 import { ConfirmDialog, Modal } from '../../components/Modal';
 import { useAsync } from '../../hooks/useAsync';
 import { useNow } from '../../hooks/useCountdown';
@@ -17,7 +19,7 @@ import { hasErrors, validateWhitelist } from '../../lib/validators';
 
 const MAX = 10;
 
-function AddDialog({ existing, onClose, onAdded }: { existing: WhitelistAddress[]; onClose: () => void; onAdded: () => void }) {
+function AddDialog({ existing, tg, onClose, onAdded }: { existing: WhitelistAddress[]; tg?: WithdrawTgInfo; onClose: () => void; onAdded: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
   const [network, setNetwork] = useState<Network>('TRC20');
@@ -26,20 +28,24 @@ function AddDialog({ existing, onClose, onAdded }: { existing: WhitelistAddress[
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pin, setPin] = useState<PinInput | null>(null);
+  const [pinRound, setPinRound] = useState(0);
   const errs = validateWhitelist({ network, address, label }, existing, MAX);
   const shown = submitted ? errs : {};
   const submit = async () => {
     setSubmitted(true);
     setErr(null);
-    if (hasErrors(errs)) return;
+    if (hasErrors(errs) || (tg && !pin)) return;
     setBusy(true);
     try {
-      await addWhitelist({ network, address, label });
+      await addWhitelist({ network, address, label, ...(tg && pin ? { pin } : {}) });
       toast.show({ tone: 'success', title: t('whitelist.added'), body: t('whitelist.addedBody') });
       onAdded();
       onClose();
     } catch (e) {
       setErr(t(errorKey(e)));
+      // 键盘用过一次就失效：换新的、清空重输
+      if (tg) setPinRound((r) => r + 1);
     } finally {
       setBusy(false);
     }
@@ -51,7 +57,7 @@ function AddDialog({ existing, onClose, onAdded }: { existing: WhitelistAddress[
       onClose={onClose}
       size="sm"
       footer={
-        <button type="button" className="btn btn-primary btn-block" onClick={submit} disabled={busy}>
+        <button type="button" className="btn btn-primary btn-block" onClick={submit} disabled={busy || (!!tg && !pin)}>
           {busy ? t('common.submitting') : t('whitelist.addConfirm')}
         </button>
       }
@@ -65,7 +71,8 @@ function AddDialog({ existing, onClose, onAdded }: { existing: WhitelistAddress[
       <TextField label={t('whitelist.address')} value={address} onChange={setAddress} mono errors={shown.address} placeholder={network === 'TRC20' ? 'T…' : '0x…'} autoComplete="off" spellCheck={false} />
       <TextField label={t('whitelist.label')} value={label} onChange={setLabel} errors={shown.label} maxLength={40} hint={t('whitelist.labelHint')} />
       <FieldErrors id="wl-form-err" errors={shown.form} />
-      <div className="notice warn">{t('whitelist.rule')}</div>
+      {tg && <PinPad id="wl-pin" label={t('pin.whitelistLabel')} onChange={setPin} resetKey={pinRound} />}
+      <div className="notice warn">{t(tg ? 'whitelist.ruleTg' : 'whitelist.rule')}</div>
       {err && (
         <div className="notice error" role="alert">
           {err}
@@ -80,6 +87,10 @@ export default function Whitelist() {
   const toast = useToast();
   const now = useNow();
   const s = useAsync(listWhitelist, 'whitelist');
+  // TG 客户（第 4 批）要输提现密码、总开关关着时不能加：从 withdraw-info 里取 tg 那一段
+  const info = useAsync(getWithdrawInfo, 'wd-info');
+  const tg = info.data?.tg;
+  const tgNoAdd = !!tg && (!tg.enabled || !tg.pinSet || tg.withdrawFrozen);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<WhitelistAddress | null>(null);
   const [busy, setBusy] = useState(false);
@@ -104,12 +115,19 @@ export default function Whitelist() {
       <section className="card">
         <div className="card-head">
           <h2>{t('whitelist.count', { n: count, max: MAX })}</h2>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => setAdding(true)} disabled={!s.data || count >= MAX}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setAdding(true)} disabled={!s.data || !info.data || count >= MAX || tgNoAdd}>
             <Icon name="plus" size={14} strokeWidth={2.4} />
             {t('whitelist.add')}
           </button>
         </div>
         {count >= MAX && <div className="notice warn">{t('validation.whitelistFull')}</div>}
+        {tg && !tg.enabled && <div className="notice warn">{t('withdraw.tg.disabled')}</div>}
+        {tg && tg.enabled && tg.withdrawFrozen && <div className="notice error">{t('withdraw.tg.frozen')}</div>}
+        {tg && tg.enabled && !tg.withdrawFrozen && !tg.pinSet && (
+          <div className="notice warn">
+            {t('withdraw.tg.pinNotSet')} <Link to="/me/withdraw-pin">{t('withdraw.tg.setPin')}</Link>
+          </div>
+        )}
         <AsyncView state={s} isEmpty={(d) => d.length === 0} empty={<EmptyState title={t('whitelist.empty')} hint={t('whitelist.emptyHint')} />}>
           {(list) => (
             <ul className="wl-list">
@@ -136,7 +154,7 @@ export default function Whitelist() {
           )}
         </AsyncView>
       </section>
-      {adding && s.data && <AddDialog existing={s.data} onClose={() => setAdding(false)} onAdded={s.reload} />}
+      {adding && s.data && <AddDialog existing={s.data} tg={tg} onClose={() => setAdding(false)} onAdded={s.reload} />}
       <ConfirmDialog open={!!removing} title={t('whitelist.removeTitle')} confirmText={t('common.delete')} tone="danger" busy={busy} onConfirm={doRemove} onClose={() => setRemoving(null)}>
         <p>{t('whitelist.removeBody', { label: removing?.label ?? '' })}</p>
         <p className="num small break">{removing?.address}</p>

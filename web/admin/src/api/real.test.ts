@@ -162,6 +162,9 @@ describe('资金、通知', () => {
     await real.approveWithdrawal('55');
     await real.rejectWithdrawal('55', '地址可疑');
     await real.emergencyCancelWithdrawal('56', '客户来电称被盗');
+    // 第 4 批：首笔核实单通过时带 firstChecked: true
+    await real.approveWithdrawal('55', true);
+    expect(calls[4].body).toEqual({ firstChecked: true });
     expect(calls[0].url).toBe('/api/admin/withdrawals?status=open&chain=TRC20&minAmount=100&maxAmount=5000&keyword=wang&page=1&pageSize=8');
     expect(calls[1].body).toBeUndefined();
     expect(calls[2].body).toEqual({ reason: '地址可疑' });
@@ -342,5 +345,13 @@ describe('S18b：品种与行情、交易参数', () => {
     await expect(real.getTradingParams()).resolves.toMatchObject({ liquidationLevel: null });
     await real.updateTradingParams({ marginCallLevel: '120', marginCallThrottleMinutes: 15 }, '提高追保线');
     expect(calls[1].body).toEqual({ marginCallLevel: '120', marginCallThrottleMinutes: 15, reason: '提高追保线' });
+  });
+});
+
+describe('第 4 批：解除提现冻结', () => {
+  it('POST /customers/{id}/withdraw-unfreeze 带原因和管理员自己的登录密码', async () => {
+    const { calls } = fakeFetch({ 'POST /api/admin/customers/7/withdraw-unfreeze': { body: { id: 7 } } });
+    await real.unfreezeCustomerWithdraw(7, '视频核实本人', 'my-own-password');
+    expect(calls[0].body).toEqual({ reason: '视频核实本人', password: 'my-own-password' });
   });
 });

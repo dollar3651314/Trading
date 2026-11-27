@@ -48,6 +48,11 @@ export const ERROR_KEYS: Record<string, string> = {
   ISSUE_NOT_OPEN: 'errors.issueNotOpen',
   WITHDRAW_NOT_REVIEWABLE: 'errors.withdrawNotReviewable',
   WITHDRAW_NOT_CANCELLABLE: 'errors.withdrawNotCancellable',
+  // TG 机器人第 4 批：首笔核实单没勾"已核实"、解除提现冻结时本来就没冻结
+  FIRST_CHECK_REQUIRED: 'errors.firstCheckRequired',
+  NOT_FROZEN: 'errors.notWithdrawFrozen',
+  // 第 4 批审查 🔴4a-1：客户账户冻结或提现冻结时不能通过出金
+  WITHDRAW_FROZEN: 'errors.customerWithdrawFrozen',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',
