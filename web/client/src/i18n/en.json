@@ -705,7 +705,8 @@
     "walletUnavailable": "Deposit address unavailable right now. Please try again later",
     "networkClosed": "Deposits on this network are paused",
     "symbolNotTradable": "This symbol is not open for trading yet",
-    "telegramOnly": "Only available from the Telegram bot for now"
+    "telegramOnly": "Only available from the Telegram bot for now",
+    "tgWithdrawDisabled": "Withdrawals for Telegram accounts are not open yet"
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",

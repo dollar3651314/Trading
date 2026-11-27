@@ -134,6 +134,10 @@ class SystemService {
     return audit.run("config.update", key, true, r, () -> {
       ConfigKey k = ConfigKey.of(key).filter(x -> x.configPage).orElseThrow(() -> new BizException("NOT_FOUND", "配置项不存在"));
       String v = k.normalize(value).orElseThrow(() -> new ValidationException(List.of(new ValidationException.Field("value", "invalid"))));
+      // 第 4 批（冻结、找回流程）上线前不能对所有人开放开户（TG 机器人第 2 批审查 🟡2；第 4 批合并时把 ConfigKey.SIGNUP_ALL_ALLOWED 改成 true）
+      if (k == ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS && "*".equals(v) && !ConfigKey.SIGNUP_ALL_ALLOWED) {
+        throw new BizException("SIGNUP_ALL_LOCKED", "冻结和找回流程上线前不能对所有人开放开户");
+      }
       if (k == ConfigKey.ADMIN_IP_WHITELIST && !v.isEmpty()) {
         IpRanges ranges = IpRanges.parse(v).orElseThrow(() -> new ValidationException(List.of(new ValidationException.Field("value", "invalid"))));
         if (!ranges.contains(actor.ip())) throw new BizException("WHITELIST_EXCLUDES_SELF", "白名单不包含你当前的 IP，保存后你会无法访问后台");

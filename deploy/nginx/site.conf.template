@@ -80,7 +80,9 @@ server {
 
   root /usr/share/nginx/client;
 
-  if ($request_uri ~ ";") { return 400; }
+  # 分号一律 400，一键登录落地页除外（TG 机器人第 2 批审查 🟡3）：Telegram 把身份参数加在它的网址后面，参数里可能有分号；
+  # 在这里 400 会用 server 的日志格式把完整网址（含身份参数）记进访问日志。落地页自己的 location 只记 $uri，后端照样校验
+  if ($request_uri ~ "^(?!/api/tg/login(\?|$)).*;") { return 400; }
   # 后台接口只在后台域名；端到端测试接口、应用管理端点一律不转发（正则：/api/admin 后面跟 / 或结尾都拦，大小写都算）
   location ~* "^/api/(admin|e2e)(/|$)" { return 404; }
   location ~* "^/(api/)?actuator" { return 404; }

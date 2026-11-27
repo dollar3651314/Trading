@@ -756,6 +756,8 @@ export const systemConfigs: SystemConfig[] = [
   // Telegram 机器人（迁移 V35，TG 机器人第 1 批）：总开关；开户名单空 = 谁都不能开户，* = 不限（TB-13 先只给 Amos 用）
   { key: 'telegram.enabled', value: 'true', unit: 'bool', group: 'telegram', updatedAt: null },
   { key: 'telegram.signup.allowIds', value: '', unit: 'text', group: 'telegram', updatedAt: null },
+  // TG 客户提现（迁移 V37，TB-1 默认关）：第 4 批验收后由 Amos 打开
+  { key: 'telegram.withdraw.enabled', value: 'false', unit: 'bool', group: 'telegram', updatedAt: null },
 ];
 
 /** 热钱包余额（原型数据；地址是公开的测试地址，不是密钥）。下限在 systemConfigs 里 */

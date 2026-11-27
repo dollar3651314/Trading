@@ -64,6 +64,8 @@ class TelegramWebLoginTest {
   @Autowired AccountApi account;
   @Autowired TelegramWebLogin login;
   @Autowired Clock clock;
+  @Autowired SessionService sessions;
+  @Autowired app.trading.common.config.SystemConfig config;
 
   @AfterEach
   void resetClock() {
@@ -282,5 +284,36 @@ class TelegramWebLoginTest {
     assertThat(TelegramWebLogin.device(null)).isEqualTo("未知设备");
     assertThat(TelegramWebLogin.maskIp("203.0.113.9")).isEqualTo("203.0.113.*");
     assertThat(TelegramWebLogin.maskIp("2001:db8:1:2::5")).isEqualTo("2001:db8:1:…");
+  }
+
+  MockHttpServletResponse write(String path, Cookie c, String body) throws Exception {
+    return mvc.perform(post(path).cookie(c).contentType(MediaType.APPLICATION_JSON).content(body)).andReturn().getResponse();
+  }
+
+  /** 🔴B2-1（TB-1"TG 提现默认关"）：有 TG 账户的客户，机器人会话、网页会话都不能加白名单、提交提现 */
+  @Test
+  void TG客户提现默认关_机器人会话和网页会话都拒绝_打开后不再拦() throws Exception {
+    assertThat(config.text(app.trading.common.config.ConfigKey.TELEGRAM_WITHDRAW_ENABLED, null)).as("迁移 V37 默认关").isEqualTo("false");
+    long tgId = newTgId();
+    TgAccount a = telegram.openAccount(tgId, null);
+    Cookie bot = cookieOf(open(telegramParams(tgId, 0), null));
+    Cookie web = new Cookie("fx_session", sessions.create(a.userId(), "203.0.113.9", "test"));
+    String addr = "{\"network\":\"TRC20\",\"address\":\"TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t\",\"label\":\"x\"}";
+    for (Cookie c : new Cookie[] {bot, web}) {
+      MockHttpServletResponse w = write("/api/wallet/whitelist", c, addr);
+      assertThat(w.getStatus()).isEqualTo(403);
+      assertThat(w.getContentAsString()).contains("TG_WITHDRAW_DISABLED").contains("Telegram 账户提现暂未开放");
+      MockHttpServletResponse s = write("/api/wallet/withdrawals", c, "{\"whitelistId\":\"1\",\"amount\":\"10\"}");
+      assertThat(s.getStatus()).isEqualTo(403);
+      assertThat(s.getContentAsString()).contains("TG_WITHDRAW_DISABLED");
+    }
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM wallet_whitelist WHERE user_id = ?", Integer.class, a.userId())).isZero();
+    // 打开以后（第 4 批验收后由 Amos 打开）：不再被这道闸拦（后面照常走白名单的其他规则）
+    config.setBySystem(app.trading.common.config.ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "true", java.time.LocalDateTime.now());
+    try {
+      assertThat(write("/api/wallet/whitelist", web, addr).getContentAsString()).doesNotContain("TG_WITHDRAW_DISABLED");
+    } finally {
+      config.setBySystem(app.trading.common.config.ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "false", java.time.LocalDateTime.now());
+    }
   }
 }

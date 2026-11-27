@@ -375,6 +375,7 @@
     "payment_balance_minUsdt": "Wallet provider available balance alert threshold (USDT)",
     "telegram_enabled": "Telegram bot switch",
     "telegram_signup_allowIds": "Telegram user IDs allowed to sign up",
+    "telegram_withdraw_enabled": "Telegram customer withdrawals (turn on after batch 4 acceptance)",
     "whitelist_effectiveHours": "Whitelist waiting period",
     "whitelist_maxAddresses": "Max whitelist addresses",
     "withdraw_coolingHours": "Cooling-off period",
@@ -575,7 +576,8 @@
     "quoteServiceUnavailable": "The quote service is unreachable; nothing changed. Please retry.",
     "quoteServiceRejected": "Not saved: {{detail}}",
     "quoteGateSuperOnly": "Only a super admin can change the public switch.",
-    "quoteGateAmos": "Tick \"Amos has approved\" to turn it on."
+    "quoteGateAmos": "Tick \"Amos has approved\" to turn it on.",
+    "signupAllLocked": "Sign-up cannot be opened to everyone (*) before the freeze and recovery flows go live. Enter specific Telegram user IDs."
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",

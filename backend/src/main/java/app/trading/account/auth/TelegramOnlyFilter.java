@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * 第一阶段只走 Telegram（TB-33，{@code trading.auth.phase1-telegram-only}，默认开）：注册、邮箱登录、发验证码、忘记密码一律 403 {@code TELEGRAM_ONLY}，
+ * 第一阶段只走 Telegram（TB-33，{@code trading.auth.phase1-telegram-only}；默认关，Amos 统一验收时打开）：注册、邮箱登录、发验证码、忘记密码一律 403 {@code TELEGRAM_ONLY}，
  * 请求体是什么都一样（不先做字段校验）。已登录客户的改密码、退出照常。
  */
 @Component

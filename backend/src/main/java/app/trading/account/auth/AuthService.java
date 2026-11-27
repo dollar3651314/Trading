@@ -49,6 +49,8 @@ class AuthService {
   /**
    * 记一条账号安全事件（v2 提现自动审批 R6）：和改密码、重置密码、冻结、解冻在同一个事务里写。
    * 时间用注入的时钟（UTC），和提现判定的"现在"同一个来源。
+   * <p><b>第 4 批备忘（TG 机器人第 2 批审查 🟡4）</b>：新增的安全事件（改提现密码、换绑、改邮箱等）要同时作废这个账户的<b>全部</b>网页会话，
+   * 包括从机器人一键登录的 BOT 会话（{@code sessions.revokeAll(userId, null)}），和现在的冻结一样。
    */
   private void securityEvent(long userId, String type) {
     mapper.insertSecurityEvent(userId, type, LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));

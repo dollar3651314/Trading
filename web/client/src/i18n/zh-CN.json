@@ -705,7 +705,8 @@
     "walletUnavailable": "暂时无法获取充值地址，请稍后再试",
     "networkClosed": "这条网络暂时不能充值",
     "symbolNotTradable": "该品种暂不开放交易",
-    "telegramOnly": "现在只能从 Telegram 机器人进入"
+    "telegramOnly": "现在只能从 Telegram 机器人进入",
+    "tgWithdrawDisabled": "Telegram 账户提现暂未开放"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",

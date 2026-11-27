@@ -375,6 +375,7 @@
     "payment_balance_minUsdt": "钱包提供方可用余额告警下限（USDT）",
     "telegram_enabled": "Telegram 机器人总开关",
     "telegram_signup_allowIds": "允许授权开户的 Telegram 用户编号",
+    "telegram_withdraw_enabled": "Telegram 客户提现（第 4 批验收后打开）",
     "whitelist_effectiveHours": "白名单生效等待",
     "whitelist_maxAddresses": "白名单地址上限",
     "withdraw_coolingHours": "冷静期",
@@ -575,7 +576,8 @@
     "quoteServiceUnavailable": "报价服务暂时连不上，没有变，请重试。",
     "quoteServiceRejected": "没有保存：{{detail}}",
     "quoteGateSuperOnly": "只有超管能改对外总开关。",
-    "quoteGateAmos": "没勾\"Amos 已同意打开\"，不能打开。"
+    "quoteGateAmos": "没勾\"Amos 已同意打开\"，不能打开。",
+    "signupAllLocked": "冻结和找回流程上线前不能对所有人开放开户（不能填 *），请填具体的 Telegram 用户编号。"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",

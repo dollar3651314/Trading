@@ -61,8 +61,11 @@ public class WithdrawService implements WithdrawAdminApi {
   private final Clock clock;
   private final Snowflake ids;
 
+  private final TelegramWithdrawGate tgGate;
+
   WithdrawService(WithdrawMapper mapper, LedgerApi ledger, FundsApi funds, AccountApi account, UserEventsApi events, NotifyApi notify, WithdrawSenders senders,
-      WithdrawLimits limits, AutoApproveService auto, TransactionTemplate tx, Clock clock, Snowflake ids) {
+      WithdrawLimits limits, AutoApproveService auto, TransactionTemplate tx, Clock clock, Snowflake ids, TelegramWithdrawGate tgGate) {
+    this.tgGate = tgGate;
     this.mapper = mapper;
     this.ledger = ledger;
     this.funds = funds;
@@ -92,6 +95,7 @@ public class WithdrawService implements WithdrawAdminApi {
    * 提交提现（AC-17）。顺序：字段 → KYC → 白名单（存在、已生效）→ 最小、单笔 → 锁账户后查当日累计和可提金额 → 冻结。
    */
   WithdrawalRow submit(long userId, String whitelistId, String amountText) {
+    tgGate.check(userId); // TB-1：TG 客户提现默认关（第 4 批验收后打开）
     ValidationException.Collector errs = new ValidationException.Collector();
     BigDecimal amount = null;
     String a = amountText == null ? "" : amountText.trim();

@@ -46,6 +46,7 @@ export type ApiErrorReason =
   | 'forbidden'
   | 'fileTooLarge'
   | 'telegramOnly'
+  | 'tgWithdrawDisabled'
   | OrderRejectReason;
 
 export class ApiError extends Error {
@@ -95,6 +96,8 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   UNAUTHORIZED: 'unauthorized',
   // 第一阶段只走 Telegram（TB-33）：注册、邮箱登录、忘记密码关闭
   TELEGRAM_ONLY: 'telegramOnly',
+  // TB-1：Telegram 账户提现默认关（第 4 批验收后打开）
+  TG_WITHDRAW_DISABLED: 'tgWithdrawDisabled',
   USER_FROZEN: 'accountFrozen',
   FORBIDDEN: 'forbidden',
   LOGIN_LOCKED: 'accountLocked',

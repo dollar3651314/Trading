@@ -44,8 +44,8 @@ trading:
     cookie-name: fx_session
     cookie-secure: ${FX_COOKIE_SECURE:true}
     # 第一阶段只走 Telegram（TB-33，TG 机器人第 2 批）：true = 关闭注册、邮箱登录、忘记密码（含发验证码），网页没有会话时显示"请在 Telegram 打开"提示页。
-    # 测试、端到端配置里关掉（要走注册流程）；服务器用 sudo trading set FX_PHASE1_TELEGRAM_ONLY 改
-    phase1-telegram-only: ${FX_PHASE1_TELEGRAM_ONLY:true}
+    # 默认关（第 2 批审查 🟡1）：Amos 统一验收时用 sudo trading set FX_PHASE1_TELEGRAM_ONLY true 打开
+    phase1-telegram-only: ${FX_PHASE1_TELEGRAM_ONLY:false}
     # 机器人会话（从机器人一键登录）：闲置 30 分钟、最长 12 小时（技术方案 11 页第 2 节）
     bot-session-idle-minutes: 30
     bot-session-max-hours: 12
