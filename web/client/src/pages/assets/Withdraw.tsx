@@ -241,7 +241,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
           {serverErr}
         </div>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block submit-wd" onClick={submit}>
+      <button type="button" className="btn btn-primary btn-lg btn-block submit-wd sticky-submit" onClick={submit}>
         {t('withdraw.submit')}
       </button>
 

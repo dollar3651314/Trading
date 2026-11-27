@@ -12,6 +12,7 @@ import { ToastProvider } from './app/ToastProvider';
 import { Loading } from './components/AsyncView';
 import { Layout } from './components/Layout';
 import { startEngine } from './api/trading';
+import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { TelegramOnly } from './pages/tg/TelegramOnly';
 
 const Login = lazy(() => import('./pages/auth/Login'));
@@ -54,6 +55,8 @@ function GuestOnly({ children }: { children: ReactNode }) {
 }
 
 export function AppRoutes() {
+  // 键盘弹出时主按钮不被遮住（UX-B2）
+  useKeyboardInset();
   return (
     <Suspense fallback={<Loading rows={4} />}>
       <Routes>

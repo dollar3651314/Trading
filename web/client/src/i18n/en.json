@@ -209,7 +209,8 @@
     "ariaTick": "{{symbol}} tick chart (recent mid prices)",
     "emptyTick": "No ticks yet. They appear as new quotes arrive",
     "indicators": "Indicators",
-    "bidAsk": "Bid/Ask lines"
+    "bidAsk": "Bid/Ask lines",
+    "gestureHint": "Drag to scroll · pinch to zoom · long-press for OHLC"
   },
   "order": {
     "title": "Order",

@@ -107,7 +107,7 @@ function KycForm({ onSubmitted }: { onSubmitted: (k: KycInfo) => void }) {
           {err}
         </div>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block" onClick={submit} disabled={busy}>
+      <button type="button" className="btn btn-primary btn-lg btn-block sticky-submit" onClick={submit} disabled={busy}>
         {busy ? t('common.submitting') : t('kyc.submit')}
       </button>
     </section>

@@ -209,7 +209,8 @@
     "ariaTick": "{{symbol}} Tick 图（最近逐笔中间价）",
     "emptyTick": "暂无逐笔报价，收到新报价后会显示",
     "indicators": "指标",
-    "bidAsk": "买卖价线"
+    "bidAsk": "买卖价线",
+    "gestureHint": "左右拖动看历史 · 双指缩放 · 长按看开高低收"
   },
   "order": {
     "title": "下单",

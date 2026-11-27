@@ -26,7 +26,7 @@ import { useWatchMode } from '../hooks/useWatchMode';
 import { useFavorites } from '../hooks/useFavorites';
 import { useIsDesktop } from '../hooks/useMediaQuery';
 import { useQuoteAvailable } from '../hooks/useQuoteStatus';
-import { useQuote, useQuotes } from '../hooks/useQuotes';
+import { quoteDirection, useQuote, useQuotes } from '../hooks/useQuotes';
 import { cmp, dec, sub, ZERO } from '../lib/decimal';
 import { formatAmount, formatDecimal, formatLots, formatPercent, formatPrice } from '../lib/format';
 import { spreadPoints, symbolName } from '../lib/symbol';
@@ -59,7 +59,10 @@ function useSymbolStats(s: SymbolInfo) {
   const up = chg === null || cmp(chg, ZERO) >= 0;
   const spread = q ? spreadPoints(q, s.digits) : null;
   const chgText = diff !== null && chg !== null ? `${formatDecimal(diff, s.digits, { sign: true })} (${formatPercent(chg, { sign: true })})` : '—';
-  return { q, up, cls: up ? 'up' : 'down', spread, chgText };
+  // 跳价闪色（TG 机器人第 3 批，照原型 trade-ui）：价格变了闪一下涨跌色；配合 key={q.bid} 每次跳价重新播放动画
+  const dir = quoteDirection(s.code);
+  const flash = dir === 'up' ? 'flash-up' : dir === 'down' ? 'flash-down' : '';
+  return { q, up, cls: up ? 'up' : 'down', spread, chgText, flash };
 }
 
 function FavButton({ code }: { code: string }) {
@@ -192,7 +195,7 @@ function DesktopHead({ s }: { s: SymbolInfo }) {
 
 function MobileHead({ s, onPick }: { s: SymbolInfo; onPick: () => void }) {
   const { t, i18n } = useTranslation();
-  const { q, cls, spread, chgText } = useSymbolStats(s);
+  const { q, cls, spread, chgText, flash } = useSymbolStats(s);
   return (
     <header className="m-sym">
       <div className="m-sym-top">
@@ -205,7 +208,9 @@ function MobileHead({ s, onPick }: { s: SymbolInfo; onPick: () => void }) {
       </div>
       <div className="m-sym-px">
         <div>
-          <div className={`p num ${cls}`}>{q ? formatPrice(q.bid, s.digits) : '—'}</div>
+          <div key={q?.bid} className={`p num ${cls} ${flash}`} data-testid="m-price">
+            {q ? formatPrice(q.bid, s.digits) : '—'}
+          </div>
           <div className="m-sym-sub">
             <span className={`num ${cls}`}>{chgText}</span>
             <span>
@@ -353,6 +358,7 @@ export default function Trade() {
       <div className="chart-box" data-sub-panes={prefs.indicators.filter((k) => k === 'macd' || k === 'rsi').length}>
         <KChart symbol={s.code} period={tf} digits={s.digits} positionLines={lines} indicators={prefs.indicators} showBidAsk={prefs.bidAsk} />
       </div>
+      <p className="chart-gesture">{t('chart.gestureHint')}</p>
       <ChartCredit />
       <MyPositionsHere s={s} />
       <div className="m-actbar">
@@ -393,7 +399,9 @@ function TradeButton({ s, side, onOpen }: { s: SymbolInfo; side: Side; onOpen: (
   return (
     <button type="button" className={`big-btn ${side}`} onClick={() => onOpen(side)} disabled={blocked} aria-disabled={blocked}>
       <small>{t(`side.${side}`)}</small>
-      <b className="num">{q ? formatPrice(side === 'buy' ? q.ask : q.bid, s.digits) : '—'}</b>
+      <b key={side === 'buy' ? q?.ask : q?.bid} className="num px-tick">
+        {q ? formatPrice(side === 'buy' ? q.ask : q.bid, s.digits) : '—'}
+      </b>
     </button>
   );
 }
