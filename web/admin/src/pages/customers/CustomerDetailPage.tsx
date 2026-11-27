@@ -86,6 +86,7 @@ export function CustomerDetailPage() {
         </>
       ),
       confirmText: t(unlink ? 'customers.tg.confirmUnlink' : 'customers.tg.confirmRelink'),
+      successText: unlink ? undefined : t('customers.tg.relinkScheduled'),
       onConfirm: (v) =>
         changeCustomerTelegram(c.id, unlink ? null : String(v.telegramId ?? ''), unlink ? null : (v.username ? String(v.username) : null), v.reason, String(v.password ?? '')),
       onDone: reload,

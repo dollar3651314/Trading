@@ -288,34 +288,42 @@ class RecoveryService implements RecoveryApi {
   }
 
   @Override
-  public Long adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason) {
+  public TelegramChange adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason) {
     return tx.execute(st -> {
       Long old = telegram.byUserId(userId).map(TelegramAccountApi.TgAccount::telegramId).orElse(null);
-      if (newTelegramId == null && old == null) throw new BizException("NOT_TG_ACCOUNT", "这个客户没有 Telegram 关联");
-      if (newTelegramId != null) {
-        var other = telegram.byTelegramId(newTelegramId);
-        if (other.isPresent()) throw new BizException("TELEGRAM_TAKEN", other.get().userId() == userId ? "已经关联的就是这个 Telegram" : "这个 Telegram 已经关联了别的客户");
-      }
-      // 安全事件：作废全部网页会话（含 BOT 会话）；之后才改关联
-      auth.securityEvent(userId, SecurityEvent.REBIND);
+      LocalDateTime now = now();
       if (newTelegramId == null) {
+        if (old == null) throw new BizException("NOT_TG_ACCOUNT", "这个客户没有 Telegram 关联");
+        // 解除：马上生效（不给任何人新的访问权）；安全事件作废全部网页会话（含 BOT 会话）后再删关联
+        auth.securityEvent(userId, SecurityEvent.REBIND);
         telegram.unlink(userId);
-      } else if (old == null) {
-        telegram.link(userId, newTelegramId, newUsername, now());
-      } else {
-        telegram.rebind(userId, newTelegramId, newUsername, now());
-        pins.clearPin(userId);
-        events.publishEvent(new AccountRecovered(userId, "ADMIN_RELINK", 0));
-      }
-      pins.freezeWithdraw(userId, "ADMIN", newTelegramId == null ? "后台解除了 Telegram 关联" : "后台更换了 Telegram 关联");
-      notify.toUser(userId, "TELEGRAM_LINK_CHANGED", Map.of("userId", String.valueOf(userId), "actionZh", newTelegramId == null ? "解除" : "更换",
-          "actionEn", newTelegramId == null ? "removed" : "changed"));
-      if (old != null) {
+        pins.freezeWithdraw(userId, "ADMIN", "后台解除了 Telegram 关联");
+        notify.toUser(userId, "TELEGRAM_LINK_CHANGED", Map.of("userId", String.valueOf(userId), "actionZh", "解除", "actionEn", "removed"));
         long o = old;
         toApplicant(o, "你的 Telegram 已经不再关联客户号 #" + userId + "（客服操作）。如果不是你本人申请的，请马上联系客服。");
+        return new TelegramChange(old, null, null);
       }
-      if (newTelegramId != null) toApplicant(newTelegramId, "客服已把客户号 #" + userId + " 关联到这个 Telegram。发 /start 进入；提现已冻结，人工核对后解冻。");
-      return old;
+      var other = telegram.byTelegramId(newTelegramId);
+      if (other.isPresent()) throw new BizException("TELEGRAM_TAKEN", other.get().userId() == userId ? "已经关联的就是这个 Telegram" : "这个 Telegram 已经关联了别的客户");
+      if (mapper.openCount(userId) > 0) throw new BizException("RECOVERY_OPEN", "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完");
+      // 更换：建一份已批准的换绑申请，24 小时执行等待期后执行；原 TG 的撤销按 4b 规则转 Amos
+      RecoveryMapper.Row r = new RecoveryMapper.Row();
+      r.kind = REBIND;
+      r.userId = userId;
+      r.applicantTgId = newTelegramId;
+      r.applicantTgUsername = cut(newUsername, 64);
+      r.status = "PROOF";
+      r.createdAt = now;
+      mapper.insert(r);
+      LocalDateTime at = now.plus(REBIND_WAIT);
+      String note = "后台更换 Telegram 关联：" + (reason == null ? "" : reason);
+      mapper.insertEvent(r.id, "APPLY", "admin:" + adminId, note, now);
+      mapper.approve(r.id, adminId, cut(note, 500), now, at);
+      mapper.insertEvent(r.id, "APPROVE", "admin:" + adminId, cut(note, 500), now);
+      pins.freezeWithdraw(userId, "ADMIN", "后台更换 Telegram 关联（找回申请 #" + r.id + "）");
+      notify.toUser(userId, "RECOVERY_APPROVED", Map.of("id", String.valueOf(r.id), "executeAt", at.format(TIME)));
+      toApplicant(newTelegramId, "客服已安排把客户号 #" + userId + " 关联到这个 Telegram，将在 " + at.format(TIME) + " 生效。生效前原账户持有人还可以提出撤销。");
+      return new TelegramChange(old, r.id, at);
     });
   }
 
@@ -437,7 +445,9 @@ class RecoveryService implements RecoveryApi {
         oldTg[0] = telegram.byUserId(r.userId).map(TelegramAccountApi.TgAccount::telegramId).orElse(null);
         // 安全事件：作废全部网页会话（含 BOT 会话），48 小时不能提现；之后才改授权时间，新 TG 不用再点"重新授权"
         auth.securityEvent(r.userId, SecurityEvent.REBIND);
-        telegram.rebind(r.userId, r.applicantTgId, r.applicantTgUsername, now());
+        // 后台给没有 TG 的客户关联（4c）：没有原来的 TG，直接关联
+        if (oldTg[0] == null) telegram.link(r.userId, r.applicantTgId, r.applicantTgUsername, now());
+        else telegram.rebind(r.userId, r.applicantTgId, r.applicantTgUsername, now());
       } else {
         auth.securityEvent(r.userId, SecurityEvent.PIN_RESET);
         pins.releaseFreeze(r.userId, SOURCE_PIN_LOCKS);

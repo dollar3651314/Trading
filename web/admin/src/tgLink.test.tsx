@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('客户详情：更换 / 解除 Telegram 关联', () => {
-  it('超管：填新 TG 编号、后台密码、原因后更换；之后提现冻结来源是客服操作', async () => {
+  it('超管：填新 TG 编号、后台密码、原因后安排更换（建已批准的换绑申请，24 小时后执行）；提现冻结来源是客服操作', async () => {
     const c = db.customers[3];
     const before = { id: c.telegramId, u: c.telegramUsername };
     c.telegramId = '710000001';
@@ -42,7 +42,9 @@ describe('客户详情：更换 / 解除 Telegram 关联', () => {
       fireEvent.change(within(dialog).getByLabelText('新的 Telegram 用户编号'), { target: { value: '710000002' } });
       fireEvent.change(within(dialog).getByLabelText('你的登录密码'), { target: { value: 'pw' } });
       confirmHighRisk(dialog, '视频核对后换绑', '确认更换');
-      await waitFor(() => expect(c.telegramId).toBe('710000002'), { timeout: 5000 });
+      await waitFor(() => expect(recoveries.find((r) => r.customerId === c.id)?.applicantTgId).toBe('710000002'), { timeout: 5000 });
+      expect(recoveries.find((r) => r.customerId === c.id)?.status).toBe('approved');
+      expect(c.telegramId).toBe('710000001');
       expect(withdrawSafety.get(c.id)?.freezes?.map((f) => f.source)).toContain('admin');
     } finally {
       c.telegramId = before.id;

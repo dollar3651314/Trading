@@ -1655,11 +1655,22 @@ export function changeCustomerTelegram(id: number, telegramId: string | null, us
     if (!telegramId && !c.telegramId) throw new ApiError('errors.notTgAccount');
     if (telegramId && db.customers.some((x) => x.telegramId === telegramId)) throw new ApiError('errors.telegramTaken');
     const old = c.telegramId ?? null;
-    c.telegramId = telegramId;
-    c.telegramUsername = telegramId ? username : null;
+    if (telegramId) {
+      // 4c 审查：更换不一步到位——建一份已批准的换绑申请，24 小时后执行
+      if (recoveries.some((x) => x.customerId === id && ['objection', 'proof', 'approved'].includes(x.status))) throw new ApiError('errors.recoveryOpen');
+      recoveries.push({
+        id: String(900 + recoveries.length), kind: 'rebind', customerId: id, customerName: c.name, customerTelegram: old, kycStatus: c.kycStatus, applicantTgId: telegramId,
+        applicantTgUsername: username, status: 'approved', disputed: false, disputePinOk: false, disputeFrozen: false, objectionEndsAt: null, proofNote: `后台更换 Telegram 关联：${r}`,
+        approvedBy: currentAdmin().displayName, approvedAt: nowString(), executeAt: new Date(Date.now() + 24 * 3_600_000).toISOString(), revokeRequested: false, revokeRequestedAt: null,
+        closedBy: null, closeReason: null, closedAt: null, createdAt: nowString(),
+      });
+    } else {
+      c.telegramId = null;
+      c.telegramUsername = null;
+    }
     const s = withdrawSafety.get(id) ?? { pinSet: false, pinLockedUntil: null, withdrawFrozen: false, frozenSource: null, frozenAt: null };
-    const list = [...freezesOf(s).filter((f) => f.source !== 'admin'), { source: 'admin' as const, reason: telegramId ? '后台更换了 Telegram 关联' : '后台解除了 Telegram 关联', at: nowString() }];
-    withdrawSafety.set(id, { ...s, pinSet: telegramId ? false : s.pinSet, withdrawFrozen: true, frozenSource: list[0].source, frozenAt: list[0].at, freezes: list });
+    const list = [...freezesOf(s).filter((f) => f.source !== 'admin'), { source: 'admin' as const, reason: telegramId ? '后台更换 Telegram 关联' : '后台解除了 Telegram 关联', at: nowString() }];
+    withdrawSafety.set(id, { ...s, withdrawFrozen: true, frozenSource: list[0].source, frozenAt: list[0].at, freezes: list });
     audit(telegramId ? 'customer.telegram_relink' : 'customer.telegram_unlink', String(id), true, r, { telegramId: old }, { telegramId });
   }).then(() => getCustomer(id));
 }

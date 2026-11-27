@@ -518,10 +518,11 @@
       "newId": "New Telegram user ID",
       "newIdRequired": "Enter a numeric Telegram user ID",
       "newUsername": "New Telegram username (optional)",
-      "impact": "Records a security event (signs out every web session, including bot ones), freezes withdrawals (lifted after a manual check) and emails the alert recipients; changing also clears the PIN and whitelist.",
+      "impact": "Changing does not take effect at once: an approved rebind request runs after 24 hours (then a security event signs out every web session and the PIN and whitelist are cleared). Withdrawals freeze now, the original Telegram and email are notified, and a cancel from the original Telegram goes to Amos. Removing takes effect at once: security event, all web sessions signed out, withdrawals frozen. Both email the alert recipients.",
       "unlinkImpact": "After removing, the customer has no Telegram link; without an email they cannot sign in until relinked.",
       "confirmRelink": "Change",
-      "confirmUnlink": "Remove"
+      "confirmUnlink": "Remove",
+      "relinkScheduled": "Change scheduled: runs in 24 hours and can be cancelled under Recovery requests"
     }
   },
   "dashboard": {
@@ -658,7 +659,8 @@
     "recoveryNoRevokeRequest": "There is no pending cancellation request",
     "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel",
     "telegramTaken": "That Telegram account is linked to another customer",
-    "notTgAccount": "This customer has no Telegram link"
+    "notTgAccount": "This customer has no Telegram link",
+    "recoveryOpen": "This customer already has a recovery request in progress; settle it under Recovery requests first"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",

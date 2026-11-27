@@ -214,4 +214,29 @@ class WebFreezeFlowTest {
     assertThat(sources(uid)).containsExactly("WEB_REQUEST");
     verify(mail, org.mockito.Mockito.never()).send(eq("nobody"), eq("x"), anyMap());
   }
+
+  /** 4c 审查 🟡：信息不对和信息对的提交，状态、内容一样，响应时间都不少于最短时间（默认 800 毫秒），看不出对不对 */
+  @Test
+  void 信息对和不对_响应状态内容一样_都不少于最短响应时间() throws Exception {
+    long uid = customer(true);
+    String[] bodies = {
+      "{\"customerNo\":\"" + uid + "\",\"name\":\"韩梅梅\",\"docLast4\":\"0000\",\"captchaId\":\"" + captcha() + "\",\"captcha\":\"AC34\"}",
+      "{\"customerNo\":\"" + uid + "\",\"name\":\"李雷\",\"docLast4\":\"4321\",\"captchaId\":\"" + captcha() + "\",\"captcha\":\"AC34\"}",
+      "{\"customerNo\":\"999999999999\",\"name\":\"李雷\",\"docLast4\":\"4321\",\"captchaId\":\"" + captcha() + "\",\"captcha\":\"AC34\"}" };
+    java.util.List<String> got = new java.util.ArrayList<>();
+    for (String b : bodies) {
+      long t0 = System.nanoTime();
+      MockHttpServletResponse r = mvc.perform(post("/api/public/withdraw-freeze").contentType(MediaType.APPLICATION_JSON).content(b)).andReturn().getResponse();
+      long ms = (System.nanoTime() - t0) / 1_000_000;
+      assertThat(ms).as("最短响应时间").isGreaterThanOrEqualTo(800);
+      got.add(r.getStatus() + " " + r.getContentAsString());
+    }
+    assertThat(got).containsOnly("200 {\"message\":\"" + WebFreezeService.ACCEPTED + "\"}");
+    assertThat(sources(uid)).containsExactly("WEB_REQUEST");
+    long t0 = System.nanoTime();
+    MockHttpServletResponse bad = mvc.perform(post("/api/public/withdraw-freeze").contentType(MediaType.APPLICATION_JSON)
+        .content("{\"customerNo\":\"1\",\"captchaId\":\"" + captcha() + "\",\"captcha\":\"XXXX\"}")).andReturn().getResponse();
+    assertThat((System.nanoTime() - t0) / 1_000_000).as("验证码不对也一样等").isGreaterThanOrEqualTo(800);
+    assertThat(bad.getContentAsString()).contains("CAPTCHA_INVALID");
+  }
 }

@@ -233,8 +233,8 @@ class CustomerOps {
 
   /**
    * 后台"解除关联 / 更换 Telegram 关联"（第 4 批 4c，需求文档 08 页第 5 节）：<b>只有超管</b>（不看权限点）、再输自己的后台密码、原因必填、写审计、
-   * 发告警邮件；账户模块记安全事件（作废全部网页会话含 BOT 会话）、冻结提现（来源 ADMIN，人工核对后解冻），更换时提现密码和白名单清空。
-   * newTelegramId 为空是解除关联
+   * 发告警邮件。解除马上生效（安全事件、冻结提现 ADMIN）；更换（4c 审查 🟡）建一份已批准的换绑申请、冻结提现，24 小时后执行，
+   * 原 TG 的撤销按 4b 规则转 Amos（{@link app.trading.account.api.RecoveryApi#adminChangeTelegram}）。newTelegramId 为空是解除关联
    */
   @Transactional
   void changeTelegram(AdminContext actor, long id, String newTelegramId, String newUsername, String reason, String password) {
@@ -250,14 +250,24 @@ class CustomerOps {
     auth.requirePassword(actor, password);
     Long newTg = tg;
     Long[] old = new Long[1];
+    app.trading.account.api.RecoveryApi.TelegramChange[] res = new app.trading.account.api.RecoveryApi.TelegramChange[1];
     String action = newTg == null ? "customer.telegram_unlink" : "customer.telegram_relink";
     audit.run(action, String.valueOf(id), true, r, () -> {
       customers.customer(id).orElseThrow(() -> new BizException("NOT_FOUND", "客户不存在"));
-      old[0] = recovery.adminChangeTelegram(id, newTg, uname, actor.adminId(), r);
-      return Audit.Change.of(null, Map.of("telegramId", old[0] == null ? "" : String.valueOf(old[0])), Map.of("telegramId", newTg == null ? "" : String.valueOf(newTg)));
+      res[0] = recovery.adminChangeTelegram(id, newTg, uname, actor.adminId(), r);
+      old[0] = res[0].oldTelegramId();
+      Map<String, Object> after = new java.util.LinkedHashMap<>();
+      after.put("telegramId", newTg == null ? "" : String.valueOf(newTg));
+      if (res[0].recoveryId() != null) {
+        after.put("recoveryId", res[0].recoveryId());
+        after.put("executeAt", Ops.time(res[0].executeAt()));
+      }
+      return Audit.Change.of(null, Map.of("telegramId", old[0] == null ? "" : String.valueOf(old[0])), after);
     });
     String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
-    Map<String, String> p = Map.of("customerId", String.valueOf(id), "actionZh", newTg == null ? "解除" : "更换", "actionEn", newTg == null ? "removed" : "changed",
+    String zh = newTg == null ? "解除" : "安排更换（找回申请 #" + res[0].recoveryId() + "，" + Ops.time(res[0].executeAt()) + " 执行，等待期内可在\"找回申请\"里撤销）";
+    String en = newTg == null ? "removed" : "scheduled to change (recovery #" + res[0].recoveryId() + ", runs at " + Ops.time(res[0].executeAt()) + ")";
+    Map<String, String> p = Map.of("customerId", String.valueOf(id), "actionZh", zh, "actionEn", en,
         "oldTg", old[0] == null ? "—" : String.valueOf(old[0]), "newTg", newTg == null ? "—" : String.valueOf(newTg), "admin", who, "reason", r, "at",
         now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString());
     List<String> to = alerts.recipients();

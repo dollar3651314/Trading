@@ -518,10 +518,11 @@
       "newId": "新的 Telegram 用户编号",
       "newIdRequired": "请填 Telegram 用户编号（纯数字）",
       "newUsername": "新的 Telegram 用户名（可不填）",
-      "impact": "会记安全事件（作废这个客户全部网页会话，含从机器人进入的）、冻结提现（人工核对后解冻）、给告警邮箱发邮件；更换时提现密码和白名单清空。",
+      "impact": "更换不会马上生效：建一份已批准的换绑申请，24 小时后执行（执行时记安全事件、作废全部网页会话、清提现密码和白名单）；现在就冻结提现、通知原 Telegram 和邮箱，原 Telegram 的撤销转给 Amos 决定。解除马上生效：安全事件、作废全部网页会话、冻结提现。都会给告警邮箱发邮件。",
       "unlinkImpact": "解除后这个客户没有 Telegram 关联：没绑邮箱的就没有登录方式，要重新关联才能用。",
       "confirmRelink": "确认更换",
-      "confirmUnlink": "确认解除"
+      "confirmUnlink": "确认解除",
+      "relinkScheduled": "已安排更换：24 小时后执行，等待期内可以在\"找回申请\"里撤销"
     }
   },
   "dashboard": {
@@ -658,7 +659,8 @@
     "recoveryNoRevokeRequest": "这份申请没有待决定的撤销请求",
     "recoveryRevokePending": "原 TG 请求了撤销：请先视频核对，选维持或撤销",
     "telegramTaken": "这个 Telegram 已经关联了别的客户",
-    "notTgAccount": "这个客户没有 Telegram 关联"
+    "notTgAccount": "这个客户没有 Telegram 关联",
+    "recoveryOpen": "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",

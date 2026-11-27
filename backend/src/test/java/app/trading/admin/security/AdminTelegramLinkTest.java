@@ -51,7 +51,7 @@ class AdminTelegramLinkTest extends AdminTestSupport {
   }
 
   @Test
-  void 更换和解除Telegram关联_只有超管_要后台密码_安全事件_冻结提现_清提现密码白名单_审计_告警() throws Exception {
+  void 更换建已批准的换绑申请24小时后执行_解除马上生效_只有超管_要后台密码_冻结提现_审计_告警() throws Exception {
     long oldTg = newTg();
     long uid = telegram.openAccount(oldTg, "old").userId();
     app.trading.support.PinTestSupport.setPin(jdbc, uid, "135790");
@@ -68,22 +68,30 @@ class AdminTelegramLinkTest extends AdminTestSupport {
     assertThat(link(uid, s, "{\"telegramId\":\"12x\",\"reason\":\"x\",\"password\":\"" + PASSWORD + "\"}")).startsWith("400");
     assertThat(telegram.byUserId(uid).orElseThrow().telegramId()).isEqualTo(oldTg);
 
+    // 4c 审查 🟡：更换不一步到位——建一份已批准的换绑申请，24 小时后执行；建的时候就冻结提现、通知原 TG 和邮箱
     long sess = session(uid);
     JsonNode d = body(call(post("/api/admin/customers/" + uid + "/telegram"), s.cookie(), ok));
-    assertThat(d.get("telegramId").asString()).isEqualTo(String.valueOf(newTg));
-    assertThat(telegram.byUserId(uid).orElseThrow().username()).isEqualTo("newme");
-    assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM account_session WHERE id = ?", Boolean.class, sess)).as("安全事件作废全部会话").isTrue();
-    assertThat(jdbc.queryForList("SELECT type FROM account_security_event WHERE user_id = ?", String.class, uid)).contains("REBIND");
+    assertThat(d.get("telegramId").asString()).as("还没换").isEqualTo(String.valueOf(oldTg));
+    var rec = jdbc.queryForMap("SELECT id, kind, status, applicant_tg_id, applicant_tg_username, execute_at, approved_by FROM account_recovery WHERE user_id = ?", uid);
+    assertThat(rec).containsEntry("kind", "REBIND").containsEntry("status", "APPROVED").containsEntry("applicant_tg_id", newTg)
+        .containsEntry("applicant_tg_username", "newme").containsEntry("approved_by", s.id());
     assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).containsExactly("ADMIN");
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_withdraw_pin WHERE user_id = ?", Integer.class, uid)).isZero();
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM wallet_whitelist WHERE user_id = ?", Integer.class, uid)).isZero();
+    assertThat(jdbc.queryForObject("SELECT revoked_at IS NULL FROM account_session WHERE id = ?", Boolean.class, sess)).as("执行时才记安全事件").isTrue();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_APPROVED'", Integer.class, uid)).isPositive();
     assertThat(audits("customer.telegram_relink")).anyMatch(l -> l.contains("视频核对后换绑"));
     verify(mail).send(eq("ops@example.com"), eq("OPS_TELEGRAM_LINK"),
-        argThat(p -> p.get("oldTg").equals(String.valueOf(oldTg)) && p.get("newTg").equals(String.valueOf(newTg)) && p.get("actionZh").equals("更换")));
+        argThat(p -> p.get("oldTg").equals(String.valueOf(oldTg)) && p.get("newTg").equals(String.valueOf(newTg)) && p.get("actionZh").contains("找回申请 #" + rec.get("id"))));
+    assertThat(link(uid, s, "{\"telegramId\":\"" + newTg() + "\",\"reason\":\"再换\",\"password\":\"" + PASSWORD + "\"}")).as("已经有进行中的申请").contains("RECOVERY_OPEN");
+    // 换绑执行的部分在 RecoveryFlowTest 里测（定时任务调执行）；这里撤销掉，接着测解除
+    jdbc.update("UPDATE account_recovery SET status = 'CANCELLED' WHERE user_id = ?", uid);
 
+    // 解除：马上生效（不给任何人新的访问权），安全事件作废全部会话、冻结提现
     JsonNode u = body(call(post("/api/admin/customers/" + uid + "/telegram"), s.cookie(), "{\"reason\":\"客户要求解除\",\"password\":\"" + PASSWORD + "\"}"));
     assertThat(u.get("telegramId").isNull()).isTrue();
     assertThat(telegram.byUserId(uid)).isEmpty();
+    assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM account_session WHERE id = ?", Boolean.class, sess)).as("安全事件作废全部会话").isTrue();
+    assertThat(jdbc.queryForList("SELECT type FROM account_security_event WHERE user_id = ?", String.class, uid)).contains("REBIND");
+    assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).containsExactly("ADMIN");
     assertThat(audits("customer.telegram_unlink")).anyMatch(l -> l.contains("客户要求解除"));
     assertThat(link(uid, s, "{\"reason\":\"再来\",\"password\":\"" + PASSWORD + "\"}")).contains("NOT_TG_ACCOUNT");
   }

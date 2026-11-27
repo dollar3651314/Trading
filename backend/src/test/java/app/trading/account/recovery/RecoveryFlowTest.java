@@ -507,4 +507,47 @@ class RecoveryFlowTest {
     assertThat(RecoveryService.lastFourMatches(null, "5678")).isFalse();
     verify(sender, never()).sendToChat(anyLong(), eq("never"), org.mockito.ArgumentMatchers.any());
   }
+
+  // ---------- 4c 审查 🟡：后台更换 Telegram 关联 = 已批准的换绑申请，24 小时后执行 ----------
+
+  @Test
+  void 后台更换Telegram关联_建已批准的申请_冻结ADMIN_原TG撤销转Amos_维持一次后不再暂停_24小时后执行() {
+    long uid = customer(null);
+    long oldTg = tgOf(uid);
+    long newTg = newTg();
+    var c = recovery.adminChangeTelegram(uid, newTg, "newme", 1L, "视频核对后换绑");
+    assertThat(c.oldTelegramId()).isEqualTo(oldTg);
+    assertThat(c.executeAt()).isEqualTo(now().plusHours(24));
+    long id = c.recoveryId();
+    assertThat(row(id).status).isEqualTo("APPROVED");
+    assertThat(row(id).approvedBy).isEqualTo(1L);
+    assertThat(sources(uid)).containsExactly("ADMIN");
+    assertThat(tgOf(uid)).as("还没换").isEqualTo(oldTg);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_APPROVED'", Integer.class, uid)).isPositive();
+    assertThat(code(() -> recovery.adminChangeTelegram(uid, newTg(), null, 1L, "再换"))).as("已经有进行中的申请").isEqualTo("RECOVERY_OPEN");
+    // 原 TG 撤销：按 4b 规则转 Amos、暂停；维持一次以后再撤销不再暂停
+    assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定");
+    time().advance(Duration.ofHours(25));
+    recovery.execute(id);
+    assertThat(row(id).status).isEqualTo("APPROVED");
+    recovery.keep(id, 1L, "视频核对后维持");
+    assertThat(recovery.revokeByOwner(uid, id)).contains("不会暂停换绑");
+    recovery.execute(id);
+    assertThat(row(id).status).isEqualTo("EXECUTED");
+    assertThat(tgOf(uid)).isEqualTo(newTg);
+    assertThat(sources(uid)).as("ADMIN 冻结要人工核对后解冻").containsExactly("ADMIN");
+    assertThat(jdbc.queryForList("SELECT type FROM account_security_event WHERE user_id = ?", String.class, uid)).contains("REBIND");
+  }
+
+  @Test
+  void 后台给没有Telegram的客户关联_执行时直接关联() {
+    long uid = jdbc.queryForObject("SELECT COALESCE(MAX(id), 0) + 1 + FLOOR(RAND() * 1000) FROM account_user", Long.class);
+    jdbc.update("INSERT INTO account_user (id, email, status) VALUES (?, ?, 'ACTIVE')", uid, "nl" + uid + "@example.com");
+    long newTg = newTg();
+    var c = recovery.adminChangeTelegram(uid, newTg, null, 1L, "客户要求关联");
+    assertThat(c.oldTelegramId()).isNull();
+    time().advance(Duration.ofHours(24).plusSeconds(1));
+    recovery.execute(c.recoveryId());
+    assertThat(tgOf(uid)).isEqualTo(newTg);
+  }
 }

@@ -39,13 +39,9 @@ class SystemService {
   private final Audit audit;
   private final Clock clock;
 
-  /**
-   * TB-37 资金配置的下限和上限（第 4 批 4c）：白名单生效 ≥ 24 小时、冷静期 ≥ 2 小时、每天提现累计上限 ≤ 30,000（TG 每天额度的上限 2,000 在
-   * {@link ConfigKey} 里）。端到端测试（profile e2e，E2eGuard 保证只在本机和 CI）不受下限限制，主流程要把冷静期、生效时间设成 0
-   */
-  static final Map<ConfigKey, java.math.BigDecimal> FLOORS = Map.of(ConfigKey.WHITELIST_EFFECTIVE_HOURS, java.math.BigDecimal.valueOf(24),
-      ConfigKey.WITHDRAW_COOLING_HOURS, java.math.BigDecimal.valueOf(2));
-  static final Map<ConfigKey, java.math.BigDecimal> CEILINGS = Map.of(ConfigKey.WITHDRAW_DAILY_LIMIT, java.math.BigDecimal.valueOf(30000));
+  /** TB-37 资金配置的下限和上限（第 4 批 4c，{@link ConfigFloors}）。端到端测试（profile e2e）不受限制 */
+  static final Map<ConfigKey, java.math.BigDecimal> FLOORS = app.trading.common.config.ConfigFloors.FLOORS;
+  static final Map<ConfigKey, java.math.BigDecimal> CEILINGS = app.trading.common.config.ConfigFloors.CEILINGS;
   /** 改了要发告警邮件的资金配置（TB-37：改值发告警；告警收件地址只在服务器 FX_ALERT_EMAILS） */
   static final java.util.Set<String> FUNDS_GROUPS = java.util.Set.of("withdraw", "telegram");
 
