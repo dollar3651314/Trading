@@ -30,7 +30,8 @@ class TelegramSetup {
   /** 配了令牌才有 */
   @Bean
   TelegramBotHolder telegramBotHolder(TelegramProperties props, TelegramHealth health, TelegramAccountApi accounts, AccountApi account,
-      ObjectProvider<TelegramPrefsApi> prefs, SystemConfig config, RateLimiter limiter, app.trading.account.api.RecoveryApi recovery) {
+      ObjectProvider<TelegramPrefsApi> prefs, SystemConfig config, RateLimiter limiter, app.trading.account.api.RecoveryApi recovery,
+      app.trading.account.api.WithdrawPinApi pins) {
     if (!props.configured()) return new TelegramBotHolder(null, null);
     TelegramBot bot = new TelegramBot(props, health);
     TelegramOutbox outbox = new TelegramOutbox(bot, props);
@@ -46,7 +47,7 @@ class TelegramSetup {
         prefs.getObject().setTelegramPref(userId, category, enabled);
       }
     };
-    bot.wire(outbox, new UpdateHandler(accounts, account, lazyPrefs, config, limiter, props, outbox, bot, recovery));
+    bot.wire(outbox, new UpdateHandler(accounts, account, lazyPrefs, config, limiter, props, outbox, bot, recovery, pins));
     return new TelegramBotHolder(bot, outbox);
   }
 

@@ -82,7 +82,18 @@ interface AuthMapper {
 
   int countPinLocksSince(@Param("userId") long userId, @Param("since") java.time.LocalDateTime since);
 
-  record WithdrawFreezeRow(long userId, String source, String reason, java.time.LocalDateTime createdAt) {}
+  record WithdrawFreezeRow(long userId, String source, String reason, java.time.LocalDateTime createdAt, java.time.LocalDateTime releaseAt) {}
+
+  /** 第 4 批 4c：BOT_SELF 自助解冻排上时间 */
+  int setFreezeRelease(@Param("userId") long userId, @Param("source") String source, @Param("at") java.time.LocalDateTime at);
+
+  /** 到时间该自助解冻的客户 */
+  java.util.List<Long> dueSelfUnfreezes(@Param("now") java.time.LocalDateTime now);
+
+  int deleteDueSelfUnfreeze(@Param("userId") long userId, @Param("now") java.time.LocalDateTime now);
+
+  /** 第 4 批 4c：后台解除 Telegram 关联 */
+  int deleteTelegram(@Param("userId") long userId);
 
   /** 4b 审查 🔴R2：这个客户全部来源的提现冻结（一个来源一行；空 = 没冻结），最早的在前 */
   java.util.List<WithdrawFreezeRow> withdrawFreezes(@Param("userId") long userId);

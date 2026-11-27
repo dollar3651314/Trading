@@ -53,7 +53,27 @@ class FundsOps {
       String txHash, AutoApproveOps.ReviewView autoReview, String provider, String payoutNo, String payoutStatus, String payoutReason, String statusAt,
       String ruleType, String source, boolean firstCheck, boolean firstChecked) {}
 
-  record Recent(String time, String chain, String amount) {}
+  /**
+   * txHash、explorerUrl（第 4 批 4c，KYC 核来源，08 页第 0 节）：充值的交易哈希和区块浏览器链接（TRC20 Tronscan、BSC BscScan、ERC20 Etherscan），
+   * 审核员按它查付款地址；提现的这两项为空。Trading 拿不到付款地址（from_address 为空），要到浏览器里看
+   */
+  record Recent(String time, String chain, String amount, String txHash, String explorerUrl) {
+
+    Recent(String time, String chain, String amount) {
+      this(time, chain, amount, null, null);
+    }
+  }
+
+  /** 区块浏览器里这笔交易的链接；不认识的链、没有哈希时为空 */
+  static String explorer(String chain, String txHash) {
+    if (txHash == null || txHash.isBlank() || !txHash.matches("(0x)?[0-9a-fA-F]{40,80}")) return null;
+    return switch (chain) {
+      case "TRC20" -> "https://tronscan.org/#/transaction/" + txHash;
+      case "BSC" -> "https://bscscan.com/tx/" + txHash;
+      case "ERC20" -> "https://etherscan.io/tx/" + txHash;
+      default -> null;
+    };
+  }
 
   /** 字段和原型 WithdrawalDetail 一致；autoReviewDetail 是完整的自动审批判定记录（v2），没有时为空 */
   record WithdrawalDetail(WithdrawalView withdrawal, String kycStatus, long registeredDays, String totalDeposit, String balance, int openPositions,
@@ -289,7 +309,8 @@ class FundsOps {
     return new WithdrawalDetail(v, c == null ? null : c.kycStatus().toLowerCase(), days, Ops.money(f.totalDeposit()),
         Ops.money(trading.balances(List.of(w.userId())).getOrDefault(w.userId(), BigDecimal.ZERO)),
         trading.openPositionCounts(List.of(w.userId())).getOrDefault(w.userId(), 0),
-        f.recentDeposits().stream().map(d -> new Recent(Ops.time(d.creditedAt() == null ? d.detectedAt() : d.creditedAt()), d.chain(), Ops.money(d.amount()))).toList(),
+        f.recentDeposits().stream().map(d -> new Recent(Ops.time(d.creditedAt() == null ? d.detectedAt() : d.creditedAt()), d.chain(), Ops.money(d.amount()),
+            d.txHash(), explorer(d.chain(), d.txHash()))).toList(),
         f.recentWithdrawals().stream().map(x -> new Recent(Ops.time(x.submittedAt()), x.chain(), Ops.money(x.amount()))).toList(),
         autoApprove.detail(w.id()), safety(w.userId()));
   }

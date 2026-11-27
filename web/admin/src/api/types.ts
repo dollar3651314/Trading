@@ -228,7 +228,7 @@ export interface HeldWithdrawal {
 }
 
 /** 冻结来源：30 天内提现密码锁 2 次 / 网页申请冻结 / 机器人里自己冻结 / 换绑争议 / 换绑证明阶段 */
-export type WithdrawFreezeSource = 'pin_locks' | 'web_request' | 'bot_self' | 'dispute' | 'recovery';
+export type WithdrawFreezeSource = 'pin_locks' | 'web_request' | 'bot_self' | 'dispute' | 'recovery' | 'admin';
 
 export interface WithdrawSafety {
   pinSet: boolean;
@@ -479,7 +479,8 @@ export interface WithdrawalDetail extends Withdrawal {
   totalDeposit: string;
   balance: string;
   openPositions: number;
-  recentDeposits: { time: string; chain: Chain; amount: string }[];
+  /** txHash、explorerUrl（第 4 批 4c，KYC 核来源）：交易哈希和区块浏览器链接，审核员按它查付款地址 */
+  recentDeposits: { time: string; chain: Chain; amount: string; txHash?: string | null; explorerUrl?: string | null }[];
   recentWithdrawals: { time: string; chain: Chain; amount: string }[];
   /** 第 4 批审查：账户冻结、提现冻结（冻结时后端拒绝通过）、最近 48 小时的安全事件 */
   safety?: WithdrawalSafety | null;
@@ -1164,4 +1165,6 @@ export interface Recovery {
 export interface RecoveryDetail {
   recovery: Recovery;
   events: { action: string; actor: string; note: string | null; at: string }[];
+  /** 第 4 批 4c：最近 10 笔充值（交易哈希、区块浏览器链接），按 08 页第 0 节判断"合格来源地址" */
+  deposits?: { time: string; chain: Chain; amount: string; txHash?: string | null; explorerUrl?: string | null }[];
 }

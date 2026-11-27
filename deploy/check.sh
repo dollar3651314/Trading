@@ -72,6 +72,7 @@ check "nginx -t 通过" docker run --rm -e APP_DOMAIN=app.check.invalid -e ADMIN
   -v "$tmp/le:/etc/letsencrypt:ro" "$NGINX_IMAGE" nginx -t
 check "web.Dockerfile 给了 9 个限流阈值、不让收录开关（默认 true）、官网去机器人的两个保底值（默认不去）" bash -c 'test "$1" -eq 24 && grep -q "^ENV FX_NGINX_NOINDEX=true$" deploy/web.Dockerfile && grep -q "^ENV FX_NGINX_BOT_URL=none FX_NGINX_TG_ONLY=false$" deploy/web.Dockerfile' _ "${#envs[@]}"
 check "报价子域名不转发 /internal" grep -q 'location ~\* "^/+(%2f)\*internal" { return 404; }' deploy/nginx/site.conf.template
+check "申请冻结提现（提交和验证码）单独低限额：两个模板都有每秒 2 个、突发 5 个、连接 10 个（4c 复审 🔴D1）" bash -c 'for f in deploy/nginx/site.conf.template deploy/nginx/gateway.conf.template; do grep -q "zone=tr_freeze:1m rate=2r/s;" "$f" && grep -A2 -F "location /api/public/withdraw-freeze {" "$f" | grep -q "limit_req zone=tr_freeze burst=5 nodelay;" && grep -A3 -F "location /api/public/withdraw-freeze {" "$f" | grep -q "limit_conn tr_freeze_conn 10;" || exit 1; done'
 
 echo "== Nginx 路由（真的起 Nginx，报价服务用桩代替，按域名发请求）"
 # 桩：在 quote 网络别名 quote-internal:8090 上，回"quote-app:<路径>"，用来看请求到没到报价服务

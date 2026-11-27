@@ -229,7 +229,9 @@ class RecoveryService implements RecoveryApi {
    *   <li>换绑在证明阶段或已批准：<b>不管有没有争议，撤销都转 Amos 决定</b>，记撤销请求、暂停批准和执行，证明阶段的 RECOVERY 冻结保留，
    *       发告警邮件。防止占着原 TG 的人在反对期里不出声、等批准后一撤销就把真原主永远挡在外面、顺带解冻提现。
    *       需求文档 08 页"正常路径原 TG 或邮箱可直接撤销"这里<b>故意更严</b>，等 Amos 确认。
-   *       Amos 选过一次"维持"以后，再撤销只记经过（REVOKE_AFTER_KEEP）、发告警，不再暂停。</li>
+   *       Amos 选过一次"维持"以后，再撤销只记经过（REVOKE_AFTER_KEEP）、发告警，不再暂停。
+   *       <b>后台发起的更换 Telegram 关联</b>（4c 复审 🟡）不受这个"维持一次"的限制：原 TG 每次撤销都暂停、转 Amos 决定——
+   *       否则偷到后台密码的人可以自己"维持"一次就让自己发起的换绑走完。</li>
    * </ul>
    */
   @Override
@@ -252,7 +254,7 @@ class RecoveryService implements RecoveryApi {
         out[0] = null; // 反对期：按"不是我"处理
         return;
       }
-      if (r.keptAt != null) {
+      if (r.keptAt != null && mapper.adminInitiated(r.id) == 0) {
         // 4b 复审：Amos 已经视频核对、选过一次"维持"，之后的撤销只记经过、发告警，不再暂停批准和执行（防止占着原 TG 的人反复撤销把申请拖住）
         mapper.insertEvent(r.id, "REVOKE_AFTER_KEEP", "user:" + userId, null, now);
         after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who",
@@ -270,6 +272,61 @@ class RecoveryService implements RecoveryApi {
     });
     if (after[0] != null) after[0].run();
     return out[0] == null ? object(userId, recoveryId) : out[0];
+  }
+
+  // ---------- 第 4 批 4c ----------
+
+  @Override
+  public IdentityCheck checkIdentity(long customerNo, String name, String docLast4) {
+    RecoveryMapper.Identity id = mapper.identity(customerNo);
+    if (id == null) return IdentityCheck.NOT_FOUND;
+    if (!"APPROVED".equals(id.kycStatus())) return IdentityCheck.NO_KYC;
+    return lastFourMatches(id.docNumber(), docLast4) && nameMatches(id, name) ? IdentityCheck.KYC_MATCH : IdentityCheck.KYC_MISMATCH;
+  }
+
+  @Override
+  public boolean hasOpen(long userId) {
+    return mapper.openCount(userId) > 0;
+  }
+
+  @Override
+  public TelegramChange adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason) {
+    return tx.execute(st -> {
+      Long old = telegram.byUserId(userId).map(TelegramAccountApi.TgAccount::telegramId).orElse(null);
+      LocalDateTime now = now();
+      if (newTelegramId == null) {
+        if (old == null) throw new BizException("NOT_TG_ACCOUNT", "这个客户没有 Telegram 关联");
+        // 解除：马上生效（不给任何人新的访问权）；安全事件作废全部网页会话（含 BOT 会话）后再删关联
+        auth.securityEvent(userId, SecurityEvent.REBIND);
+        telegram.unlink(userId);
+        pins.freezeWithdraw(userId, "ADMIN", "后台解除了 Telegram 关联");
+        notify.toUser(userId, "TELEGRAM_LINK_CHANGED", Map.of("userId", String.valueOf(userId), "actionZh", "解除", "actionEn", "removed"));
+        long o = old;
+        toApplicant(o, "你的 Telegram 已经不再关联客户号 #" + userId + "（客服操作）。如果不是你本人申请的，请马上联系客服。");
+        return new TelegramChange(old, null, null);
+      }
+      var other = telegram.byTelegramId(newTelegramId);
+      if (other.isPresent()) throw new BizException("TELEGRAM_TAKEN", other.get().userId() == userId ? "已经关联的就是这个 Telegram" : "这个 Telegram 已经关联了别的客户");
+      if (mapper.openCount(userId) > 0) throw new BizException("RECOVERY_OPEN", "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完");
+      // 更换：建一份已批准的换绑申请，24 小时执行等待期后执行；原 TG 的撤销按 4b 规则转 Amos
+      RecoveryMapper.Row r = new RecoveryMapper.Row();
+      r.kind = REBIND;
+      r.userId = userId;
+      r.applicantTgId = newTelegramId;
+      r.applicantTgUsername = cut(newUsername, 64);
+      r.status = "PROOF";
+      r.createdAt = now;
+      mapper.insert(r);
+      LocalDateTime at = now.plus(REBIND_WAIT);
+      String note = "后台更换 Telegram 关联：" + (reason == null ? "" : reason);
+      mapper.insertEvent(r.id, "APPLY", "admin:" + adminId, note, now);
+      mapper.approve(r.id, adminId, cut(note, 500), now, at);
+      mapper.insertEvent(r.id, "APPROVE", "admin:" + adminId, cut(note, 500), now);
+      pins.freezeWithdraw(userId, "ADMIN", "后台更换 Telegram 关联（找回申请 #" + r.id + "）");
+      notify.toUser(userId, "RECOVERY_APPROVED", Map.of("id", String.valueOf(r.id), "executeAt", at.format(TIME)));
+      toApplicant(newTelegramId, "客服已安排把客户号 #" + userId + " 关联到这个 Telegram，将在 " + at.format(TIME) + " 生效。生效前原账户持有人还可以提出撤销。");
+      return new TelegramChange(old, r.id, at);
+    });
   }
 
   // ---------- 后台 ----------
@@ -390,7 +447,9 @@ class RecoveryService implements RecoveryApi {
         oldTg[0] = telegram.byUserId(r.userId).map(TelegramAccountApi.TgAccount::telegramId).orElse(null);
         // 安全事件：作废全部网页会话（含 BOT 会话），48 小时不能提现；之后才改授权时间，新 TG 不用再点"重新授权"
         auth.securityEvent(r.userId, SecurityEvent.REBIND);
-        telegram.rebind(r.userId, r.applicantTgId, r.applicantTgUsername, now());
+        // 后台给没有 TG 的客户关联（4c）：没有原来的 TG，直接关联
+        if (oldTg[0] == null) telegram.link(r.userId, r.applicantTgId, r.applicantTgUsername, now());
+        else telegram.rebind(r.userId, r.applicantTgId, r.applicantTgUsername, now());
       } else {
         auth.securityEvent(r.userId, SecurityEvent.PIN_RESET);
         pins.releaseFreeze(r.userId, SOURCE_PIN_LOCKS);

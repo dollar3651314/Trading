@@ -586,3 +586,8 @@ export function releaseHeldWithdrawal(id: string, reason: string): Promise<Withd
 export function cancelHeldWithdrawal(id: string, reason: string): Promise<Withdrawal> {
   return request(`/withdrawals/${enc(id)}/cancel-held`, { method: 'POST', body: { reason } });
 }
+
+/** 第 4 批 4c：解除（telegramId 为空）或更换 Telegram 关联；只有超管，要原因和自己的后台密码 */
+export function changeCustomerTelegram(id: number, telegramId: string | null, username: string | null, reason: string, password: string): Promise<CustomerDetail> {
+  return request(`/customers/${id}/telegram`, { method: 'POST', body: { telegramId, username, reason, password } });
+}

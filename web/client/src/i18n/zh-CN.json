@@ -588,7 +588,8 @@
     "upDownRed": "红涨绿跌",
     "onboarding": "新手引导",
     "withdrawPin": "提现密码",
-    "recoveries": "找回申请"
+    "recoveries": "找回申请",
+    "withdrawFreeze": "提现冻结"
   },
   "kyc": {
     "intro": "只在提现前需要身份认证；注册、充值和交易不受影响。",
@@ -738,7 +739,9 @@
     "recoveryOpen": "已经有一份进行中的申请，请等它处理完。",
     "recoveryNotDisputed": "请先在机器人里点「不是我」。",
     "hasEmail": "你绑了邮箱，请用邮箱验证码重设提现密码。",
-    "notTgAccount": "只有 Telegram 账户可以申请人工重设提现密码。"
+    "notTgAccount": "只有 Telegram 账户可以申请人工重设提现密码。",
+    "captchaInvalid": "验证码不对或已过期，请换一张再试",
+    "notSelfFrozen": "没有在机器人里自己冻结的提现；别的冻结要人工解冻"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -928,7 +931,6 @@
     "freezeDesc": "Telegram 账号被别人占用了？先冻结提现，保护资金",
     "recover": "找回 Telegram 账户",
     "recoverDesc": "Telegram 账号丢了或换了号",
-    "entryPending": "这项功能会在后续版本开放（填写本人信息、人工审核），现在还不能在网页上提交。",
     "back": "返回",
     "entering": "正在进入…",
     "reason": {
@@ -1009,5 +1011,37 @@
     "revoke": "撤销这份申请",
     "revokeConfirm": "确定撤销？",
     "revokeBody": "人工重设提现密码：立即撤销。换绑申请：反对期里撤销按「不是我」处理；之后的撤销一律交审核员视频核对后决定，决定之前不会执行，提现冻结保持不变。"
+  },
+  "freeze": {
+    "intro": "怀疑账号被盗、Telegram 丢了时用：填客户号和只有你本人知道的一项。冻结后不能提现、加白名单、改提现密码，交易照常；只能人工核对后解冻。",
+    "customerNo": "客户号",
+    "proof": "核对方式",
+    "modeKyc": "做过身份认证",
+    "modeDeposit": "没做身份认证",
+    "name": "身份认证时的姓名",
+    "last4": "证件号后 4 位",
+    "amount": "最近一笔充值的金额",
+    "date": "最近一笔充值的日期",
+    "dateHint": "按 UTC 时间",
+    "captcha": "验证码",
+    "captchaAlt": "图形验证码",
+    "newCaptcha": "换一张",
+    "hardHint": "这台设备最近提交失败较多，换成了更难的验证码。",
+    "submit": "申请冻结提现",
+    "after": "如果信息正确，提现已经冻结，账户持有人会收到通知。解冻要人工核对本人（1 个工作日内处理），请联系客服。",
+    "title": "提现冻结",
+    "none": "提现没有冻结。",
+    "releaseAt": "将在 {{time}} 自动解冻",
+    "manualOnly": "其中有只能人工解冻的冻结，请联系客服核对本人。",
+    "selfIntro": "这是你在机器人里自己设的冻结。输对提现密码后 24 小时自动解冻（Telegram 和邮箱各通知一次）；这期间如果有人在网页申请冻结，就转人工。",
+    "selfSubmit": "申请解冻",
+    "source": {
+      "pin_locks": "30 天内提现密码锁了 2 次",
+      "web_request": "网页申请冻结",
+      "bot_self": "在机器人里自己冻结",
+      "dispute": "找回申请有争议",
+      "recovery": "找回申请证明阶段",
+      "admin": "客服操作（Telegram 关联变更）"
+    }
   }
 }

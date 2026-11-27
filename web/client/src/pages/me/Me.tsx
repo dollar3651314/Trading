@@ -74,6 +74,7 @@ export default function Me() {
           <MenuItem to="/me/password" icon="lock" label={t('me.changePassword')} />
           <MenuItem to="/me/withdraw-pin" icon="lock" label={t('me.withdrawPin')} />
           <MenuItem to="/me/recovery" icon="shield" label={t('me.recoveries')} />
+          <MenuItem to="/me/withdraw-freeze" icon="lock" label={t('me.withdrawFreeze')} />
           <li>
             <button type="button" className="menu-item" onClick={openOnboarding}>
               <Icon name="checkCircle" size={20} />

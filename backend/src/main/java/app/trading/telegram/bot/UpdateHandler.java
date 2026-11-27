@@ -56,6 +56,14 @@ public class UpdateHandler {
   static final String CB_NOOP = "noop";
   /** 退路模式（FX_TG_LOGIN_MODE=link）：打开网页的回调按钮 open:路径，点了现发一条 60 秒一次性链接 */
   static final String CB_OPEN = "open:";
+  /** 第 4 批 4c：机器人里自己冻结提现（来源 BOT_SELF），先确认 */
+  static final String CB_FREEZE = "wdfreeze";
+  static final String CB_FREEZE_YES = "wdfreeze:yes";
+  static final String SOURCE_BOT_SELF = "BOT_SELF";
+  static final String TEXT_FREEZE_ASK = "冻结提现：冻结后不能提现、加白名单、改提现密码，交易照常。怀疑账号被盗时用。\n"
+      + "要解除：在网页输对提现密码，24 小时后自动解冻（期间 Telegram 和邮箱各通知一次）；这 24 小时里如果有人在网页申请冻结，就转人工。确定冻结吗？";
+  static final String TEXT_FREEZE_DONE = "已冻结提现（交易照常）。要解除请点主菜单里的「解除自己设的提现冻结」，在网页输提现密码。";
+
   /** 第 4 批 4b：没绑账户的新 TG 点「找回原账户」 */
   static final String CB_RECOVER = "recover";
   static final String TEXT_RECOVER_ASK = "找回原账户（人工换绑）：请发一条消息，写原账户的客户号、KYC 时的姓名和证件号后 4 位，用空格隔开，例如：\n100482 张三 1234\n\n"
@@ -108,12 +116,15 @@ public class UpdateHandler {
   private final TelegramOutbox outbox;
   private final TelegramOutbox.Api api;
   private final app.trading.account.api.RecoveryApi recovery;
+  private final app.trading.account.api.WithdrawPinApi pins;
   /** 点了「找回原账户」、等着发信息的新 TG（单实例，放内存；重启后丢了就再点一次） */
   private final java.util.concurrent.ConcurrentHashMap<Long, Long> awaitingRecover = new java.util.concurrent.ConcurrentHashMap<>();
 
   public UpdateHandler(TelegramAccountApi accounts, AccountApi account, TelegramPrefsApi prefs, SystemConfig config, RateLimiter limiter,
-      TelegramProperties props, TelegramOutbox outbox, TelegramOutbox.Api api, app.trading.account.api.RecoveryApi recovery) {
+      TelegramProperties props, TelegramOutbox outbox, TelegramOutbox.Api api, app.trading.account.api.RecoveryApi recovery,
+      app.trading.account.api.WithdrawPinApi pins) {
     this.recovery = recovery;
+    this.pins = pins;
     this.accounts = accounts;
     this.account = account;
     this.prefs = prefs;
@@ -185,7 +196,7 @@ public class UpdateHandler {
     syncUsername(a, from);
     String cmd = text == null ? "" : text.strip();
     if (cmd.startsWith("/settings")) send(chat, prefsText(), prefsKeyboard(a.userId()));
-    else send(chat, menuText(a), menuKeyboard());
+    else send(chat, menuText(a), menuKeyboard(a.userId()));
   }
 
   // ---------- 按钮 ----------
@@ -214,6 +225,21 @@ public class UpdateHandler {
       recoveryAction(chat, a, data);
       return;
     }
+    // 第 4 批 4c：自己冻结提现——只会减少权限，要重新授权时也照样处理
+    if (CB_FREEZE.equals(data)) {
+      send(chat, TEXT_FREEZE_ASK, keyboard(List.of(row(cb("确认冻结提现", CB_FREEZE_YES), cb("取消", CB_MENU)))));
+      return;
+    }
+    if (CB_FREEZE_YES.equals(data)) {
+      try {
+        pins.freezeWithdraw(a.userId(), SOURCE_BOT_SELF, "客户在机器人里自己冻结");
+        edit(chat, messageId, TEXT_FREEZE_DONE, null);
+      } catch (RuntimeException e) {
+        log.warn("机器人里冻结提现失败 user={}：{}", a.userId(), e.toString());
+        send(chat, TEXT_FAILED, null);
+      }
+      return;
+    }
     if (UserStatus.FROZEN == status(a)) {
       send(chat, TEXT_FROZEN, null);
       return;
@@ -227,13 +253,13 @@ public class UpdateHandler {
     if (CB_REAUTH.equals(data)) {
       accounts.reauthorize(a.userId());
       edit(chat, messageId, "已重新授权。", null);
-      send(chat, menuText(a), menuKeyboard());
+      send(chat, menuText(a), menuKeyboard(a.userId()));
       return;
     }
     if (!gate(chat, a)) return;
     if (CB_SIGNUP.equals(data) || CB_MENU.equals(data)) {
       // 已经开过户又点了旧的「授权开户」：不再开户，回主菜单
-      send(chat, menuText(a), menuKeyboard());
+      send(chat, menuText(a), menuKeyboard(a.userId()));
     } else if (CB_PREFS.equals(data)) {
       send(chat, prefsText(), prefsKeyboard(a.userId()));
     } else if (data.startsWith(CB_PREF)) {
@@ -241,7 +267,7 @@ public class UpdateHandler {
     } else if (data.startsWith(CB_OPEN)) {
       openLink(chat, a, data.substring(CB_OPEN.length()));
     } else if (!CB_DECLINE.equals(data) && !CB_NOOP.equals(data)) {
-      send(chat, menuText(a), menuKeyboard());
+      send(chat, menuText(a), menuKeyboard(a.userId()));
     }
   }
 
@@ -251,7 +277,7 @@ public class UpdateHandler {
    */
   private void openLink(long chat, TgAccount a, String path) {
     if (!props.linkMode() || !props.hasWebUrl()) {
-      send(chat, menuText(a), menuKeyboard());
+      send(chat, menuText(a), menuKeyboard(a.userId()));
       return;
     }
     String token;
@@ -361,7 +387,7 @@ public class UpdateHandler {
       return;
     }
     edit(chat, messageId, "已授权开户。", null);
-    send(chat, welcomeText(a), menuKeyboard());
+    send(chat, welcomeText(a), menuKeyboard(a.userId()));
   }
 
   private void togglePref(long chat, Integer messageId, TgAccount a, String code) {
@@ -452,13 +478,22 @@ public class UpdateHandler {
   }
 
   /** 欢迎卡片 / 主菜单：「打开交易」和快捷入口是 login_url 按钮（网页地址没配置时不显示），「通知设置」 */
-  private InlineKeyboardMarkup menuKeyboard() {
+  private InlineKeyboardMarkup menuKeyboard(long userId) {
     List<InlineKeyboardRow> rows = new ArrayList<>();
     if (props.hasWebUrl()) {
       rows.add(row(login("打开交易", "/trade")));
       rows.add(row(login("行情", "/markets"), login("持仓", "/positions")));
       rows.add(row(login("充值", "/assets"), login("提现", "/assets/withdraw")));
     }
+    // 第 4 批 4c：自己冻结提现（BOT_SELF）；冻结着的给"解除"入口（网页输提现密码，24 小时后自动解冻）
+    boolean selfFrozen = false;
+    try {
+      selfFrozen = pins.status(userId).frozenBy(SOURCE_BOT_SELF);
+    } catch (RuntimeException e) {
+      log.debug("查提现冻结失败：{}", e.toString());
+    }
+    if (selfFrozen && props.hasWebUrl()) rows.add(row(login("解除自己设的提现冻结", "/me/withdraw-freeze")));
+    else if (!selfFrozen) rows.add(row(cb("冻结提现", CB_FREEZE)));
     rows.add(row(cb("通知设置", CB_PREFS)));
     return keyboard(rows);
   }

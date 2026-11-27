@@ -43,7 +43,9 @@ public enum TelegramCategory {
       // 第 4 批 4b：找回和换绑、没邮箱忘记提现密码
       Map.entry("RECOVERY_REQUESTED", SECURITY), Map.entry("RECOVERY_APPROVED", SECURITY), Map.entry("RECOVERY_EXECUTED", SECURITY),
       Map.entry("RECOVERY_CLOSED", SECURITY), Map.entry("PIN_RESET_REQUESTED", SECURITY), Map.entry("PIN_RESET_APPROVED", SECURITY),
-      Map.entry("PIN_RESET_EXECUTED", SECURITY));
+      Map.entry("PIN_RESET_EXECUTED", SECURITY),
+      // 第 4 批 4c：机器人里自己冻结的自助解冻、解冻；后台变更 Telegram 关联
+      Map.entry("WITHDRAW_SELF_UNFREEZE", SECURITY), Map.entry("WITHDRAW_UNFROZEN", SECURITY), Map.entry("TELEGRAM_LINK_CHANGED", SECURITY));
 
   /** 模板编号 → 分类；不认识的（后台新加的模板、手动发送）算 {@link #SYSTEM} */
   public static TelegramCategory ofTemplate(String templateCode) {

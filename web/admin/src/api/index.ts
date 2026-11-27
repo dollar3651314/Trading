@@ -270,3 +270,5 @@ export const keepRecovery: typeof real.keepRecovery = IS_MOCK ? mock.keepRecover
 export const releaseHeldWithdrawal: typeof real.releaseHeldWithdrawal = IS_MOCK ? mock.releaseHeldWithdrawal : real.releaseHeldWithdrawal;
 /** POST /api/admin/withdrawals/{id}/cancel-held（取消并退回，高危） */
 export const cancelHeldWithdrawal: typeof real.cancelHeldWithdrawal = IS_MOCK ? mock.cancelHeldWithdrawal : real.cancelHeldWithdrawal;
+/** POST /api/admin/customers/{id}/telegram（第 4 批 4c：只有超管；高危、后台密码、告警邮件） */
+export const changeCustomerTelegram: typeof real.changeCustomerTelegram = IS_MOCK ? mock.changeCustomerTelegram : real.changeCustomerTelegram;

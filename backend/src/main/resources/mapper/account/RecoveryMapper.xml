@@ -8,7 +8,7 @@
     closed_at, created_at</sql>
 
   <select id="identity" resultType="app.trading.account.recovery.RecoveryMapper$Identity">
-    SELECT p.first_name, p.middle_name, p.last_name,
+    SELECT u.id AS user_id, p.first_name, p.middle_name, p.last_name,
       (SELECT k.status FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status,
       (SELECT k.doc_number FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS doc_number
     FROM account_user u LEFT JOIN account_profile p ON p.user_id = u.id WHERE u.id = #{userId}
@@ -39,6 +39,10 @@
 
   <select id="openCount" resultType="int">
     SELECT COUNT(*) FROM account_recovery WHERE user_id = #{userId} AND status IN ('OBJECTION', 'PROOF', 'APPROVED')
+  </select>
+
+  <select id="adminInitiated" resultType="int">
+    SELECT COUNT(*) FROM account_recovery_event WHERE recovery_id = #{id} AND action = 'APPLY' AND actor LIKE 'admin:%'
   </select>
 
   <select id="countSince" resultType="int">

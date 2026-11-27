@@ -63,8 +63,9 @@ class TelegramWithdrawGate {
 
   TgContext context(long userId) {
     boolean email = account.email(userId).isPresent();
-    BigDecimal q = config.decimal(email ? ConfigKey.TELEGRAM_WITHDRAW_DAILY_LIMIT_EMAIL : ConfigKey.TELEGRAM_WITHDRAW_DAILY_LIMIT,
-        email ? DEFAULT_QUOTA_EMAIL : DEFAULT_QUOTA);
+    ConfigKey k = email ? ConfigKey.TELEGRAM_WITHDRAW_DAILY_LIMIT_EMAIL : ConfigKey.TELEGRAM_WITHDRAW_DAILY_LIMIT;
+    // 4c 审查 🟡：读的时候也按上限（2,000）夹住，绕过后台直接改库也超不过
+    BigDecimal q = app.trading.common.config.ConfigFloors.clamp(k, config.decimal(k, email ? DEFAULT_QUOTA_EMAIL : DEFAULT_QUOTA));
     return new TgContext(email, q);
   }
 

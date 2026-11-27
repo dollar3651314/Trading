@@ -44,6 +44,32 @@ public interface RecoveryApi {
   /** 没邮箱的 TG 客户申请人工重设提现密码；返回申请编号 */
   long applyPinReset(long userId);
 
+  /** 第 4 批 4c：核对网页"申请冻结提现"填的本人信息。NO_KYC 时由调用方核对最近一笔充值（金额 + 日期） */
+  enum IdentityCheck {
+    NOT_FOUND,
+    KYC_MATCH,
+    KYC_MISMATCH,
+    NO_KYC
+  }
+
+  IdentityCheck checkIdentity(long customerNo, String name, String docLast4);
+
+  /** 这个客户有没有进行中的找回申请（网页入口"7 天只能冻结 1 次"不受限） */
+  boolean hasOpen(long userId);
+
+  /**
+   * 第 4 批 4c 后台"解除关联 / 更换 Telegram 关联"（08 页第 5 节；只有超管、再输后台密码、审计、告警邮件在后台模块）：
+   * <ul>
+   *   <li>解除（newTelegramId 为空）：马上生效——安全事件（作废全部网页会话含 BOT 会话）+ 删掉 TG 关联 + 冻结提现（来源 ADMIN）。不给任何人新的访问权。</li>
+   *   <li>更换（4c 审查 🟡）：不一步到位，建一份<b>已批准</b>的换绑申请（审批人就是操作的管理员），24 小时后由定时任务执行（和 4b 的换绑一样：
+   *       安全事件、改绑、清提现密码和白名单）；建的时候就冻结提现（ADMIN）、通知原 TG 和邮箱（带「撤销」），原 TG 的撤销按 4b 规则转 Amos
+   *       （维持过一次后不再暂停）。这个客户已经有进行中的找回申请时拒绝（{@code RECOVERY_OPEN}）。</li>
+   * </ul>
+   */
+  record TelegramChange(Long oldTelegramId, Long recoveryId, LocalDateTime executeAt) {}
+
+  TelegramChange adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason);
+
   // ---------- 后台（权限、再输密码、审计、告警邮件在后台模块） ----------
 
   record Event(String action, String actor, String note, LocalDateTime at) {}

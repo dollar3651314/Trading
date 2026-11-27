@@ -761,6 +761,8 @@ export const systemConfigs: SystemConfig[] = [
   // TG 每天提现额度（迁移 V38，第 4 批）：没邮箱 500 / 有邮箱 2,000，网页和机器人合并；上限 2,000
   { key: 'telegram.withdraw.dailyLimit', value: '500', unit: 'usdt', group: 'telegram', updatedAt: null },
   { key: 'telegram.withdraw.dailyLimitEmail', value: '2000', unit: 'usdt', group: 'telegram', updatedAt: null },
+  // 网页申请冻结提现：全平台 1 小时成功冻结超过这个数发告警（迁移 V40，第 4 批 4c）
+  { key: 'withdraw.freeze.platformAlertPerHour', value: '10', unit: 'count', group: 'withdraw', updatedAt: null },
 ];
 
 /** 热钱包余额（原型数据；地址是公开的测试地址，不是密钥）。下限在 systemConfigs 里 */

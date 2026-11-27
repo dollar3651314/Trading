@@ -115,7 +115,9 @@
     "tooLong": "太长",
     "tooManyDecimals": "小数位太多（不能超过品种的小数位）",
     "unknownVariable": "用了模板没有的变量",
-    "weak": "强度不够（至少 10 位，含字母和数字）"
+    "weak": "强度不够（至少 10 位，含字母和数字）",
+    "belowFloor": "低于下限（TB-37：白名单生效至少 24 小时、冷静期至少 2 小时）",
+    "aboveCeiling": "高于上限（TB-37：每天提现累计最多 30,000 USDT）"
   },
   "app": {
     "adminConsole": "管理后台"
@@ -167,7 +169,9 @@
       "edit": "编辑客户资料",
       "freeze": "冻结客户",
       "unfreeze": "解冻客户",
-      "withdraw_unfreeze": "解除提现冻结"
+      "withdraw_unfreeze": "解除提现冻结",
+      "telegram_relink": "更换 Telegram 关联",
+      "telegram_unlink": "解除 Telegram 关联"
     },
     "holiday": {
       "create": "新增假期",
@@ -398,7 +402,8 @@
     "withdraw_maxSingle": "单笔最大提现",
     "withdraw_minAmount": "单笔最小提现",
     "telegram_withdraw_dailyLimit": "Telegram 每天提现额度（没绑邮箱）",
-    "telegram_withdraw_dailyLimitEmail": "Telegram 每天提现额度（绑了邮箱）"
+    "telegram_withdraw_dailyLimitEmail": "Telegram 每天提现额度（绑了邮箱）",
+    "withdraw_freeze_platformAlertPerHour": "网页申请冻结提现：1 小时内成功冻结超过多少个发告警"
   },
   "customerStatus": {
     "active": "正常",
@@ -478,7 +483,8 @@
         "web_request": "网页申请冻结",
         "bot_self": "客户在机器人里自己冻结",
         "dispute": "换绑争议",
-        "recovery": "换绑证明阶段"
+        "recovery": "换绑证明阶段",
+        "admin": "客服操作（Telegram 关联变更）"
       },
       "unfreeze": "解除提现冻结",
       "frozenLine": "冻结来源：{{source}}；冻结时间：{{time}}",
@@ -504,6 +510,19 @@
       "confirmRelease": "确认继续放款",
       "confirmCancel": "确认取消并退回",
       "target": "提现 {{id}}：{{amount}} USDT → {{address}}"
+    },
+    "tg": {
+      "relink": "更换 Telegram 关联",
+      "unlink": "解除关联",
+      "superOnly": "只有超级管理员可以操作",
+      "newId": "新的 Telegram 用户编号",
+      "newIdRequired": "请填 Telegram 用户编号（纯数字）",
+      "newUsername": "新的 Telegram 用户名（可不填）",
+      "impact": "更换不会马上生效：建一份已批准的换绑申请，24 小时后执行（执行时记安全事件、作废全部网页会话、清提现密码和白名单）；现在就冻结提现、通知原 Telegram 和邮箱，原 Telegram 的撤销转给 Amos 决定。解除马上生效：安全事件、作废全部网页会话、冻结提现。都会给告警邮箱发邮件。",
+      "unlinkImpact": "解除后这个客户没有 Telegram 关联：没绑邮箱的就没有登录方式，要重新关联才能用。",
+      "confirmRelink": "确认更换",
+      "confirmUnlink": "确认解除",
+      "relinkScheduled": "已安排更换：24 小时后执行，等待期内可以在\"找回申请\"里撤销"
     }
   },
   "dashboard": {
@@ -638,7 +657,10 @@
     "recoveryNotPending": "只能处理待审核的申请",
     "recoveryNotOpen": "这份申请已经结束了",
     "recoveryNoRevokeRequest": "这份申请没有待决定的撤销请求",
-    "recoveryRevokePending": "原 TG 请求了撤销：请先视频核对，选维持或撤销"
+    "recoveryRevokePending": "原 TG 请求了撤销：请先视频核对，选维持或撤销",
+    "telegramTaken": "这个 Telegram 已经关联了别的客户",
+    "notTgAccount": "这个客户没有 Telegram 关联",
+    "recoveryOpen": "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -1515,7 +1537,8 @@
         "pin_reset": "重设了提现密码",
         "kyc_first": "第一次提交 KYC"
       }
-    }
+    },
+    "viewTx": "在区块浏览器查看"
   },
   "hotWallet": {
     "address": "热钱包地址",
@@ -2135,6 +2158,8 @@
     "confirmKeep": "确认维持",
     "keepImpact": "维持后清掉撤销请求，到执行时间就换绑。请先视频核对原主。",
     "keptTitle": "已维持过",
-    "kept": "{{time}} 你已经维持过一次：之后原 TG 再撤销只记入经过并发告警邮件，不再暂停批准和执行。"
+    "kept": "{{time}} 你已经维持过一次：之后原 TG 再撤销只记入经过并发告警邮件，不再暂停批准和执行。",
+    "deposits": "最近的充值（核对来源）",
+    "depositsHint": "在区块浏览器里查付款地址：早于申请 30 天以上并早于最近一次安全事件、没有交易所标签、不是多人共用（近 90 天给超过 20 个地址转过账）、最近 30 天没有新的付款地址，才算合格来源地址（08 页第 0 节）。"
   }
 }

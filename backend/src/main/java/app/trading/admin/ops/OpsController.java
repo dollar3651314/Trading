@@ -97,6 +97,17 @@ class OpsController {
     return customers.detail(id);
   }
 
+  /** 第 4 批 4c：解除 / 更换 Telegram 关联（只有超管；telegramId 为空是解除），请求体 {telegramId, username, reason, password} */
+  record TelegramLinkBody(String telegramId, String username, String reason, String password) {}
+
+  @RequiresPermission(Permission.CUSTOMER_VIEW)
+  @PostMapping("/api/admin/customers/{id}/telegram")
+  CustomerOps.Detail changeTelegram(@PathVariable long id, @RequestBody(required = false) TelegramLinkBody b) {
+    customers.changeTelegram(AdminContext.current(), id, b == null ? null : b.telegramId(), b == null ? null : b.username(), b == null ? null : b.reason(),
+        b == null ? null : b.password());
+    return customers.detail(id);
+  }
+
   /** v2 E1：编辑客户资料（高危，必须填原因）；邮箱、状态不能在这里改 */
   @RequiresPermission(Permission.CUSTOMER_EDIT)
   @PutMapping("/api/admin/customers/{id}/profile")

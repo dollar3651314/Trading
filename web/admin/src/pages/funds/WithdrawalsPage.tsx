@@ -490,6 +490,14 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
             <div className="row" key={i}>
               <span>
                 {shortTime(d.time)} · {d.chain}
+                {d.explorerUrl ? (
+                  <>
+                    {' · '}
+                    <a href={d.explorerUrl} target="_blank" rel="noreferrer noopener" title={d.txHash ?? ''}>
+                      {t('withdrawals.viewTx')}
+                    </a>
+                  </>
+                ) : null}
               </span>
               <span className="num up">+{formatAmount(d.amount)}</span>
             </div>

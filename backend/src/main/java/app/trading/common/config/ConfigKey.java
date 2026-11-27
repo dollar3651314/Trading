@@ -103,13 +103,15 @@ public enum ConfigKey {
    * 上限 2,000（TB-37：每天额度设上限）
    */
   TELEGRAM_WITHDRAW_DAILY_LIMIT("telegram.withdraw.dailyLimit", Unit.USDT, "telegram", BigDecimal.ZERO, true, BigDecimal.valueOf(2000)),
-  TELEGRAM_WITHDRAW_DAILY_LIMIT_EMAIL("telegram.withdraw.dailyLimitEmail", Unit.USDT, "telegram", BigDecimal.ZERO, true, BigDecimal.valueOf(2000));
+  TELEGRAM_WITHDRAW_DAILY_LIMIT_EMAIL("telegram.withdraw.dailyLimitEmail", Unit.USDT, "telegram", BigDecimal.ZERO, true, BigDecimal.valueOf(2000)),
+  /** 第 4 批 4c（TB-27）：网页"申请冻结提现"全平台 1 小时内成功冻结超过这个数就发告警（迁移 V40 默认 10） */
+  WITHDRAW_FREEZE_PLATFORM_ALERT_PER_HOUR("withdraw.freeze.platformAlertPerHour", Unit.COUNT, "withdraw", BigDecimal.ONE);
 
   /**
    * 第 4 批（冻结、找回流程）上线前不能对所有人开放开户：后台保存 {@code telegram.signup.allowIds = *} 时拒绝（第 2 批审查 🟡2）。
-   * <b>第 4 批合并时改成 true</b>
+   * 第 4 批 4c 起是 true：冻结入口、找回和换绑都有了，可以对所有人开放（开不开仍由 Amos 在后台决定）
    */
-  public static final boolean SIGNUP_ALL_ALLOWED = false;
+  public static final boolean SIGNUP_ALL_ALLOWED = true;
 
   /** 单位，和原型一致 */
   public enum Unit {

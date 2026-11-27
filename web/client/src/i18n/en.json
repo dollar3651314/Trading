@@ -588,7 +588,8 @@
     "upDownRed": "Red up, green down",
     "onboarding": "Getting started",
     "withdrawPin": "Withdrawal PIN",
-    "recoveries": "Recovery requests"
+    "recoveries": "Recovery requests",
+    "withdrawFreeze": "Withdrawal freezes"
   },
   "kyc": {
     "intro": "Verification is only required before withdrawing.",
@@ -738,7 +739,9 @@
     "recoveryOpen": "There is already a request in progress. Please wait for it to finish.",
     "recoveryNotDisputed": "Tap \"Not me\" in the bot first.",
     "hasEmail": "Your account has an email. Reset your PIN with an email code instead.",
-    "notTgAccount": "Only Telegram accounts can request a manual PIN reset."
+    "notTgAccount": "Only Telegram accounts can request a manual PIN reset.",
+    "captchaInvalid": "Wrong or expired captcha. Try a new one",
+    "notSelfFrozen": "No freeze you set in the bot; other freezes are lifted manually"
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",
@@ -928,7 +931,6 @@
     "freezeDesc": "Someone else is using your Telegram account? Freeze withdrawals first",
     "recover": "Recover Telegram account",
     "recoverDesc": "Lost your Telegram account or changed number",
-    "entryPending": "This will open in a later release (your details plus a manual review). It cannot be submitted on the web yet.",
     "back": "Back",
     "entering": "Signing in…",
     "reason": {
@@ -1009,5 +1011,37 @@
     "revoke": "Cancel this request",
     "revokeConfirm": "Cancel it?",
     "revokeBody": "Manual PIN reset: cancelled immediately. Rebind: during the objection period it counts as \"Not me\"; after that, every cancellation goes to the reviewer, who verifies by video and decides. Nothing runs before that, and the withdrawal freeze stays."
+  },
+  "freeze": {
+    "intro": "Use this if your account may be stolen or you lost your Telegram: enter your customer number and one detail only you know. Withdrawals, adding addresses and PIN changes stop; trading continues. Only a manual check can lift it.",
+    "customerNo": "Customer number",
+    "proof": "Verify with",
+    "modeKyc": "Identity verified",
+    "modeDeposit": "Not verified",
+    "name": "Name as verified",
+    "last4": "Last 4 of ID number",
+    "amount": "Last deposit amount",
+    "date": "Last deposit date",
+    "dateHint": "UTC date",
+    "captcha": "Captcha",
+    "captchaAlt": "Captcha image",
+    "newCaptcha": "New image",
+    "hardHint": "Many failed attempts from this device; the captcha is harder now.",
+    "submit": "Freeze withdrawals",
+    "after": "If the details are correct, withdrawals are now frozen and the account holder is notified. Lifting it needs a manual identity check (within 1 business day); contact support.",
+    "title": "Withdrawal freezes",
+    "none": "Withdrawals are not frozen.",
+    "releaseAt": "Unfreezes automatically at {{time}}",
+    "manualOnly": "Some freezes can only be lifted manually. Contact support for an identity check.",
+    "selfIntro": "You set this freeze in the bot. Enter your withdrawal PIN and it lifts automatically after 24 hours (Telegram and email are notified). If someone requests a freeze on the web meanwhile, it turns manual.",
+    "selfSubmit": "Request unfreeze",
+    "source": {
+      "pin_locks": "PIN locked twice in 30 days",
+      "web_request": "Freeze requested on the web",
+      "bot_self": "Frozen by you in the bot",
+      "dispute": "Disputed recovery request",
+      "recovery": "Recovery verification",
+      "admin": "Support action (Telegram link changed)"
+    }
   }
 }

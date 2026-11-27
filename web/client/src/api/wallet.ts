@@ -2,7 +2,7 @@
 import * as mock from '../mocks/wallet';
 import { IS_MOCK } from './mode';
 import * as real from './real/wallet';
-import type { MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from './types';
+import type { FreezeCaptcha, FreezeRequest, MyFreeze, MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from './types';
 
 export const getDepositAddresses = (): Promise<DepositAddress[]> => (IS_MOCK ? mock.getDepositAddresses() : real.getDepositAddresses());
 export const requestDepositAddress = (network: Network): Promise<DepositAddress> => (IS_MOCK ? mock.requestDepositAddress(network) : real.requestDepositAddress(network));
@@ -29,3 +29,9 @@ export const listMyRecoveries = (): Promise<MyRecovery[]> => (IS_MOCK ? mock.lis
 export const objectRecovery = (id: number, pin: PinInput): Promise<void> => (IS_MOCK ? mock.objectRecovery(id, pin) : real.objectRecovery(id, pin));
 export const revokeRecovery = (id: number): Promise<{ message: string }> => (IS_MOCK ? mock.revokeRecovery(id) : real.revokeRecovery(id));
 export const requestPinReset = (): Promise<{ id: number }> => (IS_MOCK ? mock.requestPinReset() : real.requestPinReset());
+
+// 申请冻结提现、自己的冻结和自助解冻（第 4 批 4c）
+export const getFreezeCaptcha = (fp?: string): Promise<FreezeCaptcha> => (IS_MOCK ? mock.getFreezeCaptcha() : real.getFreezeCaptcha(fp));
+export const requestWithdrawFreeze = (req: FreezeRequest): Promise<{ message: string }> => (IS_MOCK ? mock.requestWithdrawFreeze(req) : real.requestWithdrawFreeze(req));
+export const listMyFreezes = (): Promise<MyFreeze[]> => (IS_MOCK ? mock.listMyFreezes() : real.listMyFreezes());
+export const requestSelfUnfreeze = (pin: PinInput): Promise<{ releaseAt: string }> => (IS_MOCK ? mock.requestSelfUnfreeze(pin) : real.requestSelfUnfreeze(pin));

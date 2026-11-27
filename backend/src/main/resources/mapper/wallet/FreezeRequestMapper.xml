@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 网页"申请冻结提现"（第 4 批 4c，迁移 V40）：提交记录、按来源 / 目标 / 全平台计数、最近一笔充值。时间一律 UTC（应用时钟传进来）。 -->
+<mapper namespace="app.trading.wallet.freeze.FreezeRequestMapper">
+
+  <insert id="insert">
+    INSERT INTO wallet_freeze_request (target_user_id, ip, fingerprint, result, created_at) VALUES (#{target}, #{ip}, #{fp}, #{result}, #{at})
+  </insert>
+
+  <select id="countByIp" resultType="int">
+    SELECT COUNT(*) FROM wallet_freeze_request WHERE ip = #{ip} AND created_at &gt;= #{since}
+    <if test="result != null">AND result = #{result}</if>
+  </select>
+
+  <select id="countByFingerprint" resultType="int">
+    SELECT COUNT(*) FROM wallet_freeze_request WHERE fingerprint = #{fp} AND created_at &gt;= #{since}
+    <if test="result != null">AND result = #{result}</if>
+  </select>
+
+  <select id="countByTarget" resultType="int">
+    SELECT COUNT(*) FROM wallet_freeze_request WHERE target_user_id = #{target} AND created_at &gt;= #{since}
+    <if test="result != null">AND result = #{result}</if>
+  </select>
+
+  <select id="countFrozenSince" resultType="int">
+    SELECT COUNT(*) FROM wallet_freeze_request WHERE result = 'FROZEN' AND created_at &gt;= #{since}
+  </select>
+
+  <select id="lastDeposit" resultType="app.trading.wallet.freeze.FreezeRequestMapper$LastDeposit">
+    SELECT amount, credited_at FROM wallet_deposit WHERE user_id = #{userId} AND status = 'CREDITED' AND credited_at IS NOT NULL
+    ORDER BY credited_at DESC, id DESC LIMIT 1
+  </select>
+</mapper>

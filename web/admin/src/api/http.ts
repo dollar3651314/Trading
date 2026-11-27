@@ -62,6 +62,10 @@ export const ERROR_KEYS: Record<string, string> = {
   RECOVERY_NOT_OPEN: 'errors.recoveryNotOpen',
   RECOVERY_NO_REVOKE_REQUEST: 'errors.recoveryNoRevokeRequest',
   RECOVERY_REVOKE_PENDING: 'errors.recoveryRevokePending',
+  // 第 4 批 4c：解除 / 更换 Telegram 关联
+  TELEGRAM_TAKEN: 'errors.telegramTaken',
+  NOT_TG_ACCOUNT: 'errors.notTgAccount',
+  RECOVERY_OPEN: 'errors.recoveryOpen',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',

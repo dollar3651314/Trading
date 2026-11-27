@@ -344,4 +344,23 @@ class TelegramBotFlowTest {
     assertThat(jdbc.queryForList("SELECT reason FROM account_withdraw_freeze WHERE user_id = ? AND source = 'DISPUTE'", String.class, uid))
         .singleElement().asString().contains("找回申请 #" + id).contains("客户选了直接冻结");
   }
+
+  /** 第 4 批 4c：机器人里自己冻结提现（BOT_SELF），先确认；只会减少权限 */
+  @Test
+  void 机器人里自己冻结提现_先确认() throws Exception {
+    long id = newId();
+    long uid = signup(id, "selffz").userId();
+    tg.push(tg.text(id, "selffz", "/start"));
+    assertThat(buttons(replies(id, 4).get(3))).contains(UpdateHandler.CB_FREEZE);
+    tg.push(tg.callback(id, "selffz", id, "private", UpdateHandler.CB_FREEZE));
+    FakeTelegram.Call ask = replies(id, 5).get(4);
+    assertThat(text(ask)).isEqualTo(UpdateHandler.TEXT_FREEZE_ASK);
+    assertThat(buttons(ask)).contains(UpdateHandler.CB_FREEZE_YES);
+    assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).as("确认之前不冻结").isEmpty();
+    tg.push(tg.callback(id, "selffz", id, "private", UpdateHandler.CB_FREEZE_YES));
+    assertThat(text(replies(id, 6).get(5))).isEqualTo(UpdateHandler.TEXT_FREEZE_DONE);
+    assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).containsExactly("BOT_SELF");
+    tg.push(tg.text(id, "selffz", "/start"));
+    assertThat(buttons(replies(id, 7).get(6))).as("冻结着不再显示冻结按钮").doesNotContain("\"" + UpdateHandler.CB_FREEZE + "\"");
+  }
 }

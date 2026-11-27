@@ -36,8 +36,8 @@ interface RecoveryMapper {
     LocalDateTime createdAt;
   }
 
-  /** 核对申请人填的信息用：资料里的姓名、最近一份 KYC 的状态和证件号 */
-  record Identity(String firstName, String middleName, String lastName, String kycStatus, String docNumber) {}
+  /** 核对申请人填的信息用：资料里的姓名、最近一份 KYC 的状态和证件号（带上客户号：没有资料、没做 KYC 时其他列全空，MyBatis 会把全空的行当成没有） */
+  record Identity(long userId, String firstName, String middleName, String lastName, String kycStatus, String docNumber) {}
 
   Identity identity(@Param("userId") long userId);
 
@@ -53,6 +53,9 @@ interface RecoveryMapper {
 
   /** 这个客户进行中的申请数（没结束的） */
   int openCount(@Param("userId") long userId);
+
+  /** 后台发起的申请（第一条 APPLY 的操作人是 admin:…，4c 后台更换 Telegram 关联）：大于 0 就是 */
+  int adminInitiated(@Param("id") long id);
 
   /** 这个客户从 since 起提交过的申请数（同一种） */
   int countSince(@Param("userId") long userId, @Param("kind") String kind, @Param("since") LocalDateTime since);

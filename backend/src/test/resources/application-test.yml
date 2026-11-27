@@ -48,6 +48,9 @@ trading:
     monitor-enabled: false
   # 钱包：合约地址是三条链官方 USDT 合约的公开地址。测试用链替身，不连真实节点
   wallet:
+    # 网页申请冻结提现的最短响应时间（生产 800 毫秒）：测试里调小，800 毫秒只在 WebFreezeTimingTest 里测
+    freeze:
+      min-response-ms: 20
     # 提现状态不定时推进，测试里直接调用
     withdraw:
       scheduler-enabled: false
