@@ -25,6 +25,18 @@ interface AuthMapper {
 
   int touchLogin(@Param("id") long id);
 
+  // ---------- Telegram 账户（TG 机器人第 1 批） ----------
+  app.trading.account.api.TelegramAccountApi.TgAccount tgByTelegramId(@Param("telegramId") long telegramId);
+
+  app.trading.account.api.TelegramAccountApi.TgAccount tgByUserId(@Param("userId") long userId);
+
+  int insertTelegram(@Param("userId") long userId, @Param("telegramId") long telegramId, @Param("username") String username, @Param("source") String source,
+      @Param("at") java.time.LocalDateTime at);
+
+  int updateTgAuthorizedAt(@Param("userId") long userId, @Param("at") java.time.LocalDateTime at);
+
+  int updateTgUsername(@Param("userId") long userId, @Param("username") String username);
+
   // ---------- 账号安全事件（v2 提现自动审批 R6） ----------
   int insertSecurityEvent(@Param("userId") long userId, @Param("type") String type, @Param("at") java.time.LocalDateTime at);
 

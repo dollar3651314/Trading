@@ -791,7 +791,7 @@ apply() {
   if wait_healthy "$(current_rev)"; then ok "已生效，健康检查通过"; else bad "改完后健康检查没通过（看 sudo trading status，截图给主会话）"; return 1; fi
 }
 
-SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED"
+SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED FX_TG_BOT_USERNAME TR_MEM_APP TR_META_APP"
 # 只有生产能改的：真实 IP（实测平台网关后打开，两项都填才开）、报价对外端口 8085 绑在哪（127.0.0.1 = 不对外，0.0.0.0 = 平台上发布时）
 SET_PROD="TR_REAL_IP_FROM TR_REAL_IP_HEADER TR_QUOTE_BIND"
 
@@ -889,7 +889,7 @@ set_prod() {
     fi
   fi
 }
-KEY_ALLOWED="FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN"
+KEY_ALLOWED="FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN FX_TG_BOT_TOKEN"
 
 cmd_set() {
   need_root
@@ -902,7 +902,17 @@ cmd_set() {
   if prod && [[ " $SET_PROD " == *" ${1:-} "* ]]; then [ $# -eq 2 ] || die "用法：sudo trading set $1 <值>"; set_prod "$1" "$2"; return; fi
   [ $# -eq 2 ] || die "用法：sudo trading set <变量名> <值>；能改的：$SET_ALLOWED$(prod && echo " $SET_PROD" || echo " TR_SHARE_WITH_TOPUP")（密钥用 set-key）"
   [[ " $SET_ALLOWED " == *" $1 "* ]] || die "$1 不在可改清单里：$SET_ALLOWED$(prod && echo " $SET_PROD")（密钥用 sudo trading set-key）"
-  envset "$1" "$2"; ok "$1 已更新"
+  local v="$2"
+  if [ "$1" = FX_TG_BOT_USERNAME ]; then
+    # 机器人用户名（不是密钥）：可以带 @；5～32 位字母、数字、下划线，以 bot 结尾（BotFather 的规则）
+    v=${v#@}
+    [[ "$v" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$ ]] || die "FX_TG_BOT_USERNAME 不像机器人用户名：$2（例：$(prod && echo TradingAssistBot || echo TradingAssistTestBot)）"
+  fi
+  if [ "$1" = TR_MEM_APP ] || [ "$1" = TR_META_APP ]; then
+    # trading-app 的容器内存上限 / 元空间上限（TG 机器人第 1 批实测：测试机开机器人时元空间约 96 MB、贴着默认 104m，建议 120m、容器 380m）
+    [[ "$v" =~ ^[1-9][0-9]{1,4}m$ ]] || die "$1 要写成 数字+m，例如 $([ "$1" = TR_MEM_APP ] && echo 380m || echo 120m)"
+  fi
+  envset "$1" "$v"; ok "$1 已更新"
   apply
 }
 
@@ -1013,10 +1023,14 @@ cmd_status() {
     say "证书到期：${exp:-没有证书}"
   fi
   local filled=() k
-  for k in FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN TEST_ADMIN_TOKEN_SHA256; do
+  for k in FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN FX_TG_BOT_TOKEN TEST_ADMIN_TOKEN_SHA256; do
     if [ -n "$(envget "$k")" ]; then filled+=("$k=已填"); else filled+=("$k=空"); fi
   done
   say "Amos 填的（只说是否）：${filled[*]}"
+  local tgname
+  tgname=$(envget FX_TG_BOT_USERNAME)
+  [ -n "$tgname" ] || tgname="$(prod && echo TradingAssistBot || echo TradingAssistTestBot)（默认）"
+  say "Telegram 机器人：@$tgname，$([ -n "$(envget FX_TG_BOT_TOKEN)" ] && echo "令牌已填" || echo "令牌没填 = 机器人不启动")"
 }
 
 # 每个容器的内存（cgroup v2）：按容器进程号找 cgroup 目录（/proc/<pid>/cgroup 的 0:: 行），不依赖容器 ID 的长短和 cgroup 驱动；

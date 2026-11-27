@@ -49,6 +49,8 @@ services:
       # 不是测试环境：没有"测试环境"条，测试管理员不认（配了 TEST_ADMIN_TOKEN_SHA256 应用拒绝启动，trading 命令也拒绝）
       FX_ENV_LABEL: ""
       TEST_ADMIN_TOKEN_SHA256: ""
+      # TG 机器人（第 1 批，11/27 开发机实测，同样的 JVM 参数和 1024m 上限）：机器人开着 + 每秒约 20 条消息 3 分钟，容器约 356 MB（峰值 396，不开机器人 316 / 350）、
+      # 元空间约 96 MB（不开 87）/ 160：都够，不用改（方案里预留的 1024 → 1088、160 → 192 不需要）
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx${TR_HEAP_APP:-512m} -XX:MaxMetaspaceSize=${TR_META_APP:-160m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-64m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-64m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
       # MySQL 最多 40 个连接：trading 24 + quote 6 + 备份 1 + 健康检查 1 + 余量
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-24}
@@ -62,6 +64,8 @@ services:
       # 邮件端口：生产默认 2587（InstaBox 虚拟机拦出站 587、465、25）。和 trading 命令的 resend_port 一致，
       # 不然 .env 没写端口时 trading test-mail 走 2587 显示成功、应用的告警和验证码却走 587 发不出去
       FX_MAIL_PORT: ${FX_MAIL_PORT:-2587}
+      # Telegram 机器人（TG 机器人第 1 批）：生产默认 @TradingAssistBot（测试默认 @TradingAssistTestBot，见 docker-compose.yml）
+      FX_TG_BOT_USERNAME: ${FX_TG_BOT_USERNAME:-TradingAssistBot}
     mem_limit: ${TR_MEM_APP:-1024m}
     memswap_limit: ${TR_MEM_APP:-1024m}
     cpus: 2

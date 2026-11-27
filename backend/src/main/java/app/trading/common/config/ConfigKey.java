@@ -85,7 +85,14 @@ public enum ConfigKey {
    * 以后台的改动为准（不在每次启动时覆盖）。不在系统配置页
    */
   INIT_ENABLED_CATEGORIES("init.enabledCategories", Unit.TEXT, "init", null, false),
-  INIT_BALANCE_MIN_USDT("init.balanceMinUsdt", Unit.TEXT, "init", null, false);
+  INIT_BALANCE_MIN_USDT("init.balanceMinUsdt", Unit.TEXT, "init", null, false),
+  /** Telegram 机器人总开关（TG 机器人第 1 批，迁移 V35，默认 true）：false 时机器人只回"暂停服务"，Telegram 提醒也不发。没配令牌时机器人本来就不启动 */
+  TELEGRAM_ENABLED("telegram.enabled", Unit.BOOL, "telegram", null),
+  /**
+   * 允许在机器人里授权开户的 Telegram 用户编号（逗号分隔）；空 = 谁都不能开户，{@code *} = 不限（TB-13：先只给 Amos 用，迁移 V35 默认空）。
+   * 已经开过户的不受影响
+   */
+  TELEGRAM_SIGNUP_ALLOW_IDS("telegram.signup.allowIds", Unit.TEXT, "telegram", null);
 
   /** 单位，和原型一致 */
   public enum Unit {
@@ -138,6 +145,11 @@ public enum ConfigKey {
   public Optional<String> normalize(String value) {
     if (value == null) return Optional.empty();
     String v = value.strip();
+    if (this == TELEGRAM_SIGNUP_ALLOW_IDS) {
+      // 空、* 或逗号分隔的 Telegram 用户编号（纯数字），存成去掉空格的样子
+      String n = v.replaceAll("\\s+", "");
+      return n.length() <= 1000 && n.matches("|\\*|\\d{1,19}(,\\d{1,19})*") ? Optional.of(n) : Optional.empty();
+    }
     if (unit == Unit.TEXT) return v.length() <= 1000 ? Optional.of(v) : Optional.empty();
     if (unit == Unit.BOOL) return "true".equals(v) || "false".equals(v) ? Optional.of(v) : Optional.empty();
     try {

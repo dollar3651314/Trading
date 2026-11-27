@@ -124,7 +124,7 @@ export function KycDetailPage() {
             <h2 className="card-title">{t('kyc.applicant')}</h2>
             <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 3 }}>
               <Descriptions.Item label={t('customers.customer')}>{k.name}</Descriptions.Item>
-              <Descriptions.Item label={t('customers.email')}>{k.email}</Descriptions.Item>
+              <Descriptions.Item label={t('customers.email')}>{k.email ?? '—'}</Descriptions.Item>
               <Descriptions.Item label={t('customers.id')}><Num>{k.customerId}</Num></Descriptions.Item>
               <Descriptions.Item label={t('customers.nationality')}>{k.nationality}</Descriptions.Item>
               <Descriptions.Item label={t('customers.birthDate')}><Num>{k.birthDate}</Num></Descriptions.Item>

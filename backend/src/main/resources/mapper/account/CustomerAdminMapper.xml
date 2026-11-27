@@ -7,9 +7,11 @@
   <sql id="customerSelect">
     SELECT u.id, u.email, u.status, u.frozen_reason, u.created_at, u.last_login_at,
       p.first_name, p.middle_name, p.last_name, p.birth_date, p.nationality,
-      COALESCE(k.status, 'NONE') AS kyc_status, k.doc_type, k.doc_number, k.reviewed_at AS kyc_reviewed_at, k.reject_reason AS kyc_reject_reason
+      COALESCE(k.status, 'NONE') AS kyc_status, k.doc_type, k.doc_number, k.reviewed_at AS kyc_reviewed_at, k.reject_reason AS kyc_reject_reason,
+      t.telegram_id, t.username AS telegram_username
     FROM account_user u
     LEFT JOIN account_profile p ON p.user_id = u.id
+    LEFT JOIN account_telegram t ON t.user_id = u.id
     LEFT JOIN account_kyc_application k ON k.id = (SELECT MAX(k2.id) FROM account_kyc_application k2 WHERE k2.user_id = u.id)
   </sql>
 
@@ -19,7 +21,8 @@
       <if test="kycStatus != null">AND COALESCE(k.status, 'NONE') = #{kycStatus}</if>
       <if test="keyword != null">
         AND (u.email LIKE CONCAT('%', #{keyword}, '%') OR CONCAT_WS(' ', p.first_name, p.middle_name, p.last_name) LIKE CONCAT('%', #{keyword}, '%')
-        <if test="id != null">OR u.id = #{id}</if>)
+        OR t.username LIKE CONCAT('%', TRIM(LEADING '@' FROM #{keyword}), '%')
+        <if test="id != null">OR u.id = #{id} OR t.telegram_id = #{id}</if>)
       </if>
     </where>
   </sql>
@@ -31,6 +34,7 @@
   <select id="countCustomers" resultType="long">
     SELECT COUNT(*) FROM account_user u
     LEFT JOIN account_profile p ON p.user_id = u.id
+    LEFT JOIN account_telegram t ON t.user_id = u.id
     LEFT JOIN account_kyc_application k ON k.id = (SELECT MAX(k2.id) FROM account_kyc_application k2 WHERE k2.user_id = u.id)
     <include refid="customerWhere"/>
   </select>

@@ -15,6 +15,10 @@ interface NotifyMapper {
 
   void upsertPref(@Param("userId") long userId, @Param("push") boolean push, @Param("email") boolean email);
 
+  List<Rows.TgPrefRow> tgPrefs(@Param("userId") long userId);
+
+  void upsertTgPref(@Param("userId") long userId, @Param("category") String category, @Param("enabled") boolean enabled);
+
   void upsertLang(@Param("userId") long userId, @Param("lang") String lang);
 
   void insertMessage(Rows.MessageRow m);

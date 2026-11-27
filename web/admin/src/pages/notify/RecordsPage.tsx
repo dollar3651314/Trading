@@ -26,7 +26,7 @@ export function RecordsPage() {
       <PageHeader title={t('records.title')} sub={t('records.sub')} />
       <FilterBar onSearch={() => list.setFilters(draft)} onReset={() => { setDraft({}); list.setFilters({}); }}>
         <FilterItem label={t('records.channel')}>
-          <Select aria-label={t('records.channel')} allowClear style={{ width: 110 }} placeholder={t('common.all')} value={draft.channel} onChange={(v) => setDraft({ ...draft, channel: v })} options={(['inbox', 'push', 'email'] as const).map((c) => ({ value: c, label: t(`channel.${c}`) }))} />
+          <Select aria-label={t('records.channel')} allowClear style={{ width: 110 }} placeholder={t('common.all')} value={draft.channel} onChange={(v) => setDraft({ ...draft, channel: v })} options={(['inbox', 'push', 'email', 'telegram'] as const).map((c) => ({ value: c, label: t(`channel.${c}`) }))} />
         </FilterItem>
         <FilterItem label={t('records.status')}>
           <Select aria-label={t('records.status')} allowClear style={{ width: 110 }} placeholder={t('common.all')} value={draft.status} onChange={(v) => setDraft({ ...draft, status: v })} options={(['pending', 'sent', 'failed', 'skipped'] as const).map((c) => ({ value: c, label: t(`notifyStatus.${c}`) }))} />

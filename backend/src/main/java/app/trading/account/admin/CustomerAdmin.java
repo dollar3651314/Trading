@@ -43,7 +43,8 @@ class CustomerAdmin implements CustomerAdminApi {
   }
 
   private static Customer customer(CustomerAdminMapper.CustomerRow r) {
-    return new Customer(r.id, r.email, name(r.firstName, r.middleName, r.lastName), r.nationality, r.status, r.kycStatus, r.createdAt, r.lastLoginAt);
+    return new Customer(r.id, r.email, name(r.firstName, r.middleName, r.lastName), r.nationality, r.status, r.kycStatus, r.createdAt, r.lastLoginAt, r.telegramId,
+        r.telegramUsername);
   }
 
   private static Long idOf(String keyword) {

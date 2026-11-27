@@ -27,8 +27,10 @@ class AuthController {
   private final AuthService auth;
   private final SessionService sessions;
   private final AuthProperties props;
+  private final TelegramAccounts telegram;
 
-  AuthController(AuthService auth, SessionService sessions, AuthProperties props) {
+  AuthController(AuthService auth, SessionService sessions, AuthProperties props, TelegramAccounts telegram) {
+    this.telegram = telegram;
     this.auth = auth;
     this.sessions = sessions;
     this.props = props;
@@ -75,13 +77,17 @@ class AuthController {
   @GetMapping("/api/me/session")
   SessionView me() {
     UserRow u = auth.user(CurrentUser.id());
-    return new SessionView(String.valueOf(u.id()), u.email());
+    return view(u);
+  }
+
+  private SessionView view(UserRow u) {
+    return new SessionView(String.valueOf(u.id()), u.email(), telegram.byUserId(u.id()).map(t -> t.username()).orElse(null));
   }
 
   private SessionView startSession(UserRow u, HttpServletRequest req, HttpServletResponse res) {
     String token = sessions.create(u.id(), req.getRemoteAddr(), req.getHeader(HttpHeaders.USER_AGENT));
     res.addHeader(HttpHeaders.SET_COOKIE, cookie(token, Duration.ofHours(props.sessionTtlHours())));
-    return new SessionView(String.valueOf(u.id()), u.email());
+    return view(u);
   }
 
   /** HttpOnly：页面脚本读不到令牌；SameSite=Strict：其他网站发起的请求不带上它（防跨站请求伪造） */

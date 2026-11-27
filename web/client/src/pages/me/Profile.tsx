@@ -123,7 +123,7 @@ export default function Profile() {
                 </div>
                 <div>
                   <dt>{t('auth.email')}</dt>
-                  <dd className="break">{p.email}</dd>
+                  <dd className="break">{p.email ?? t('profile.noEmail')}</dd>
                 </div>
                 <div>
                   <dt>{t('profile.birthDate')}</dt>

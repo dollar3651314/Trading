@@ -50,3 +50,12 @@ export function quoteFreshness(s: { enabled: boolean; lastQuoteAt?: string | nul
   if (Number.isNaN(at)) return 'none';
   return nowMs - at > QUOTE_STALE_SECONDS * 1000 ? 'stale' : 'fresh';
 }
+
+/**
+ * 客户的联系方式（TG 机器人第 1 批）：有邮箱显示邮箱；机器人开户的客户（纯 Telegram）没有邮箱，显示"TG @用户名"，没有用户名时显示"TG 客户"。
+ */
+export function contact(email: string | null | undefined, telegramUsername?: string | null): string {
+  if (email) return email;
+  if (telegramUsername) return `TG @${telegramUsername}`;
+  return 'TG';
+}

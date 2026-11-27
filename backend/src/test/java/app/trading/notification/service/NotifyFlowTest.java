@@ -89,7 +89,8 @@ class NotifyFlowTest extends NotifyTestSupport {
   @Test
   void V30_客户通知文案整理_认证通过不再只说可以提现_减仓改成平掉部分持仓() {
     Map<String, Object> approved = jdbc.queryForMap("SELECT audience, kind, variables, channels, body_zh, body_en FROM notify_template WHERE code = 'KYC_APPROVED'");
-    assertThat(approved).containsEntry("audience", "USER").containsEntry("kind", "kyc").containsEntry("variables", "").containsEntry("channels", "INBOX,PUSH,EMAIL");
+    assertThat(approved).containsEntry("audience", "USER").containsEntry("kind", "kyc").containsEntry("variables", "")
+        .as("V35（TG 机器人第 1 批）加了 Telegram 渠道").containsEntry("channels", "INBOX,PUSH,EMAIL,TELEGRAM");
     assertThat((String) approved.get("body_zh")).contains("充值、交易、提现均已开通");
     assertThat((String) approved.get("body_en")).contains("Deposits, trading and withdrawals");
     assertThat(jdbc.queryForObject("SELECT variables FROM notify_template WHERE code = 'KYC_REJECTED'", String.class)).isEqualTo("reason");
@@ -212,7 +213,8 @@ class NotifyFlowTest extends NotifyTestSupport {
   void UX9_UX11_V31_新模板只发站内信_热钱包余额模板改成币种加余额不足() {
     for (String code : List.of("POSITION_OPENED", "POSITION_CLOSED", "POSITION_PARTIAL_CLOSED", "WELCOME")) {
       Map<String, Object> t = jdbc.queryForMap("SELECT audience, kind, channels, body_zh, body_en FROM notify_template WHERE code = ?", code);
-      assertThat(t).as(code).containsEntry("audience", "USER").containsEntry("channels", "INBOX");
+      // 只发站内信（不推送、不发邮件）；V35（TG 机器人第 1 批）给开平仓加了 Telegram 渠道（只发给有 TG 账户的客户），欢迎信不加
+      assertThat(t).as(code).containsEntry("audience", "USER").containsEntry("channels", "WELCOME".equals(code) ? "INBOX" : "INBOX,TELEGRAM");
       assertThat((String) t.get("body_en")).as(code + " 英文里没有中文").doesNotContainPattern("[\\u4e00-\\u9fff]");
     }
     assertThat(jdbc.queryForObject("SELECT kind FROM notify_template WHERE code = 'POSITION_OPENED'", String.class)).isEqualTo("fill");

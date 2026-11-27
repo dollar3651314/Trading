@@ -288,7 +288,8 @@
   "channel": {
     "email": "邮件",
     "inbox": "站内信",
-    "push": "推送"
+    "push": "推送",
+    "telegram": "Telegram"
   },
   "common": {
     "actions": "操作",
@@ -327,6 +328,8 @@
   },
   "config": {
     "alertOff": "0（不告警）",
+    "allowIdsHint": "逗号分隔的 Telegram 用户编号；留空 = 谁都不能开户；* = 不限",
+    "boolHint": "只能填 true（开）或 false（关）",
     "editDesc": "{{key}} 当前值 {{value}}，修改后立即生效。",
     "editTitle": "修改配置：{{name}}",
     "group": "分组",
@@ -350,6 +353,7 @@
     "notify": "通知",
     "payment": "钱包提供方余额告警",
     "security": "安全",
+    "telegram": "Telegram 机器人",
     "withdraw": "出金"
   },
   "configKey": {
@@ -369,6 +373,8 @@
     "login_lockThreshold": "登录失败锁定次数",
     "notify_marginCallThrottleMinutes": "追保通知节流",
     "payment_balance_minUsdt": "钱包提供方可用余额告警下限（USDT）",
+    "telegram_enabled": "Telegram 机器人总开关",
+    "telegram_signup_allowIds": "允许授权开户的 Telegram 用户编号",
     "whitelist_effectiveHours": "白名单生效等待",
     "whitelist_maxAddresses": "白名单地址上限",
     "withdraw_coolingHours": "冷静期",

@@ -2,6 +2,7 @@
  * 系统配置：只列真正生效的配置项（出金限额、冷静期、白名单、确认数、登录锁定、IP 白名单、余额调整上限、追保通知节流、热钱包余额告警下限）。
  * 热钱包余额告警下限（分组 hotWallet）：0 = 不告警（默认，负责人 2026-10-17），显示为"0（不告警）"。
  * 钱包提供方可用余额告警下限（分组 payment，payment.balance.minUsdt，生产方案 v1 07 页 R-5）：同样 0 = 不告警；生产初始 5,000（Amos 11/19）。
+ * Telegram 机器人（分组 telegram，TG 机器人第 1 批）：总开关 telegram.enabled（true / false）；开户名单 telegram.signup.allowIds（逗号分隔的 TG 用户编号，空 = 谁都不能开户，* = 不限）。
  * 修改是高危操作，二次确认并写审计。
  */
 import { useCallback } from 'react';
@@ -27,6 +28,7 @@ const ALERT_GROUPS = new Set<SystemConfig['group']>(['hotWallet', 'payment']);
 
 /** 新值的格式：USDT 最多 2 位小数；手续费币最多 8 位小数（和后端一致）；其余是整数 */
 function valuePattern(unit: SystemConfig['unit']): RegExp {
+  if (unit === 'bool') return /^(true|false)$/;
   if (unit === 'usdt') return /^\d+(\.\d{1,2})?$/;
   if (COIN_UNITS[unit]) return /^\d+(\.\d{1,8})?$/;
   return /^\d+$/;
@@ -68,10 +70,25 @@ export function ConfigPage() {
           name="value"
           label={t('config.newValue')}
           rules={[
-            { required: true, whitespace: true, message: t('validation.required') },
-            c.unit === 'text' ? { max: 500 } : { pattern: valuePattern(c.unit), message: t('validation.positiveNumber') },
+            // 开户名单可以留空（= 谁都不能开户）
+            ...(c.key === 'telegram.signup.allowIds' ? [] : [{ required: true, whitespace: true, message: t('validation.required') }]),
+            c.key === 'telegram.signup.allowIds'
+              ? { pattern: /^\s*(\*|\d{1,19}(\s*,\s*\d{1,19})*)?\s*$/, message: t('config.allowIdsHint') }
+              : c.unit === 'text'
+                ? { max: 500 }
+                : { pattern: valuePattern(c.unit), message: c.unit === 'bool' ? t('config.boolHint') : t('validation.positiveNumber') },
           ]}
-          extra={c.group === 'hotWallet' ? t('config.hotWalletHint') : c.group === 'payment' ? t('config.paymentBalanceHint') : undefined}
+          extra={
+            c.group === 'hotWallet'
+              ? t('config.hotWalletHint')
+              : c.group === 'payment'
+                ? t('config.paymentBalanceHint')
+                : c.key === 'telegram.signup.allowIds'
+                  ? t('config.allowIdsHint')
+                  : c.unit === 'bool'
+                    ? t('config.boolHint')
+                    : undefined
+          }
         >
           <Input />
         </Form.Item>

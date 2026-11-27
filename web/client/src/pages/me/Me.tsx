@@ -50,11 +50,11 @@ export default function Me() {
         ) : (
           <>
             <div className="me-avatar" aria-hidden="true">
-              {(profile.data.lastName || profile.data.firstName).slice(0, 1).toUpperCase()}
+              {(profile.data.lastName || profile.data.firstName || 'T').slice(0, 1).toUpperCase()}
             </div>
             <div className="me-info">
               <b>{displayName(profile.data, i18n.language)}</b>
-              <span className="break">{profile.data.email}</span>
+              <span className="break">{profile.data.email ?? t('profile.noEmail')}</span>
               <small>
                 UID <span className="num">{profile.data.userId}</span>
               </small>

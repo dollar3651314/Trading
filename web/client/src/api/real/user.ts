@@ -3,7 +3,16 @@ import { get, post, put, utc } from '../http';
 import type { KycInfo, KycSubmit, NotifyPrefs, Profile, ProfileUpdate } from '../types';
 
 /** 资料和 KYC 的时间是不带时区的 UTC 时间，补上 Z */
-const profileView = (p: Profile): Profile => ({ ...p, middleName: p.middleName ?? '', registeredAt: utc(p.registeredAt) ?? '' });
+/** 纯 Telegram 客户（机器人开户）第一次保存前没有资料：姓名、生日、国籍是 null，换成空字符串（页面按"未填写"显示，表单可以直接填） */
+const profileView = (p: Profile): Profile => ({
+  ...p,
+  firstName: p.firstName ?? '',
+  middleName: p.middleName ?? '',
+  lastName: p.lastName ?? '',
+  birthDate: p.birthDate ?? '',
+  nationality: p.nationality ?? '',
+  registeredAt: utc(p.registeredAt) ?? '',
+});
 const kycView = (k: KycInfo): KycInfo => ({ ...k, submittedAt: utc(k.submittedAt), reviewedAt: utc(k.reviewedAt) });
 
 export const getProfile = async (): Promise<Profile> => profileView(await get<Profile>('/api/me/profile'));

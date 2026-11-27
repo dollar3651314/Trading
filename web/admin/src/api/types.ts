@@ -102,7 +102,11 @@ export type KycStatus = 'none' | 'pending' | 'approved' | 'rejected';
 export interface CustomerSummary {
   id: number;
   name: string;
-  email: string;
+  /** 机器人开户的客户（纯 Telegram）没有邮箱（TG 机器人第 1 批） */
+  email: string | null;
+  /** 有 TG 账户的客户：TG 用户编号（字符串，超过 JS 安全整数也不丢精度）和用户名（可能为空）；没有 TG 账户时都为空 */
+  telegramId?: string | null;
+  telegramUsername?: string | null;
   nationality: string;
   status: CustomerStatus;
   kycStatus: KycStatus;
@@ -232,7 +236,8 @@ export interface KycApplication {
   id: string;
   customerId: number;
   name: string;
-  email: string;
+  /** 纯 Telegram 客户为空 */
+  email: string | null;
   nationality: string;
   birthDate: string;
   docType: DocType;
@@ -256,7 +261,8 @@ export interface Deposit {
   id: string;
   customerId: number;
   customerName: string;
-  email: string;
+  /** 纯 Telegram 客户为空 */
+  email: string | null;
   chain: Chain;
   txHash: string;
   amount: string;
@@ -294,7 +300,8 @@ export interface Withdrawal {
   id: string;
   customerId: number;
   customerName: string;
-  email: string;
+  /** 纯 Telegram 客户为空 */
+  email: string | null;
   amount: string;
   fee: string;
   chain: Chain;
@@ -786,7 +793,8 @@ export interface TradingParamsInput {
 }
 
 // ---------- 通知 ----------
-export type NotifyChannel = 'inbox' | 'push' | 'email';
+/** telegram：TG 机器人第 1 批（只发给有 TG 账户的客户） */
+export type NotifyChannel = 'inbox' | 'push' | 'email' | 'telegram';
 
 export interface NotifyTemplate {
   id: string;
@@ -921,9 +929,9 @@ export interface SystemConfig {
   key: string;
   value: string;
   /** eth / bnb / trx：热钱包手续费币的告警下限 */
-  unit: 'usdt' | 'hours' | 'minutes' | 'count' | 'percent' | 'text' | 'eth' | 'bnb' | 'trx';
+  unit: 'usdt' | 'hours' | 'minutes' | 'count' | 'percent' | 'text' | 'bool' | 'eth' | 'bnb' | 'trx';
   /** hotWallet：热钱包余额告警下限（0 = 不告警，原型）；payment：钱包提供方可用余额告警下限（0 = 不告警，生产方案 v1 07 页 R-5） */
-  group: 'withdraw' | 'deposit' | 'security' | 'adjust' | 'notify' | 'hotWallet' | 'payment';
+  group: 'withdraw' | 'deposit' | 'security' | 'adjust' | 'notify' | 'hotWallet' | 'payment' | 'telegram';
   /** 从没改过时为空 */
   updatedAt: string | null;
 }

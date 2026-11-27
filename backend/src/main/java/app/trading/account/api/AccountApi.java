@@ -15,8 +15,11 @@ public interface AccountApi {
   /** 用户状态；用户不存在时抛 {@code BizException("USER_NOT_FOUND")}。 */
   UserStatus status(long userId);
 
-  /** 登录邮箱（通知模块发邮件时用）；用户不存在时抛 {@code BizException("USER_NOT_FOUND")}。 */
-  String email(long userId);
+  /**
+   * 绑定的邮箱（通知模块发邮件时用）；<b>纯 Telegram 客户（机器人里开户）没有邮箱，为空</b>（TG 机器人第 1 批，技术方案 07 页第 2b 节）。
+   * 用户不存在时抛 {@code BizException("USER_NOT_FOUND")}。
+   */
+  Optional<String> email(long userId);
 
   /** 注册时间（UTC）；用户不存在时抛 {@code BizException("USER_NOT_FOUND")}。提现自动审批 R7 用。 */
   LocalDateTime registeredAt(long userId);

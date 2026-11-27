@@ -41,6 +41,12 @@ final class Rows {
     }
   }
 
+  /** notify_tg_pref 的一行（客户的 Telegram 提醒按类开关） */
+  static class TgPrefRow {
+    String category;
+    boolean enabled;
+  }
+
   /** notify_message 的一行 */
   static class MessageRow {
     Long id;

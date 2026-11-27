@@ -23,7 +23,7 @@ import { ChainTag, Pill } from '../../components/Pill';
 import { Amount, Num } from '../../components/Num';
 import { withdrawalTone } from '../../utils/status';
 import { compareAmounts, formatAmount, isValidAmountInput } from '../../utils/money';
-import { fullTime, shortHash, shortTime } from '../../utils/display';
+import { contact, fullTime, shortHash, shortTime } from '../../utils/display';
 import { errorText } from '../../utils/errors';
 import { AUTO_RULE_CODES } from '../../config/autoApprove';
 import { AUTO_RULES_PATH, AutoReviewCard, AutoReviewCell } from './AutoReview';
@@ -222,7 +222,7 @@ export function WithdrawalsPage() {
               render: (_, r) => (
                 <div className="user-cell">
                   <b title={r.customerName}>{r.customerName}</b>
-                  <small>{r.email}</small>
+                  <small>{contact(r.email)}</small>
                 </div>
               ),
             },
@@ -374,7 +374,7 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
         <div style={{ minWidth: 0 }}>
           <b className="ellipsis" style={{ maxWidth: 200 }} title={w.customerName}>{w.customerName}</b>{' '}
           <Pill tone={w.kycStatus === 'approved' ? 'ok' : 'danger'}>{t(`withdrawals.kyc.${w.kycStatus === 'approved' ? 'ok' : 'no'}`)}</Pill>
-          <small>{t('withdrawals.userLine', { email: w.email, id: w.customerId })}</small>
+          <small>{t('withdrawals.userLine', { email: contact(w.email), id: w.customerId })}</small>
         </div>
       </div>
       <div className="kv-grid">

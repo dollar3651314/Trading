@@ -18,9 +18,11 @@ public interface CustomerAdminApi {
    *
    * @param status ACTIVE / FROZEN
    * @param kycStatus NONE / PENDING / APPROVED / REJECTED
+   * @param email 机器人开户的客户（纯 Telegram）为空
+   * @param telegramId 有 TG 账户的客户的 Telegram 用户编号（没有为空）；telegramUsername 是 TG 用户名（只用来显示，可能为空）
    */
   record Customer(long id, String email, String name, String nationality, String status, String kycStatus, LocalDateTime registeredAt,
-      LocalDateTime lastLoginAt) {}
+      LocalDateTime lastLoginAt, Long telegramId, String telegramUsername) {}
 
   /**
    * 客户详情：资料、最近一次 KYC、最近一次登录的 IP（v2 E6，取最近一个登录会话的 IP；从没登录过为空）。
@@ -38,7 +40,7 @@ public interface CustomerAdminApi {
   /** 证件照片 */
   record Image(byte[] content, String contentType) {}
 
-  /** keyword 匹配邮箱、姓名、客户号；status、kycStatus 为空表示不筛选 */
+  /** keyword 匹配邮箱、姓名、客户号、TG 用户名、TG 用户编号；status、kycStatus 为空表示不筛选 */
   Page<Customer> customers(String keyword, String status, String kycStatus, int offset, int limit);
 
   Optional<CustomerDetail> customer(long id);

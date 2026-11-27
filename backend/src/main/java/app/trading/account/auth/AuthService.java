@@ -152,6 +152,8 @@ class AuthService {
     mapper.updateStatus(userId, UserStatus.FROZEN.name());
     securityEvent(userId, SecurityEvent.FREEZE);
     sessions.revokeAll(userId, null);
+    // 安全提醒（TG 机器人第 1 批）：模板 ACCOUNT_FROZEN 只发 Telegram（只发给有 TG 账户的客户；网页客户冻结后本来就登录不了），不能关
+    notify.toUser(userId, "ACCOUNT_FROZEN", Map.of());
   }
 
   @Transactional

@@ -17,6 +17,15 @@
     ON DUPLICATE KEY UPDATE push_enabled = VALUES(push_enabled), email_enabled = VALUES(email_enabled)
   </insert>
 
+  <select id="tgPrefs" resultType="app.trading.notification.service.Rows$TgPrefRow">
+    SELECT category, enabled FROM notify_tg_pref WHERE user_id = #{userId}
+  </select>
+
+  <insert id="upsertTgPref">
+    INSERT INTO notify_tg_pref (user_id, category, enabled) VALUES (#{userId}, #{category}, #{enabled})
+    ON DUPLICATE KEY UPDATE enabled = VALUES(enabled)
+  </insert>
+
   <insert id="upsertLang">
     INSERT INTO notify_pref (user_id, lang) VALUES (#{userId}, #{lang})
     ON DUPLICATE KEY UPDATE lang = VALUES(lang)
