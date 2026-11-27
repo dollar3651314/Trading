@@ -1,7 +1,7 @@
 /** 认证的真实接口：`/api/auth/*`、`/api/me/session`（`account/auth/AuthController.java`） */
 import { ApiError, validCooldown } from '../errors';
 import { get, post } from '../http';
-import type { EmailCodePurpose, RegisterRequest, Session } from '../types';
+import type { AuthOptions, EmailCodePurpose, RegisterRequest, Session, TgLoginReason } from '../types';
 
 /** 后端 SessionView：机器人开户的客户（纯 Telegram）email 为 null；有 TG 账户的带 telegramUsername（TG 机器人第 1 批） */
 interface SessionView {
@@ -59,4 +59,31 @@ export async function restoreSession(): Promise<Session | null> {
     if (e instanceof ApiError && e.reason === 'unauthorized') return null;
     throw e;
   }
+}
+
+/** 登录方式（公开接口）：第一阶段只走 Telegram、机器人用户名 */
+export const getAuthOptions = (): Promise<AuthOptions> => get<AuthOptions>('/api/auth/options', { quiet401: true });
+
+const TG_REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled'];
+
+/**
+ * 一次性链接换会话（退路模式，TG 机器人第 2 批）：令牌从网址 # 后面读出来，POST 给后端（GET 打开页面不消耗令牌）。
+ * 成功返回登录后要打开的页面；失败返回原因（后端错误码 TG_LOGIN_<原因>），网络错误抛出。
+ */
+export async function tgLink(token: string): Promise<{ next: string } | { reason: TgLoginReason }> {
+  const res = await fetch('/api/tg/link', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  let body: { next?: string; code?: string } = {};
+  try {
+    body = JSON.parse(await res.text()) as typeof body;
+  } catch {
+    /* 不是 JSON：按失败处理 */
+  }
+  if (res.ok && typeof body.next === 'string') return { next: body.next };
+  const r = (body.code ?? '').replace(/^TG_LOGIN_/, '').toLowerCase() as TgLoginReason;
+  return { reason: TG_REASONS.includes(r) ? r : 'invalid' };
 }

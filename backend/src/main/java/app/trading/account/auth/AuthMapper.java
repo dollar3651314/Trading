@@ -25,6 +25,24 @@ interface AuthMapper {
 
   int touchLogin(@Param("id") long id);
 
+  // ---------- 从机器人进入网页（TG 机器人第 2 批） ----------
+  /** 一次性链接 */
+  record LinkToken(long userId, String nextPath) {}
+
+  int insertLoginHash(@Param("hash") String hash, @Param("at") java.time.LocalDateTime at);
+
+  int deleteLoginHashesBefore(@Param("before") java.time.LocalDateTime before);
+
+  int insertLinkToken(@Param("tokenHash") String tokenHash, @Param("userId") long userId, @Param("next") String next,
+      @Param("expiresAt") java.time.LocalDateTime expiresAt, @Param("now") java.time.LocalDateTime now);
+
+  /** 原子地标成已用：没用过、没过期才改，返回影响行数 */
+  int useLinkToken(@Param("tokenHash") String tokenHash, @Param("now") java.time.LocalDateTime now);
+
+  LinkToken linkToken(@Param("tokenHash") String tokenHash);
+
+  int deleteLinkTokensBefore(@Param("before") java.time.LocalDateTime before);
+
   // ---------- Telegram 账户（TG 机器人第 1 批） ----------
   app.trading.account.api.TelegramAccountApi.TgAccount tgByTelegramId(@Param("telegramId") long telegramId);
 
@@ -64,7 +82,10 @@ interface AuthMapper {
 
   SessionRow findActiveSession(@Param("tokenHash") String tokenHash);
 
-  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours);
+  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours, @Param("botIdleMinutes") int botIdleMinutes);
+
+  int insertBotSession(@Param("userId") long userId, @Param("tokenHash") String tokenHash, @Param("ip") String ip, @Param("userAgent") String userAgent,
+      @Param("idleMinutes") int idleMinutes, @Param("maxHours") int maxHours);
 
   int revokeSession(@Param("tokenHash") String tokenHash);
 

@@ -68,7 +68,29 @@ export function clientUrl(): string {
   return cachedClientUrl;
 }
 
-/** 注册、登录的地址：客户端的 /register、/login，带上当前语言（客户端读 ?lang=，web/client/src/i18n/urlLang.ts） */
-export function clientLink(page: 'register' | 'login', lang: Lang, base = clientUrl()): string {
+/**
+ * 机器人地址（TG 机器人第 2 批，技术方案 11 页第 2b 节）：只有"第一阶段只走 Telegram"打开（meta tr-tg-only = true）、
+ * 并且是合法的 https://t.me/机器人用户名 时才用；否则为空串（照旧去客户端注册、登录）。
+ */
+export function resolveBotUrl(botMeta: string | null | undefined, tgOnlyMeta: string | null | undefined): string {
+  const url = (botMeta || '').trim();
+  return (tgOnlyMeta || '').trim() === 'true' && /^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{3,31}$/.test(url) ? url : '';
+}
+
+let cachedBotUrl: string | undefined;
+export function botUrl(): string {
+  if (cachedBotUrl === undefined) {
+    const meta = (name: string) => (typeof document !== 'undefined' ? document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') : null);
+    cachedBotUrl = resolveBotUrl(meta('tr-bot-url'), meta('tr-tg-only'));
+  }
+  return cachedBotUrl;
+}
+
+/**
+ * 注册、登录的地址：客户端的 /register、/login，带上当前语言（客户端读 ?lang=，web/client/src/i18n/urlLang.ts）。
+ * 第一阶段只走 Telegram 时（{@link botUrl} 不为空）一律去机器人：网页注册、邮箱登录都关了
+ */
+export function clientLink(page: 'register' | 'login', lang: Lang, base = clientUrl(), bot = botUrl()): string {
+  if (bot) return bot;
   return `${base}/${page}?lang=${lang}`;
 }

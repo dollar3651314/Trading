@@ -29,5 +29,16 @@ public interface TelegramSender {
    * @param done 发完（或确定发不出）时回调：成功传 {@code null}，失败传原因（不含令牌）；只在返回 {@link Result#QUEUED} 时回调。
    *     发送队列在内存里：进程重启时还没发出的不会回调（通知记录停在"发送中"）
    */
-  Result send(long userId, String text, Priority priority, String viewPath, java.util.function.Consumer<String> done);
+  default Result send(long userId, String text, Priority priority, String viewPath, java.util.function.Consumer<String> done) {
+    return send(userId, text, priority, viewPath, java.util.List.of(), done);
+  }
+
+  /** 按钮数据：「不是我，退出所有网页会话」（机器人认这个，作废这个客户的全部网页会话） */
+  String ACTION_LOGOUT_ALL = "logoutall";
+
+  /** 提醒里额外的回调按钮（例如"刚在浏览器里登录"的「不是我，退出所有网页会话」）；data 是机器人认的按钮数据 */
+  record Action(String text, String data) {}
+
+  /** 同上，另外加几个回调按钮 */
+  Result send(long userId, String text, Priority priority, String viewPath, java.util.List<Action> actions, java.util.function.Consumer<String> done);
 }

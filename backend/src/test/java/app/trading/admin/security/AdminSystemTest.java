@@ -201,6 +201,26 @@ class AdminSystemTest extends AdminTestSupport {
   }
 
   @Test
+  void 开户名单_第4批之前不能填星号_填具体编号可以() throws Exception {
+    Admin s = superAdmin();
+    // 别的测试（机器人对话）可能直接写过 *：先清空，再看后台保存 * 会不会被拒、值有没有变
+    jdbc.update("UPDATE common_config SET value = '' WHERE config_key = ?", ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS.key);
+    config.refresh();
+    try {
+      MockHttpServletResponse all = call(put("/api/admin/configs/telegram.signup.allowIds"), s.cookie(), "{\"value\":\" * \",\"reason\":\"全开\"}");
+      assertThat(all.getStatus()).isEqualTo(409);
+      assertThat(all.getContentAsString()).contains("SIGNUP_ALL_LOCKED");
+      assertThat(config.text(ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS, "x")).as("没改").isEqualTo("");
+      MockHttpServletResponse ok = call(put("/api/admin/configs/telegram.signup.allowIds"), s.cookie(), "{\"value\":\"123456789, 42\",\"reason\":\"先给 Amos\"}");
+      assertThat(body(ok).get("value").asString()).isEqualTo("123456789,42");
+      assertThat(ConfigKey.SIGNUP_ALL_ALLOWED).as("第 4 批合并时才改成 true").isFalse();
+    } finally {
+      jdbc.update("UPDATE common_config SET value = '' WHERE config_key = ?", ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS.key);
+      config.refresh();
+    }
+  }
+
+  @Test
   void 系统配置_按单位校验_确认数只能调高_改了各模块立即生效() throws Exception {
     Admin s = superAdmin();
     try {

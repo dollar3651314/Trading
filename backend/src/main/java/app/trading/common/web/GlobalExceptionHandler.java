@@ -28,6 +28,11 @@ public class GlobalExceptionHandler {
   private static final Map<String, HttpStatus> STATUS = Map.ofEntries(
       Map.entry("UNAUTHORIZED", HttpStatus.UNAUTHORIZED),
       Map.entry("USER_FROZEN", HttpStatus.FORBIDDEN),
+      // 第一阶段只走 Telegram（TB-33）：注册、邮箱登录、忘记密码关闭
+      Map.entry("TELEGRAM_ONLY", HttpStatus.FORBIDDEN),
+      // TB-1：TG 客户提现默认关（telegram.withdraw.enabled）
+      Map.entry("TG_WITHDRAW_DISABLED", HttpStatus.FORBIDDEN),
+      Map.entry("SIGNUP_ALL_LOCKED", HttpStatus.CONFLICT),
       Map.entry("FORBIDDEN", HttpStatus.FORBIDDEN),
       Map.entry("TEST_ADMIN_FORBIDDEN", HttpStatus.FORBIDDEN),
       Map.entry("IP_NOT_ALLOWED", HttpStatus.FORBIDDEN),

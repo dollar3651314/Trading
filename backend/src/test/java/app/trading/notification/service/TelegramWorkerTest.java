@@ -28,7 +28,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 class TelegramWorkerTest {
 
-  record Sent(long userId, String text, TelegramSender.Priority priority, String viewPath, Consumer<String> done) {}
+  record Sent(long userId, String text, TelegramSender.Priority priority, String viewPath, List<TelegramSender.Action> actions, Consumer<String> done) {}
 
   final ObjectMapper json = new ObjectMapper();
   final TaskService tasks = mock(TaskService.class);
@@ -37,8 +37,8 @@ class TelegramWorkerTest {
   final List<Sent> sent = new ArrayList<>();
   final List<String> mails = new ArrayList<>();
   final MailHealth mailHealth = new MailHealth(AlertProperties.defaults(), true);
-  final TelegramSender sender = (userId, text, priority, viewPath, done) -> {
-    sent.add(new Sent(userId, text, priority, viewPath, done));
+  final TelegramSender sender = (userId, text, priority, viewPath, actions, done) -> {
+    sent.add(new Sent(userId, text, priority, viewPath, actions, done));
     return TelegramSender.Result.QUEUED;
   };
 
@@ -50,6 +50,23 @@ class TelegramWorkerTest {
     margin.bodyZh = "保证金水平 {level}%";
     margin.bodyEn = "Margin level {level}%";
     when(mapper.template("MARGIN_CALL")).thenReturn(margin);
+    Rows.TemplateRow login = new Rows.TemplateRow();
+    login.code = "LOGIN_NEW_DEVICE";
+    login.titleZh = "刚在浏览器里登录";
+    login.titleEn = "New browser sign-in";
+    login.bodyZh = "你的账户刚在浏览器里登录：{device}，IP {ip}。";
+    login.bodyEn = "Signed in: {device}, IP {ip}.";
+    when(mapper.template("LOGIN_NEW_DEVICE")).thenReturn(login);
+  }
+
+  @Test
+  void 刚在浏览器里登录_高优先级_带不是我按钮() {
+    worker().handle(task(NotifyService.TG_TASK, Map.of("recordId", 7, "userId", 7, "template", "LOGIN_NEW_DEVICE",
+        "params", Map.of("device", "iPhone · Telegram 内置浏览器", "ip", "203.0.113.*"))));
+    Sent s = sent.getFirst();
+    assertThat(s.text()).isEqualTo("刚在浏览器里登录\n\n你的账户刚在浏览器里登录：iPhone · Telegram 内置浏览器，IP 203.0.113.*。");
+    assertThat(s.priority()).isEqualTo(TelegramSender.Priority.HIGH);
+    assertThat(s.actions()).containsExactly(new TelegramSender.Action("不是我，退出所有网页会话", TelegramSender.ACTION_LOGOUT_ALL));
   }
 
   NotifyWorker worker() {

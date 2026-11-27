@@ -65,6 +65,9 @@ services:
       # 测试环境官网不让搜索引擎收录（X-Robots-Tag: noindex + robots.txt 全部禁止，测试环境验收 T-2）；生产要让官网被收录时设 "false"。
       # 这个开关只管官网，客户端、后台、报价子域名在 Nginx 配置里写死永远不收录
       FX_NGINX_NOINDEX: "true"
+      # 第一阶段只走 Telegram（TB-33，TG 机器人第 2 批）：官网的"开始交易"、注册、登录去机器人（生产的机器人用户名在 docker-compose.production.yml）
+      FX_NGINX_BOT_URL: https://t.me/${FX_TG_BOT_USERNAME:-TradingAssistTestBot}
+      FX_NGINX_TG_ONLY: ${FX_PHASE1_TELEGRAM_ONLY:-false}
     volumes:
       # 只挂 Trading 自己那张证书（live 里是指向 archive 的相对链接，两个目录都要）；同机 TopUP 的证书和私钥不挂进来
       - /etc/letsencrypt/live/trading:/etc/letsencrypt/live/trading:ro
@@ -133,6 +136,11 @@ services:
       FX_TG_BOT_TOKEN: ${FX_TG_BOT_TOKEN:-}
       FX_TG_BOT_USERNAME: ${FX_TG_BOT_USERNAME:-TradingAssistTestBot}
       FX_TG_WEB_URL: ${FX_TG_WEB_URL:-}
+      # 第 2 批：进入网页的方式 login-url（一键登录，默认；要先在 BotFather /setdomain 绑上 FX_TG_WEB_URL 的域名，绑好再填 FX_TG_WEB_URL）或 link（绑不上时的退路）；
+      # 第一阶段只走 Telegram（TB-33）：关注册、邮箱登录、忘记密码，网页没有会话时显示"请在 Telegram 打开"。
+      # 默认关（第 2 批审查 🟡1），Amos 统一验收时 sudo trading set FX_PHASE1_TELEGRAM_ONLY true 打开
+      FX_TG_LOGIN_MODE: ${FX_TG_LOGIN_MODE:-login-url}
+      FX_PHASE1_TELEGRAM_ONLY: ${FX_PHASE1_TELEGRAM_ONLY:-false}
       # 测试管理员（做法 07）：只存令牌的 SHA-256，trading gen-test-admin 生成、test-admin-off 删除
       TEST_ADMIN_TOKEN_SHA256: ${TEST_ADMIN_TOKEN_SHA256:-}
     volumes:

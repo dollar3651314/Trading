@@ -22,8 +22,13 @@ class TelegramAccounts implements TelegramAccountApi {
   private final NotifyApi notify;
   private final Clock clock;
   private final TransactionTemplate tx;
+  private final org.springframework.beans.factory.ObjectProvider<TelegramWebLogin> webLogin;
+  private final SessionService sessions;
 
-  TelegramAccounts(AuthMapper mapper, LedgerApi ledger, NotifyApi notify, Clock clock, PlatformTransactionManager txm) {
+  TelegramAccounts(AuthMapper mapper, LedgerApi ledger, NotifyApi notify, Clock clock, PlatformTransactionManager txm,
+      org.springframework.beans.factory.ObjectProvider<TelegramWebLogin> webLogin, SessionService sessions) {
+    this.webLogin = webLogin;
+    this.sessions = sessions;
     this.mapper = mapper;
     this.ledger = ledger;
     this.notify = notify;
@@ -74,6 +79,16 @@ class TelegramAccounts implements TelegramAccountApi {
   @Override
   public void updateUsername(long userId, String username) {
     mapper.updateTgUsername(userId, cut(username));
+  }
+
+  @Override
+  public String createLoginLink(long userId, String next) {
+    return webLogin.getObject().createLink(userId, next);
+  }
+
+  @Override
+  public void logoutAllWeb(long userId) {
+    sessions.revokeAll(userId, null);
   }
 
   private static String cut(String username) {

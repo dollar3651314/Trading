@@ -38,6 +38,8 @@ export const ERROR_KEYS: Record<string, string> = {
   BUILT_IN_ROLE: 'errors.builtInRole',
   ROLE_IN_USE: 'errors.roleInUse',
   WHITELIST_EXCLUDES_SELF: 'errors.whitelistExcludesSelf',
+  // TG 机器人第 2 批：冻结、找回流程（第 4 批）上线前开户名单不能填 *
+  SIGNUP_ALL_LOCKED: 'errors.signupAllLocked',
   // 客户、资金、KYC、通知（admin/ops 及各模块的 api）
   OVER_SINGLE_LIMIT: 'errors.overSingleLimit',
   OVER_DAILY_LIMIT: 'errors.overDailyLimit',

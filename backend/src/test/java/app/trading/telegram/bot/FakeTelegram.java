@@ -177,7 +177,7 @@ public final class FakeTelegram implements AutoCloseable {
       }
       switch (method) {
         case "getMe" -> reply(ex, 200, "{\"ok\":true,\"result\":{\"id\":1,\"is_bot\":true,\"first_name\":\"bot\",\"username\":\"" + getMeUsername + "\"}}");
-        case "deleteWebhook", "answerCallbackQuery" -> reply(ex, 200, "{\"ok\":true,\"result\":true}");
+        case "deleteWebhook", "answerCallbackQuery", "deleteMessage" -> reply(ex, 200, "{\"ok\":true,\"result\":true}");
         case "getUpdates" -> {
           List<String> out = new ArrayList<>();
           String first = updates.poll(300, TimeUnit.MILLISECONDS);
@@ -203,7 +203,7 @@ public final class FakeTelegram implements AutoCloseable {
     }
   }
 
-  private static final List<String> METHODS = List.of("getMe", "deleteWebhook", "answerCallbackQuery", "getUpdates", "sendMessage", "editMessageText");
+  private static final List<String> METHODS = List.of("getMe", "deleteWebhook", "answerCallbackQuery", "getUpdates", "sendMessage", "editMessageText", "deleteMessage");
 
   private static String canonical(String m) {
     return METHODS.stream().filter(x -> x.equalsIgnoreCase(m)).findFirst().orElse(m);

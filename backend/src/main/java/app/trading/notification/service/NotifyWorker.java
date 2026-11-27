@@ -217,7 +217,7 @@ class NotifyWorker {
       TelegramSender sender = telegram == null ? null : telegram.getIfAvailable();
       final Long rid = recordId;
       TelegramSender.Result r = sender == null ? TelegramSender.Result.BOT_OFF
-          : sender.send(userId, text.title() + "\n\n" + text.body(), cat.priority, viewPath(cat), err -> {
+          : sender.send(userId, text.title() + "\n\n" + text.body(), cat.priority, viewPath(cat), actions(code), err -> {
             if (rid != null) mapper.updateRecord(rid, err == null ? "SENT" : "FAILED", cut(err));
           });
       tasks.succeed(t.id());
@@ -288,6 +288,11 @@ class NotifyWorker {
     } catch (RuntimeException e) {
       return null;
     }
+  }
+
+  /** 提醒里额外的按钮：刚在浏览器里登录 → 「不是我，退出所有网页会话」 */
+  static List<TelegramSender.Action> actions(String template) {
+    return "LOGIN_NEW_DEVICE".equals(template) ? List.of(new TelegramSender.Action("不是我，退出所有网页会话", TelegramSender.ACTION_LOGOUT_ALL)) : List.of();
   }
 
   /** 提醒里「查看」按钮直达的网页客户端页面 */

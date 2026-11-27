@@ -21,6 +21,9 @@ absolute_redirect off;
 
 log_format tr_gw '$realip_remote_addr client=$remote_addr xff="$http_x_forwarded_for" xri="$http_x_real_ip" [$time_local] $server_port "$host" "$request" '
                  '$status $body_bytes_sent $request_time "$http_user_agent" $request_id';
+# 一键登录落地页（TG 机器人第 2 批）：网址参数里有 Telegram 身份（id、hash、名字），日志只记路径（$uri 不带参数）
+log_format tr_gw_noq '$realip_remote_addr client=$remote_addr xff="$http_x_forwarded_for" xri="$http_x_real_ip" [$time_local] $server_port "$host" "$request_method $uri $server_protocol" '
+                 '$status $body_bytes_sent $request_time "$http_user_agent" $request_id';
 
 # 搜索引擎收录：只有官网（8084）看 FX_NGINX_NOINDEX（只有 false 才收录），其他端口一律不收录
 map "${FX_NGINX_NOINDEX}" $tr_site_robots_tag {
@@ -62,7 +65,9 @@ server {
 
   root /usr/share/nginx/client;
 
-  if ($request_uri ~ ";") { return 400; }
+  # 分号一律 400，一键登录落地页除外（TG 机器人第 2 批审查 🟡3）：Telegram 把身份参数加在它的网址后面，参数里可能有分号；
+  # 在这里 400 会用 server 的日志格式把完整网址（含身份参数）记进访问日志。落地页自己的 location 只记 $uri，后端照样校验
+  if ($request_uri ~ "^(?!/api/tg/login(\?|$)).*;") { return 400; }
   location ~* "^/api/(admin|e2e)(/|$)" { return 404; }
   location ~* "^/(api/)?actuator" { return 404; }
 
@@ -71,6 +76,15 @@ server {
     limit_conn tr_ws_conn ${FX_NGINX_WS_CONN};
     include /etc/nginx/snippets/proxy.inc;
     proxy_read_timeout 1h;
+  }
+  # 一键登录落地页（TG 机器人第 2 批，技术方案 12 页）：访问日志不记参数；错误日志只留最严重的（限流、上游错误的日志行会带完整请求行）
+  location = /api/tg/login {
+    access_log /var/log/nginx/access.log tr_gw_noq;
+    error_log /var/log/nginx/error.log emerg;
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
   }
   location /api/ {
     limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
@@ -164,6 +178,9 @@ server {
     expires -1;
     sub_filter_once on;
     sub_filter '__TR_CLIENT_URL__' 'https://${APP_DOMAIN}';
+    # 第一阶段只走 Telegram（TB-33）：官网的"开始交易"、注册、登录去机器人（FX_NGINX_BOT_URL、FX_NGINX_TG_ONLY 由 compose 按 FX_TG_BOT_USERNAME、FX_PHASE1_TELEGRAM_ONLY 给）
+    sub_filter '__TR_BOT_URL__' '${FX_NGINX_BOT_URL}';
+    sub_filter '__TR_TG_ONLY__' '${FX_NGINX_TG_ONLY}';
     try_files $uri /index.html;
   }
 }

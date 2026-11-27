@@ -20,6 +20,8 @@ ENV FX_NGINX_API_RATE=20r/s \
     FX_NGINX_QUOTE_CONN=50
 # 搜索引擎收录（测试环境验收 T-2，site.conf.template 开头）：只管官网（客户端、后台、报价子域名永远不收录）；默认 true = 不让收录，生产要让官网被收录时在 compose 里设 false
 ENV FX_NGINX_NOINDEX=true
+# 官网"开始交易"、注册、登录去机器人（TG 机器人第 2 批，第一阶段只走 Telegram）：compose 按 FX_TG_BOT_USERNAME、FX_PHASE1_TELEGRAM_ONLY 覆盖；这里是不经部署工具单独运行时的保底（不去机器人）
+ENV FX_NGINX_BOT_URL=none FX_NGINX_TG_ONLY=false
 RUN rm -f /etc/nginx/conf.d/default.conf
 COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
 COPY deploy/nginx/site.conf.template /etc/nginx/templates/site.conf.template

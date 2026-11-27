@@ -20,7 +20,7 @@ class TelegramBotStartTest {
   static final String TOKEN = "987654:START-test-token-not-real";
 
   static TelegramProperties props(String apiUrl, String username) {
-    return new TelegramProperties(TOKEN, username, apiUrl, null, Duration.ofSeconds(1), Duration.ofMillis(10), 25, 100, Duration.ofMinutes(10), 20);
+    return new TelegramProperties(TOKEN, username, apiUrl, null, Duration.ofSeconds(1), Duration.ofMillis(10), 25, 100, Duration.ofMinutes(10), 20, "login-url");
   }
 
   record Started(TelegramBot bot, TelegramHealth health) {}

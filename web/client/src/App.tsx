@@ -12,6 +12,7 @@ import { ToastProvider } from './app/ToastProvider';
 import { Loading } from './components/AsyncView';
 import { Layout } from './components/Layout';
 import { startEngine } from './api/trading';
+import { TelegramOnly } from './pages/tg/TelegramOnly';
 
 const Login = lazy(() => import('./pages/auth/Login'));
 const Register = lazy(() => import('./pages/auth/Register'));
@@ -31,6 +32,9 @@ const Notifications = lazy(() => import('./pages/me/Notifications'));
 const NotifyPrefs = lazy(() => import('./pages/me/NotifyPrefs'));
 const ChangePassword = lazy(() => import('./pages/me/ChangePassword'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const TgHint = lazy(() => import('./pages/tg/TgHint'));
+const TgEntry = lazy(() => import('./pages/tg/TgEntry'));
+const TgLink = lazy(() => import('./pages/tg/TgLink'));
 
 // 原型：行情驱动的挂单成交、止盈止损、强平在浏览器内模拟（真实环境在服务端，这里什么都不做）
 startEngine();
@@ -53,9 +57,15 @@ export function AppRoutes() {
   return (
     <Suspense fallback={<Loading rows={4} />}>
       <Routes>
-        <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
-        <Route path="/register" element={<GuestOnly><Register /></GuestOnly>} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
+        {/* 第一阶段只走 Telegram（TB-33）：后端说 telegramOnly 时这三页换成"请在 Telegram 打开"提示页 */}
+        <Route path="/login" element={<GuestOnly><TelegramOnly><Login /></TelegramOnly></GuestOnly>} />
+        <Route path="/register" element={<GuestOnly><TelegramOnly><Register /></TelegramOnly></GuestOnly>} />
+        <Route path="/forgot-password" element={<TelegramOnly><ForgotPassword /></TelegramOnly>} />
+        {/* TG 机器人第 2 批：提示页（从机器人进来没成功时 ?r=原因）、提示页上的两个入口、一次性链接（退路） */}
+        <Route path="/tg" element={<TgHint />} />
+        <Route path="/tg/freeze" element={<TgEntry kind="freeze" />} />
+        <Route path="/tg/recover" element={<TgEntry kind="recover" />} />
+        <Route path="/tg-link" element={<TgLink />} />
         <Route
           element={
             <RequireAuth>

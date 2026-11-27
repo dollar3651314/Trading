@@ -92,7 +92,18 @@ public enum ConfigKey {
    * 允许在机器人里授权开户的 Telegram 用户编号（逗号分隔）；空 = 谁都不能开户，{@code *} = 不限（TB-13：先只给 Amos 用，迁移 V35 默认空）。
    * 已经开过户的不受影响
    */
-  TELEGRAM_SIGNUP_ALLOW_IDS("telegram.signup.allowIds", Unit.TEXT, "telegram", null);
+  TELEGRAM_SIGNUP_ALLOW_IDS("telegram.signup.allowIds", Unit.TEXT, "telegram", null),
+  /**
+   * TG 客户能不能加白名单、提现（TB-1"TG 提现默认关"，第 2 批审查 🔴B2-1，迁移 V37 默认 false）：false 时有 TG 账户的客户（不管从哪种会话进来）
+   * 加白名单、提交提现一律拒绝。第 4 批的提现密码、额度、人工审核等保护做完、验收后由 Amos 在后台打开
+   */
+  TELEGRAM_WITHDRAW_ENABLED("telegram.withdraw.enabled", Unit.BOOL, "telegram", null);
+
+  /**
+   * 第 4 批（冻结、找回流程）上线前不能对所有人开放开户：后台保存 {@code telegram.signup.allowIds = *} 时拒绝（第 2 批审查 🟡2）。
+   * <b>第 4 批合并时改成 true</b>
+   */
+  public static final boolean SIGNUP_ALL_ALLOWED = false;
 
   /** 单位，和原型一致 */
   public enum Unit {

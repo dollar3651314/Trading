@@ -28,7 +28,9 @@ class SessionFilter extends OncePerRequestFilter {
    * /api/pay/callback/topup 是 TopUP 的回调（不靠登录，靠验签，见 payment.core.PaymentCallbackController） */
   static final Set<String> PUBLIC = Set.of(
       "/api/health", "/api/auth/email-code", "/api/auth/register", "/api/auth/login", "/api/auth/logout", "/api/auth/password/reset",
-      "/api/public/quotes", "/api/pay/callback/topup");
+      "/api/public/quotes", "/api/pay/callback/topup",
+      // TG 机器人第 2 批：从机器人一键登录（login_url 落地页、一次性链接换会话）、登录方式（第一阶段只走 Telegram）
+      "/api/tg/login", "/api/tg/link", "/api/auth/options");
 
   private final SessionService sessions;
   private final AuthProperties props;

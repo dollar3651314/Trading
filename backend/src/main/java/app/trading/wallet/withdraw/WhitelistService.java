@@ -23,7 +23,10 @@ class WhitelistService {
   private final WithdrawLimits limits;
   private final Clock clock;
 
-  WhitelistService(WithdrawMapper mapper, WithdrawLimits limits, Clock clock) {
+  private final TelegramWithdrawGate tgGate;
+
+  WhitelistService(WithdrawMapper mapper, WithdrawLimits limits, Clock clock, TelegramWithdrawGate tgGate) {
+    this.tgGate = tgGate;
     this.mapper = mapper;
     this.limits = limits;
     this.clock = clock;
@@ -35,6 +38,7 @@ class WhitelistService {
 
   @Transactional
   WhitelistRow add(long userId, String network, String address, String label) {
+    tgGate.check(userId); // TB-1：TG 客户提现默认关（第 4 批验收后打开）
     ValidationException.Collector errs = new ValidationException.Collector();
     Chain chain = null;
     try {

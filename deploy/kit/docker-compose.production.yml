@@ -30,6 +30,7 @@ services:
       TR_NGINX_MODE: gateway
       # 只管官网 8084（客户端、后台、报价写死不收录）
       FX_NGINX_NOINDEX: "false"
+      FX_NGINX_BOT_URL: https://t.me/${FX_TG_BOT_USERNAME:-TradingAssistBot}
       # 真实 IP（默认关；实测平台网关后 sudo trading set TR_REAL_IP_FROM / TR_REAL_IP_HEADER，两项都填才开）
       TR_REAL_IP_FROM: ${TR_REAL_IP_FROM:-}
       TR_REAL_IP_HEADER: ${TR_REAL_IP_HEADER:-off}
