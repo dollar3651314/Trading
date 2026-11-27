@@ -8,6 +8,7 @@ import type {
   PinInput,
   PinKeypad,
   PinStatus,
+  MyRecovery,
   DepositAddress,
   DepositRecord,
   LedgerItem,
@@ -266,5 +267,43 @@ export function resetPin(_code: string, pin: PinInput, confirm: PinInput): Promi
     const a = decode(pin);
     if (a !== decode(confirm)) throw new ApiError('validationFailed', { confirm: ['validation.pinMismatch'] });
     pinState.pin = a;
+  });
+}
+
+// ---------- 找回申请（第 4 批 4b，原型：只在内存里） ----------
+const recoveries: MyRecovery[] = [];
+
+export function listMyRecoveries(): Promise<MyRecovery[]> {
+  return respond(() => recoveries.map((r) => ({ ...r })));
+}
+
+export function objectRecovery(id: number, pin: PinInput): Promise<void> {
+  return mutate(() => {
+    const r = recoveries.find((x) => x.id === id);
+    if (!r) throw new ApiError('notFound');
+    if (decode(pin) !== pinState.pin) {
+      r.disputeFrozen = true;
+      throw new ApiError('pinWrong');
+    }
+    r.disputePinOk = true;
+    r.disputeFrozen = false;
+  });
+}
+
+export function revokeRecovery(id: number): Promise<{ message: string }> {
+  return mutate(() => {
+    const r = recoveries.find((x) => x.id === id);
+    if (!r) throw new ApiError('notFound');
+    r.status = 'cancelled';
+    return { message: '已撤销这份申请。' };
+  });
+}
+
+export function requestPinReset(): Promise<{ id: number }> {
+  return mutate(() => {
+    if (recoveries.some((r) => ['objection', 'proof', 'approved'].includes(r.status))) throw new ApiError('recoveryOpen');
+    const id = recoveries.length + 1;
+    recoveries.unshift({ id, kind: 'pin_reset', status: 'proof', disputed: false, disputePinOk: false, disputeFrozen: false, objectionEndsAt: null, executeAt: null, revokeRequested: false, createdAt: new Date().toISOString() });
+    return { id };
   });
 }

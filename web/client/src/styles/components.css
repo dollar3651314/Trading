@@ -397,3 +397,11 @@ button.menu-item { width: 100%; text-align: left; font-size: inherit; background
 .pin-form { display: flex; flex-direction: column; gap: 18px; }
 .pin-form > p, .pin-page > p { margin: 0; }
 .tg-rules { display: flex; flex-direction: column; gap: 6px; }
+
+/* 找回申请（pages/me/Recovery.tsx，第 4 批 4b） */
+.recovery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.recovery-item { border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.recovery-item.focus { border-color: var(--primary); }
+.recovery-item p { margin: 0; }
+.recovery-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recovery-head .st { margin-left: auto; }

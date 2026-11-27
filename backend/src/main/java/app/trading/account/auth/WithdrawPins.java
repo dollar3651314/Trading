@@ -196,6 +196,23 @@ class WithdrawPins implements WithdrawPinApi {
     if (e != null) throw e;
   }
 
+  @Override
+  public void verifyIdentity(long userId, PinInput pin) {
+    String p = decode(userId, pin, "pin");
+    BizException e = own.execute(st -> check(userId, p));
+    if (e != null) throw e;
+  }
+
+  @Override
+  public void clearPin(long userId) {
+    mapper.deletePin(userId);
+  }
+
+  @Override
+  public boolean releaseFreeze(long userId, String source) {
+    return mapper.deleteWithdrawFreezeOf(userId, source) == 1;
+  }
+
   /** 在自己的事务里核对、计数；返回要抛的错（不在事务里抛，免得计数被回滚） */
   private BizException check(long userId, String p) {
     AuthMapper.PinRow row = mapper.lockPin(userId);

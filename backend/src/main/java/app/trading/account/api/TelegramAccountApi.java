@@ -37,6 +37,12 @@ public interface TelegramAccountApi {
    */
   String createLoginLink(long userId, String next);
 
+  /**
+   * 第 4 批 4b：人工换绑执行——这个客户的 TG 账户改成新的 TG 用户编号（新 TG 不能已经绑了别的客户，唯一键兜底），授权时间改成 at。
+   * 安全事件和作废会话由调用方做
+   */
+  void rebind(long userId, long newTelegramId, String username, LocalDateTime at);
+
   /** "不是我，退出所有网页会话"（第 2 批）：作废这个客户的全部网页会话（网页登录的和从机器人进入的） */
   void logoutAllWeb(long userId);
 }

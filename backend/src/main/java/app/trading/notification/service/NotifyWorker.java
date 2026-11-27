@@ -217,7 +217,7 @@ class NotifyWorker {
       TelegramSender sender = telegram == null ? null : telegram.getIfAvailable();
       final Long rid = recordId;
       TelegramSender.Result r = sender == null ? TelegramSender.Result.BOT_OFF
-          : sender.send(userId, text.title() + "\n\n" + text.body(), cat.priority, viewPath(cat), actions(code), err -> {
+          : sender.send(userId, text.title() + "\n\n" + text.body(), cat.priority, viewPath(cat), actions(code, json.convertValue(p.getOrDefault("params", Map.of()), PARAMS)), err -> {
             if (rid != null) mapper.updateRecord(rid, err == null ? "SENT" : "FAILED", cut(err));
           });
       tasks.succeed(t.id());
@@ -290,9 +290,20 @@ class NotifyWorker {
     }
   }
 
-  /** 提醒里额外的按钮：刚在浏览器里登录 → 「不是我，退出所有网页会话」 */
-  static List<TelegramSender.Action> actions(String template) {
-    return "LOGIN_NEW_DEVICE".equals(template) ? List.of(new TelegramSender.Action("不是我，退出所有网页会话", TelegramSender.ACTION_LOGOUT_ALL)) : List.of();
+  /**
+   * 提醒里额外的按钮：刚在浏览器里登录 → 「不是我，退出所有网页会话」；第 4 批 4b：有人申请换绑 → 「不是我」；
+   * 换绑已批准、人工重设提现密码申请 / 已批准 → 「撤销」（按钮数据带申请编号）
+   */
+  static List<TelegramSender.Action> actions(String template, Map<String, String> params) {
+    if (template == null) return List.of();
+    String id = params == null ? null : params.get("id");
+    return switch (template) {
+      case "LOGIN_NEW_DEVICE" -> List.of(new TelegramSender.Action("不是我，退出所有网页会话", TelegramSender.ACTION_LOGOUT_ALL));
+      case "RECOVERY_REQUESTED" -> id == null ? List.of() : List.of(new TelegramSender.Action("不是我", TelegramSender.ACTION_RECOVERY_OBJECT + id));
+      case "RECOVERY_APPROVED", "PIN_RESET_REQUESTED", "PIN_RESET_APPROVED" ->
+          id == null ? List.of() : List.of(new TelegramSender.Action("撤销", TelegramSender.ACTION_RECOVERY_REVOKE + id));
+      default -> List.of();
+    };
   }
 
   /** 提醒里「查看」按钮直达的网页客户端页面 */

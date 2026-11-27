@@ -33,6 +33,7 @@ const Notifications = lazy(() => import('./pages/me/Notifications'));
 const NotifyPrefs = lazy(() => import('./pages/me/NotifyPrefs'));
 const ChangePassword = lazy(() => import('./pages/me/ChangePassword'));
 const WithdrawPin = lazy(() => import('./pages/me/WithdrawPin'));
+const Recovery = lazy(() => import('./pages/me/Recovery'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const TgHint = lazy(() => import('./pages/tg/TgHint'));
 const TgEntry = lazy(() => import('./pages/tg/TgEntry'));
@@ -98,6 +99,7 @@ export function AppRoutes() {
           <Route path="me/notify-prefs" element={<NotifyPrefs />} />
           <Route path="me/password" element={<ChangePassword />} />
           <Route path="me/withdraw-pin" element={<WithdrawPin />} />
+          <Route path="me/recovery" element={<Recovery />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

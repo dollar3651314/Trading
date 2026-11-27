@@ -7,6 +7,8 @@
  */
 import { API_BASE, request, withQuery } from './http';
 import type {
+  Recovery,
+  RecoveryDetail,
   AdjustLimits,
   AutoApproveChange,
   AutoApproveSettings,
@@ -552,3 +554,34 @@ export async function setQuoteGate(open: boolean, amosApproved: boolean, reason:
   await request('/quote-service/gate', { method: 'PUT', body: { open, amosApproved, reason } });
 }
 export const getQuoteSources = (): Promise<QuoteSources> => request('/quote-service/sources');
+
+// ---------- 第 4 批 4b：找回申请（admin/ops/RecoveryAdminController，权限 recovery:review） ----------
+export function listRecoveries(status?: string): Promise<Recovery[]> {
+  return request(`/recoveries${status ? `?status=${enc(status)}` : ''}`);
+}
+export function getRecovery(id: string): Promise<RecoveryDetail> {
+  return request(`/recoveries/${enc(id)}`);
+}
+/** 批准：证明核对记录必填、再输自己的后台密码 */
+export function approveRecovery(id: string, note: string, password: string): Promise<RecoveryDetail> {
+  return request(`/recoveries/${enc(id)}/approve`, { method: 'POST', body: { note, password } });
+}
+export function rejectRecovery(id: string, reason: string): Promise<RecoveryDetail> {
+  return request(`/recoveries/${enc(id)}/reject`, { method: 'POST', body: { reason } });
+}
+/** Amos 本人撤销（直接生效） */
+export function revokeRecovery(id: string, reason: string): Promise<RecoveryDetail> {
+  return request(`/recoveries/${enc(id)}/revoke`, { method: 'POST', body: { reason } });
+}
+/** 争议路径上的撤销请求：维持批准（再输后台密码） */
+export function keepRecovery(id: string, reason: string, password: string): Promise<RecoveryDetail> {
+  return request(`/recoveries/${enc(id)}/keep`, { method: 'POST', body: { reason, password } });
+}
+
+// 冻结时暂停的提现（4a 复审 🟡1）
+export function releaseHeldWithdrawal(id: string, reason: string): Promise<Withdrawal> {
+  return request(`/withdrawals/${enc(id)}/release-held`, { method: 'POST', body: { reason } });
+}
+export function cancelHeldWithdrawal(id: string, reason: string): Promise<Withdrawal> {
+  return request(`/withdrawals/${enc(id)}/cancel-held`, { method: 'POST', body: { reason } });
+}

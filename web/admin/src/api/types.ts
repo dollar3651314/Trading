@@ -212,6 +212,19 @@ export interface CustomerDetail extends CustomerSummary {
   closedPositions: ClosedPosition[];
   /** 第 4 批：提现安全（提现密码、提现冻结） */
   withdrawSafety?: WithdrawSafety | null;
+  /** 第 4 批 4b：冻结时暂停的已审核待放款提现（解除冻结后不自动继续，逐笔选"继续放款"或"取消并退回"） */
+  heldWithdrawals?: HeldWithdrawal[];
+}
+
+export interface HeldWithdrawal {
+  id: string;
+  amount: string;
+  chain: Chain;
+  address: string;
+  heldAt: string;
+  reason: string;
+  /** 交过钱包提供方（可能已在付款）：不能直接取消退回 */
+  sentBefore: boolean;
 }
 
 /** 冻结来源：30 天内提现密码锁 2 次 / 网页申请冻结 / 机器人里自己冻结 / 换绑争议 / 换绑证明阶段 */
@@ -1104,4 +1117,39 @@ export interface QuoteSources {
   mode: string;
   feeds: { feed: string; configured: boolean; ok: boolean; detail: string | null }[];
   rows: QuoteSourceRow[];
+}
+
+/** 第 4 批 4b：找回申请（人工换绑 / 没邮箱人工重设提现密码），Amos 一人审核 */
+export type RecoveryStatus = 'objection' | 'proof' | 'approved' | 'executed' | 'rejected' | 'cancelled';
+
+export interface Recovery {
+  id: string;
+  kind: 'rebind' | 'pin_reset';
+  customerId: number;
+  customerName: string | null;
+  /** 当前绑的 TG（@用户名 · 编号） */
+  customerTelegram: string | null;
+  kycStatus: string | null;
+  applicantTgId: string | null;
+  applicantTgUsername: string | null;
+  status: RecoveryStatus;
+  disputed: boolean;
+  disputePinOk: boolean;
+  disputeFrozen: boolean;
+  objectionEndsAt: string | null;
+  proofNote: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  executeAt: string | null;
+  revokeRequested: boolean;
+  revokeRequestedAt: string | null;
+  closedBy: string | null;
+  closeReason: string | null;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+export interface RecoveryDetail {
+  recovery: Recovery;
+  events: { action: string; actor: string; note: string | null; at: string }[];
 }

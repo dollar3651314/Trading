@@ -83,7 +83,8 @@ class TelegramWithdrawGate {
     if (age.isAfter(now)) until = age;
     List<SecurityEvent> events = account.securityEventsSince(userId, now.minus(RESET_HOLD));
     for (SecurityEvent e : events) {
-      LocalDateTime end = e.at().plus(SecurityEvent.PIN_RESET.equals(e.type()) ? RESET_HOLD : HOLD);
+      // 重设提现密码、人工换绑（第 4 批 4b）48 小时，其他安全事件 24 小时
+      LocalDateTime end = e.at().plus(SecurityEvent.PIN_RESET.equals(e.type()) || SecurityEvent.REBIND.equals(e.type()) ? RESET_HOLD : HOLD);
       if (end.isAfter(now) && (until == null || end.isAfter(until))) until = end;
     }
     return until;

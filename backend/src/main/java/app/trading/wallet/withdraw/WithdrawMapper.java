@@ -33,6 +33,9 @@ interface WithdrawMapper {
 
   int deleteWhitelist(@Param("userId") long userId, @Param("id") long id);
 
+  /** 第 4 批 4b：找回申请执行时清空这个客户的白名单 */
+  int deleteAllWhitelist(@Param("userId") long userId);
+
   // ---------- 提现单 ----------
   int insertWithdrawal(WithdrawalRow row);
 
@@ -67,6 +70,18 @@ interface WithdrawMapper {
   List<Long> due(@Param("status") String status, @Param("timeColumn") String timeColumn, @Param("now") LocalDateTime now);
 
   List<Long> withStatus(@Param("status") String status);
+
+  /** 第 4 批 4b（审查 🟡1）：交钱包提供方前认领（待放款、没暂停才成功，send_attempts + 1）；返回 1 才能交出去 */
+  int claimSend(@Param("id") long id);
+
+  /** 冻结时暂停已审核待放款的（之后解除冻结也不自动继续，要后台逐笔选"继续放款"或"取消并退回"） */
+  int hold(@Param("id") long id, @Param("reason") String reason, @Param("now") LocalDateTime now);
+
+  /** 后台选"继续放款"：去掉暂停 */
+  int release(@Param("id") long id);
+
+  /** 这个客户暂停中的已审核待放款提现 */
+  List<WithdrawalRow> heldOf(@Param("userId") long userId);
 
   /** 第 4 批审查 🔴4a-1：这个客户在这些状态里的提现（冻结时处理在途的） */
   List<Long> idsOfUserIn(@Param("userId") long userId, @Param("statuses") List<String> statuses);

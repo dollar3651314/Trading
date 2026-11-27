@@ -176,4 +176,12 @@
     WHERE user_id = #{userId} AND revoked_at IS NULL
     <if test="exceptTokenHash != null">AND token_hash &lt;&gt; #{exceptTokenHash}</if>
   </update>
+  <!-- 第 4 批 4b：找回和换绑 -->
+  <delete id="deleteWithdrawFreezeOf">DELETE FROM account_withdraw_freeze WHERE user_id = #{userId} AND source = #{source}</delete>
+
+  <delete id="deletePin">DELETE FROM account_withdraw_pin WHERE user_id = #{userId}</delete>
+
+  <update id="rebindTelegram">
+    UPDATE account_telegram SET telegram_id = #{telegramId}, username = #{username}, authorized_at = #{at} WHERE user_id = #{userId}
+  </update>
 </mapper>

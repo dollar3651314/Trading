@@ -72,6 +72,11 @@ class TelegramAccounts implements TelegramAccountApi {
   }
 
   @Override
+  public void rebind(long userId, long newTelegramId, String username, LocalDateTime at) {
+    if (mapper.rebindTelegram(userId, newTelegramId, cut(username), at) != 1) throw new IllegalStateException("客户 " + userId + " 没有 TG 账户");
+  }
+
+  @Override
   public void reauthorize(long userId) {
     mapper.updateTgAuthorizedAt(userId, now());
   }

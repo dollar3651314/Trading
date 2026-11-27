@@ -292,4 +292,53 @@ class TelegramBotFlowTest {
     assertThat(replies(id, 3)).as("前两次 500，第三次成功").hasSize(3);
     assertThat(out.getAll()).doesNotContain(TOKEN).doesNotContain(TOKEN.substring(TOKEN.indexOf(':') + 1));
   }
+
+  // ---------- 第 4 批 4b：找回原账户 ----------
+
+  /** 机器人开户的客户，补上资料和已通过的 KYC（姓名 张三、护照后 4 位 8765） */
+  long kycCustomer() throws Exception {
+    long tgId = newId();
+    long uid = signup(tgId, "orig").userId();
+    jdbc.update("INSERT INTO account_profile (user_id, first_name, middle_name, last_name, birth_date, nationality) VALUES (?, '三', '', '张', '1990-01-01', 'CN')", uid);
+    jdbc.update("INSERT INTO account_kyc_application (user_id, doc_type, doc_number, front_key, back_key, selfie_key, status) VALUES (?, 'PASSPORT', 'E12348765', 'f', 'b', 's', 'APPROVED')",
+        uid);
+    return uid;
+  }
+
+  @Test
+  void 新TG找回原账户_格式不对提示_信息对了建申请_回同一句_原TG点不是我() throws Exception {
+    long uid = kycCustomer();
+    long newTg = newId();
+    tg.push(tg.text(newTg, "newme", "/start"));
+    assertThat(buttons(replies(newTg, 1).getFirst())).contains(UpdateHandler.CB_RECOVER);
+    tg.push(tg.callback(newTg, "newme", newTg, "private", UpdateHandler.CB_RECOVER));
+    assertThat(text(replies(newTg, 2).get(1))).isEqualTo(UpdateHandler.TEXT_RECOVER_ASK);
+    tg.push(tg.text(newTg, "newme", "随便写写"));
+    assertThat(text(replies(newTg, 3).get(2))).isEqualTo(UpdateHandler.TEXT_RECOVER_FORMAT);
+    tg.push(tg.text(newTg, "newme", uid + " 张三 8765"));
+    assertThat(text(replies(newTg, 4).get(3))).isEqualTo(UpdateHandler.TEXT_RECOVER_APPLIED);
+    Long id = jdbc.queryForObject("SELECT MAX(id) FROM account_recovery WHERE user_id = ?", Long.class, uid);
+    assertThat(id).isNotNull();
+    assertThat(jdbc.queryForObject("SELECT applicant_tg_id FROM account_recovery WHERE id = ?", Long.class, id)).isEqualTo(newTg);
+
+    // 信息不对：也回同一句，不建申请（/start recover 直接进入）
+    long other = newId();
+    tg.push(tg.text(other, null, "/start recover"));
+    replies(other, 1);
+    tg.push(tg.text(other, null, uid + " 李四 8765"));
+    assertThat(text(replies(other, 2).get(1))).isEqualTo(UpdateHandler.TEXT_RECOVER_APPLIED);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_recovery WHERE user_id = ?", Integer.class, uid)).isEqualTo(1);
+
+    // 原 TG 点通知里的「不是我」：转加严人工，给出输提现密码和直接冻结两个按钮
+    long orig = accounts.byUserId(uid).orElseThrow().telegramId();
+    int before = replies(orig, 0).size();
+    tg.push(tg.callback(orig, "orig", orig, "private", app.trading.notification.api.TelegramSender.ACTION_RECOVERY_OBJECT + id));
+    FakeTelegram.Call r = replies(orig, before + 1).get(before);
+    assertThat(text(r)).startsWith("已记下");
+    assertThat(buttons(r)).contains(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE + id);
+    assertThat(jdbc.queryForObject("SELECT disputed FROM account_recovery WHERE id = ?", Boolean.class, id)).isTrue();
+    tg.push(tg.callback(orig, "orig", orig, "private", app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE + id));
+    assertThat(text(replies(orig, before + 2).get(before + 1))).startsWith("已冻结提现");
+    assertThat(jdbc.queryForObject("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).isEqualTo("DISPUTE");
+  }
 }

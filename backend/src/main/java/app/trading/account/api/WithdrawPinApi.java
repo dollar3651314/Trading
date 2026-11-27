@@ -37,6 +37,17 @@ public interface WithdrawPinApi {
    */
   void verify(long userId, PinInput pin);
 
+  /**
+   * 第 4 批 4b：核对本人（找回申请里原 TG 点了"不是我"之后输提现密码）：和 {@link #verify} 一样计数、锁定，但提现冻结着也照样核对
+   */
+  void verifyIdentity(long userId, PinInput pin);
+
+  /** 第 4 批 4b：换绑、人工重设提现密码执行时清掉提现密码（之后要重新设置） */
+  void clearPin(long userId);
+
+  /** 第 4 批 4b：解除指定来源的冻结（找回申请结束时解除 RECOVERY / DISPUTE），别的来源的冻结不动；返回是否解除了 */
+  boolean releaseFreeze(long userId, String source);
+
   /** 冻结提现（已经冻结的不变） */
   void freezeWithdraw(long userId, String source, String reason);
 

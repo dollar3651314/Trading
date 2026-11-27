@@ -53,7 +53,14 @@ class CustomerOps {
   record Detail(long id, String name, String email, String nationality, String status, String kycStatus, String balance, int openPositions,
       String registeredAt, String lastLoginAt, String lastLoginIp, String lastLoginIpAt, String firstName, String middleName, String lastName,
       String birthDate, String frozenReason, Kyc kyc, Account account, List<PositionView> positions, List<LedgerView> ledger,
-      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername, WithdrawSafety withdrawSafety) {}
+      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername, WithdrawSafety withdrawSafety,
+      List<HeldView> heldWithdrawals) {}
+
+  /**
+   * 冻结时暂停的已审核待放款提现（第 4 批 4b 审查 🟡1：解除冻结后不自动继续，后台逐笔选"继续放款"或"取消并退回"）。
+   * id 是对外编号；sentBefore：交过钱包提供方（可能已在付款），不能直接取消退回
+   */
+  record HeldView(String id, String amount, String chain, String address, String heldAt, String reason, boolean sentBefore) {}
 
   /**
    * 提现安全（TG 机器人第 4 批）：提现密码设了没有、锁到什么时候、提现有没有被冻结（来源：PIN_LOCKS 30 天锁 2 次 / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY）
@@ -82,6 +89,7 @@ class CustomerOps {
   private final Clock clock;
   private final app.trading.account.api.WithdrawPinApi pins;
   private final AdminAuthService auth;
+  private final app.trading.wallet.api.WithdrawAdminApi withdraws;
   private final MailApi mail;
   private final AlertProperties alerts;
   private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(CustomerOps.class);
@@ -90,7 +98,8 @@ class CustomerOps {
 
   CustomerOps(CustomerAdminApi customers, TradingAdminApi trading, LedgerApi ledger, FundsApi funds, SystemConfig config, AdminNames names,
       AdjustMapper adjusts, Audit audit, Clock clock, app.trading.account.api.WithdrawPinApi pins, AdminAuthService auth, MailApi mail,
-      AlertProperties alerts) {
+      AlertProperties alerts, app.trading.wallet.api.WithdrawAdminApi withdraws) {
+    this.withdraws = withdraws;
     this.pins = pins;
     this.auth = auth;
     this.mail = mail;
@@ -164,7 +173,9 @@ class CustomerOps {
     LocalDate birth = d.birthDate();
     return new Detail(c.id(), c.name(), c.email(), c.nationality(), apiStatus(c.status()), apiStatus(c.kycStatus()), Ops.money(m.balance()), positions.size(),
         Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()), d.lastLoginIp(), Ops.time(d.lastLoginIpAt()), d.firstName(), d.middleName(), d.lastName(),
-        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername(), safety(c.id()));
+        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername(), safety(c.id()),
+        withdraws.held(id).stream().map(h -> new HeldView(String.valueOf(h.publicNo()), Ops.money(h.amount()), h.network(), h.address(), Ops.time(h.heldAt()),
+            h.reason(), h.sentBefore())).toList());
   }
 
   private WithdrawSafety safety(long userId) {

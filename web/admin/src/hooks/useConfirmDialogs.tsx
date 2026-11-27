@@ -18,6 +18,8 @@ export interface HighRiskRequest {
   extra?: ReactNode;
   initialValues?: Record<string, unknown>;
   confirmText?: string;
+  /** 原因输入框的标题（默认"操作原因"；例如批准找回申请时是"证明核对记录"） */
+  reasonLabel?: string;
   successText?: string;
   onConfirm: (values: HighRiskValues) => Promise<unknown>;
   onDone?: () => void;
@@ -37,6 +39,7 @@ export function useHighRisk() {
       extra={req?.extra}
       initialValues={req?.initialValues}
       confirmText={req?.confirmText}
+      reasonLabel={req?.reasonLabel}
       onCancel={() => setReq(null)}
       onConfirm={async (v) => {
         if (!req) return;

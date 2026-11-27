@@ -15,6 +15,7 @@ public final class Menus {
       leaf("dashboard", "menu.dashboard", "/dashboard", Permission.DASHBOARD_VIEW),
       leaf("customers", "menu.customers", "/customers", Permission.CUSTOMER_VIEW),
       leaf("kyc", "menu.kyc", "/kyc", Permission.KYC_VIEW),
+      leaf("recoveries", "menu.recoveries", "/recoveries", Permission.RECOVERY_REVIEW),
       group("funds", "menu.funds",
           leaf("deposits", "menu.deposits", "/funds/deposits", Permission.DEPOSIT_VIEW),
           leaf("withdrawals", "menu.withdrawals", "/funds/withdrawals", Permission.WITHDRAWAL_VIEW),

@@ -228,6 +228,20 @@ class OpsController {
     return funds.emergencyCancel(AdminContext.current(), id, body == null ? null : body.reason());
   }
 
+  /** 第 4 批 4b 审查 🟡1：冻结时暂停的提现，解除冻结后逐笔处理——继续放款 */
+  @RequiresPermission(Permission.WITHDRAWAL_REVIEW)
+  @PostMapping("/api/admin/withdrawals/{id}/release-held")
+  FundsOps.WithdrawalView releaseHeld(@PathVariable long id, @RequestBody(required = false) ReasonBody body) {
+    return funds.releaseHeld(AdminContext.current(), id, body == null ? null : body.reason());
+  }
+
+  /** 同上——取消并退回（高危；交过钱包提供方的不行） */
+  @RequiresPermission(Permission.WITHDRAWAL_EMERGENCY_CANCEL)
+  @PostMapping("/api/admin/withdrawals/{id}/cancel-held")
+  FundsOps.WithdrawalView cancelHeld(@PathVariable long id, @RequestBody(required = false) ReasonBody body) {
+    return funds.cancelHeld(AdminContext.current(), id, body == null ? null : body.reason());
+  }
+
   @RequiresPermission(Permission.RECON_VIEW)
   @GetMapping("/api/admin/recon")
   Ops.Page<FundsOps.ReconView> recon(@RequestParam(required = false) String status, @RequestParam(defaultValue = "1") int page,

@@ -587,7 +587,8 @@
     "upDownGreen": "Green up, red down",
     "upDownRed": "Red up, green down",
     "onboarding": "Getting started",
-    "withdrawPin": "Withdrawal PIN"
+    "withdrawPin": "Withdrawal PIN",
+    "recoveries": "Recovery requests"
   },
   "kyc": {
     "intro": "Verification is only required before withdrawing.",
@@ -733,7 +734,11 @@
     "withdrawFrozen": "Withdrawals are frozen. Contact support to verify your identity",
     "withdrawHold": "For security, withdrawals are not available yet (24 hours after sign-up or a security change, 48 hours after resetting the PIN)",
     "tgDailyLimit": "Over today's withdrawal limit",
-    "noEmail": "No email linked: a forgotten PIN needs manual recovery"
+    "noEmail": "No email linked: a forgotten PIN needs manual recovery",
+    "recoveryOpen": "There is already a request in progress. Please wait for it to finish.",
+    "recoveryNotDisputed": "Tap \"Not me\" in the bot first.",
+    "hasEmail": "Your account has an email. Reset your PIN with an email code instead.",
+    "notTgAccount": "Only Telegram accounts can request a manual PIN reset."
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",
@@ -936,7 +941,11 @@
       "reauth": "There was a recent security change on your account. Go back to the bot, tap \"Re-authorize\", then open trading.",
       "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again.",
       "security": "For security, all web sessions of this account have been signed out (you just set or changed your withdrawal PIN, submitted identity verification or made another security change), and withdrawals pause for a while. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\"."
-    }
+    },
+    "recoverTitle": "Recover a Telegram account",
+    "recoverSteps": "Recovery (moving the account to a new Telegram) is requested in the bot only: open the bot with your new Telegram, tap \"Recover my account\" and send your customer number, your name as verified, and the last 4 characters of your ID number. The current holder is notified; after a 48-hour objection period a reviewer verifies you by video, and an approved request runs 24 hours later. Support will never DM you for passwords or codes.",
+    "recoverOpenBot": "Open the bot with your new Telegram",
+    "recoverNoBot": "The bot link is unavailable. Search for our bot in Telegram and send /recover."
   },
   "pin": {
     "title": "Withdrawal PIN",
@@ -954,7 +963,6 @@
     "emailCode": "Email code",
     "sendCode": "Send code",
     "codeSent": "Sent",
-    "forgotNoEmail": "No email linked: a forgotten PIN needs manual recovery (your details and a video check). This opens in a later release.",
     "submit": {
       "set": "Set PIN",
       "change": "Change PIN",
@@ -965,6 +973,41 @@
       "forgot": "Forgot"
     },
     "withdrawLabel": "Withdrawal PIN",
-    "whitelistLabel": "Withdrawal PIN (needed to add an address)"
+    "whitelistLabel": "Withdrawal PIN (needed to add an address)",
+    "manualApply": "Request a manual reset",
+    "manualIntro": "No email linked: a forgotten PIN needs a manual reset. A reviewer will contact you on Telegram for a video check of your identity and source of funds. Once approved it takes effect after 48 hours: the old PIN stops working, the whitelist is cleared and withdrawals pause for 48 hours.",
+    "manualDone": "Submitted (request #{{id}}). You can view or cancel it under Recovery requests.",
+    "manualView": "View recovery requests"
+  },
+  "recovery": {
+    "title": "Recovery requests",
+    "intro": "Requests to recover (rebind) your account, or your own manual PIN reset requests.",
+    "empty": "No recovery requests.",
+    "kind": {
+      "rebind": "Telegram rebind",
+      "pin_reset": "Manual PIN reset"
+    },
+    "status": {
+      "objection": "Objection period",
+      "proof": "Manual review",
+      "approved": "Approved, waiting",
+      "executed": "Done",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "no": "Request #{{id}}",
+    "createdAt": "Submitted {{time}}",
+    "objectionEnds": "Objection period ends {{time}}",
+    "executeAt": "Runs at {{time}}",
+    "disputed": "You tapped \"Not me\": strict manual review",
+    "pinOk": "PIN confirmed; withdrawals not frozen",
+    "frozen": "Withdrawals frozen until the review is done",
+    "revokeRequested": "Cancellation requested; the reviewer will decide",
+    "pinLabel": "Enter your withdrawal PIN (correct PIN = no freeze)",
+    "pinSubmit": "Confirm it is me",
+    "pinOkDone": "Confirmed: withdrawals are not frozen. The request still goes to strict manual review.",
+    "revoke": "Cancel this request",
+    "revokeConfirm": "Cancel it?",
+    "revokeBody": "Normally this takes effect immediately. If you tapped \"Not me\", the reviewer decides after verification."
   }
 }

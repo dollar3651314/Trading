@@ -53,6 +53,14 @@ export const ERROR_KEYS: Record<string, string> = {
   NOT_FROZEN: 'errors.notWithdrawFrozen',
   // 第 4 批审查 🔴4a-1：客户账户冻结或提现冻结时不能通过出金
   WITHDRAW_FROZEN: 'errors.customerWithdrawFrozen',
+  // 第 4 批 4b：冻结时暂停的提现、找回申请
+  WITHDRAW_NOT_HELD: 'errors.withdrawNotHeld',
+  WITHDRAW_SENT_BEFORE: 'errors.withdrawSentBefore',
+  PROOF_NOTE_REQUIRED: 'errors.proofNoteRequired',
+  RECOVERY_NOT_READY: 'errors.recoveryNotReady',
+  RECOVERY_NOT_PENDING: 'errors.recoveryNotPending',
+  RECOVERY_NOT_OPEN: 'errors.recoveryNotOpen',
+  RECOVERY_NO_REVOKE_REQUEST: 'errors.recoveryNoRevokeRequest',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',

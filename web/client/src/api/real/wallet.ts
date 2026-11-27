@@ -3,7 +3,7 @@
  * 资金流水：后端还没有客户端接口（S17 汇报的缺口），这里按约定的 `GET /api/trading/ledger` 调用，接口补上后即可使用。
  */
 import { del, get, post } from '../http';
-import type { DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from '../types';
+import type { MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from '../types';
 
 /** 开着的充值网络和已经生成的地址（不访问钱包提供方） */
 export const getDepositAddresses = (): Promise<DepositAddress[]> => get<DepositAddress[]>('/api/wallet/networks');
@@ -56,3 +56,15 @@ export const sendPinResetCode = (): Promise<{ cooldownSeconds: number }> => post
 export async function resetPin(code: string, pin: PinInput, confirm: PinInput): Promise<void> {
   await post<void>('/api/me/withdraw-pin/forgot', { code: code.trim(), pin, confirm });
 }
+
+// ---------- 找回申请（第 4 批 4b，account/recovery/RecoveryController.java） ----------
+/** 自己账户的找回申请（自己是被找回的账户） */
+export const listMyRecoveries = (): Promise<MyRecovery[]> => get<MyRecovery[]>('/api/me/recoveries');
+/** 点了"不是我"以后输提现密码：输对不冻结；输错冻结提现 */
+export async function objectRecovery(id: number, pin: PinInput): Promise<void> {
+  await post<void>(`/api/me/recoveries/${encodeURIComponent(String(id))}/object`, { pin });
+}
+/** 撤销：正常路径直接撤销，争议路径转审核员决定；返回说明文字 */
+export const revokeRecovery = (id: number): Promise<{ message: string }> => post<{ message: string }>(`/api/me/recoveries/${encodeURIComponent(String(id))}/revoke`);
+/** 没邮箱忘记提现密码：申请人工重设 */
+export const requestPinReset = (): Promise<{ id: number }> => post<{ id: number }>('/api/me/withdraw-pin/forgot/manual');

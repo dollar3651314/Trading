@@ -4,8 +4,8 @@ import { APP_ROUTES } from './routes';
 import { ALL_PERMISSION_CODES } from './permissions';
 
 describe('菜单', () => {
-  it('一级菜单共 11 个（第 3 批加"报价服务"）', () => {
-    expect(MENU).toHaveLength(11);
+  it('一级菜单共 12 个（第 3 批加"报价服务"，TG 机器人第 4 批 4b 加"找回申请"）', () => {
+    expect(MENU).toHaveLength(12);
   });
 
   it('每个页面路由都对应一个菜单入口', () => {

@@ -153,7 +153,8 @@
       "disable": "禁用管理员",
       "enable": "启用管理员",
       "reset_password": "重置管理员密码",
-      "update": "修改管理员"
+      "update": "修改管理员",
+      "reauth": "再输后台密码"
     },
     "auth": {
       "login": "登录后台"
@@ -225,7 +226,9 @@
       "emergency_cancel": "紧急取消出金",
       "reject": "拒绝出金",
       "auto_rule_update": "修改提现自动审批规则",
-      "requery": "重新查询付款状态"
+      "requery": "重新查询付款状态",
+      "release_held": "暂停的提现继续放款",
+      "cancel_held": "暂停的提现取消并退回"
     },
     "payment": {
       "network_on": "打开充值网络",
@@ -242,6 +245,12 @@
       "license_save": "报价源授权登记",
       "gate_on": "打开对外总开关",
       "gate_off": "关闭对外总开关"
+    },
+    "recovery": {
+      "approve": "批准找回申请",
+      "reject": "驳回找回申请",
+      "revoke": "撤销找回申请",
+      "keep": "维持找回申请（争议撤销请求）"
     }
   },
   "auth": {
@@ -478,6 +487,19 @@
       "password": "你的登录密码",
       "passwordHint": "解除提现冻结要重新输入你自己的后台登录密码；解除后会给告警邮箱发邮件。",
       "passwordRequired": "请输入你的登录密码"
+    },
+    "held": {
+      "title": "冻结时暂停的提现",
+      "note": "冻结时这些已审核待放款的提现暂停交给钱包提供方；解除冻结后不会自动继续，请逐笔选择。",
+      "line": "{{amount}} USDT · {{chain}} · 暂停于 {{time}}（{{reason}}）",
+      "sentBefore": "交过钱包提供方，不能直接退回",
+      "release": "继续放款",
+      "cancel": "取消并退回",
+      "releaseImpact": "去掉暂停，马上交钱包提供方放款（仍要在钱包提供方后台第二道人工审核）。",
+      "cancelImpact": "取消这笔提现，冻结金额退回客户余额。",
+      "confirmRelease": "确认继续放款",
+      "confirmCancel": "确认取消并退回",
+      "target": "提现 {{id}}：{{amount}} USDT → {{address}}"
     }
   },
   "dashboard": {
@@ -604,7 +626,14 @@
     "signupAllLocked": "冻结和找回流程上线前不能对所有人开放开户（不能填 *），请填具体的 Telegram 用户编号。",
     "firstCheckRequired": "这笔是首笔核实单，请先勾选\"已人工核实\"再通过",
     "notWithdrawFrozen": "这个客户的提现没有被冻结",
-    "customerWithdrawFrozen": "客户已冻结提现，请先核对"
+    "customerWithdrawFrozen": "客户已冻结提现，请先核对",
+    "withdrawNotHeld": "这笔提现不在暂停中",
+    "withdrawSentBefore": "这笔已经交过钱包提供方（可能已在付款），不能直接退回，请先在钱包提供方核对",
+    "proofNoteRequired": "要写证明核对记录",
+    "recoveryNotReady": "还在 48 小时反对期里，不能批准",
+    "recoveryNotPending": "只能处理待审核的申请",
+    "recoveryNotOpen": "这份申请已经结束了",
+    "recoveryNoRevokeRequest": "这份申请没有待决定的撤销请求"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -740,7 +769,8 @@
     "quoteKeys": "外部客户和 Key",
     "quoteUsage": "限额和用量",
     "quoteLicense": "授权登记和总开关",
-    "quoteSources": "报价源状态"
+    "quoteSources": "报价源状态",
+    "recoveries": "找回申请"
   },
   "menus": {
     "group": "分组",
@@ -867,7 +897,8 @@
     "quote_key_operate": "建外部客户、建 / 轮换 / 停用 Key",
     "quote_limit_edit": "改 Key 的限额、改默认限额",
     "quote_license_edit": "报价源授权登记",
-    "withdraw_unfreeze": "解除提现冻结"
+    "withdraw_unfreeze": "解除提现冻结",
+    "recovery_review": "找回申请审核（Amos 一人审核）"
   },
   "permModule": {
     "customer": "客户",
@@ -2025,5 +2056,77 @@
     "switches24h": "24 小时切换次数",
     "deviations24h": "24 小时偏差次数",
     "srcRule": "规则：主源 10 秒没价切备源，恢复 30 秒后切回；两家相差 > 0.5% 时交易这个品种暂停开仓。生产里只用\"交易用途已授权\"的源成交。"
+  },
+  "recoveries": {
+    "title": "找回申请",
+    "sub": "人工换绑 Telegram、没邮箱人工重设提现密码。Amos 一人审核：批准要写证明核对记录并再输后台密码，批准后换绑等 24 小时、重设等 48 小时才执行。",
+    "statusFilter": "状态",
+    "empty": "没有找回申请",
+    "detail": "找回申请详情",
+    "no": "申请 #{{id}}",
+    "kindCol": "类型",
+    "statusCol": "状态",
+    "customer": "客户",
+    "currentTg": "当前 Telegram",
+    "kyc": "KYC",
+    "applicant": "申请人（新 Telegram）",
+    "createdAt": "提交时间",
+    "objectionEnds": "反对期到",
+    "executeAt": "执行时间",
+    "kind": {
+      "rebind": "人工换绑",
+      "pin_reset": "人工重设提现密码"
+    },
+    "status": {
+      "objection": "反对期中",
+      "proof": "人工核对中",
+      "approved": "已批准等执行",
+      "executed": "已执行",
+      "rejected": "已驳回",
+      "cancelled": "已撤销"
+    },
+    "dispute": "争议",
+    "disputedTag": "原 TG 点了不是我",
+    "pinOk": "已输对提现密码",
+    "disputeFrozen": "争议冻结提现",
+    "disputeRule": "争议路径：原 TG 或邮箱的任何撤销都转给你决定（撤销不作废申请，暂停执行）；只有你本人撤销直接生效。",
+    "revokeRequested": "{{time}} 原 TG 请求撤销，换绑暂停执行，等你视频核对后选\"撤销\"或\"维持批准\"",
+    "revokeRequestedTag": "待决定撤销",
+    "proofNoteLine": "证明核对记录：{{note}}（{{by}} 批准）",
+    "closeLine": "结束：{{by}}，{{reason}}",
+    "events": "经过",
+    "action": {
+      "apply": "提交",
+      "object": "原 TG 点不是我",
+      "pin_ok": "输对提现密码",
+      "pin_wrong": "提现密码没输对",
+      "dispute_freeze": "争议冻结提现",
+      "proof": "进入证明阶段",
+      "approve": "批准",
+      "revoke_request": "原 TG 请求撤销",
+      "keep": "维持批准",
+      "cancel": "撤销",
+      "reject": "驳回",
+      "execute": "已执行",
+      "execute_failed": "没能执行"
+    },
+    "target": "客户：{{name}}（#{{id}}）",
+    "approve": "批准",
+    "confirmApprove": "确认批准",
+    "approveImpactRebind": "批准后 24 小时换绑到申请人的新 Telegram：提现密码、白名单清空，48 小时不能提现，全部网页会话作废。等待期内原 TG 可以撤销（争议路径转你决定）。",
+    "approveImpactPin": "批准后 48 小时生效：原提现密码作废、白名单清空，48 小时不能提现。等待期内本人可以撤销。",
+    "proofNote": "证明核对记录（来源地址 / 视频共享 App / P2P 等）",
+    "password": "你的后台登录密码",
+    "passwordHint": "批准、维持要再输一次自己的后台密码；输错和登录失败一起计数，到次数会锁定并退出登录。",
+    "passwordRequired": "请输入你的后台登录密码",
+    "reject": "驳回",
+    "confirmReject": "确认驳回",
+    "rejectImpact": "驳回后封掉申请人用过的 Telegram（长期），这个 Telegram 之后的找回申请不受理。",
+    "revoke": "撤销",
+    "confirmRevoke": "确认撤销",
+    "revokeImpact": "你本人撤销直接生效：申请结束，这份申请带来的提现冻结解除。",
+    "keep": "维持批准",
+    "confirmKeep": "确认维持",
+    "keepImpact": "维持后清掉撤销请求，到执行时间就换绑。请先视频核对原主。"
   }
 }

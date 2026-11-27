@@ -355,3 +355,31 @@ describe('第 4 批：解除提现冻结', () => {
     expect(calls[0].body).toEqual({ reason: '视频核实本人', password: 'my-own-password' });
   });
 });
+
+describe('第 4 批 4b：找回申请、暂停的提现', () => {
+  it('路径和请求体', async () => {
+    const { calls } = fakeFetch({
+      'GET /api/admin/recoveries': { body: [] },
+      'POST /api/admin/recoveries/31/approve': { body: {} },
+      'POST /api/admin/recoveries/31/reject': { body: {} },
+      'POST /api/admin/recoveries/31/revoke': { body: {} },
+      'POST /api/admin/recoveries/31/keep': { body: {} },
+      'POST /api/admin/withdrawals/55/release-held': { body: {} },
+      'POST /api/admin/withdrawals/55/cancel-held': { body: {} },
+    });
+    await real.listRecoveries('proof');
+    await real.approveRecovery('31', '视频', 'pw');
+    await real.rejectRecovery('31', '对不上');
+    await real.revokeRecovery('31', '撤销');
+    await real.keepRecovery('31', '维持', 'pw');
+    await real.releaseHeldWithdrawal('55', '继续');
+    await real.cancelHeldWithdrawal('55', '取消');
+    expect(calls[0].url).toBe('/api/admin/recoveries?status=proof');
+    expect(calls[1].body).toEqual({ note: '视频', password: 'pw' });
+    expect(calls[2].body).toEqual({ reason: '对不上' });
+    expect(calls[3].body).toEqual({ reason: '撤销' });
+    expect(calls[4].body).toEqual({ reason: '维持', password: 'pw' });
+    expect(calls[5].body).toEqual({ reason: '继续' });
+    expect(calls[6].body).toEqual({ reason: '取消' });
+  });
+});

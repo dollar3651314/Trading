@@ -7,6 +7,7 @@ import { CustomerListPage } from '../pages/customers/CustomerListPage';
 import { CustomerDetailPage } from '../pages/customers/CustomerDetailPage';
 import { KycListPage } from '../pages/kyc/KycListPage';
 import { KycDetailPage } from '../pages/kyc/KycDetailPage';
+import { RecoveriesPage } from '../pages/customers/RecoveriesPage';
 import { DepositsPage } from '../pages/funds/DepositsPage';
 import { WithdrawalsPage } from '../pages/funds/WithdrawalsPage';
 import { AutoApprovePage } from '../pages/funds/AutoApprovePage';
@@ -47,6 +48,7 @@ export const APP_ROUTES: RouteDef[] = [
   { path: '/customers/:id', menuKey: 'customers', element: <CustomerDetailPage /> },
   { path: '/kyc', menuKey: 'kyc', element: <KycListPage /> },
   { path: '/kyc/:id', menuKey: 'kyc', element: <KycDetailPage /> },
+  { path: '/recoveries', menuKey: 'recoveries', element: <RecoveriesPage /> },
   { path: '/funds/deposits', menuKey: 'deposits', element: <DepositsPage /> },
   { path: '/funds/withdrawals', menuKey: 'withdrawals', element: <WithdrawalsPage /> },
   // v2 自动审批规则（原型；真实接口模式下显示"未上线"），从出金审核页进入，归在出金审核菜单下

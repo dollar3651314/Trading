@@ -14,4 +14,19 @@ public interface WithdrawAdminApi {
 
   /** 大额延迟期内紧急取消：资金退回（AC-21） */
   void emergencyCancel(long withdrawalId, long adminId, String reason);
+
+  /**
+   * 冻结时暂停的已审核待放款提现（第 4 批 4b 审查 🟡1：解除冻结后不自动继续）。sentBefore：交过钱包提供方（可能已在付款），不能直接取消退回
+   */
+  record Held(long id, long publicNo, java.math.BigDecimal amount, String network, String address, java.time.LocalDateTime heldAt, String reason,
+      boolean sentBefore) {}
+
+  /** 这个客户暂停中的提现 */
+  java.util.List<Held> held(long userId);
+
+  /** 继续放款：客户还冻结着时抛 WITHDRAW_FROZEN；不在暂停中抛 WITHDRAW_NOT_HELD */
+  void releaseHeld(long withdrawalId, long adminId, String reason);
+
+  /** 取消并退回：交过钱包提供方的抛 WITHDRAW_SENT_BEFORE；不在暂停中抛 WITHDRAW_NOT_HELD */
+  void cancelHeld(long withdrawalId, long adminId, String reason);
 }

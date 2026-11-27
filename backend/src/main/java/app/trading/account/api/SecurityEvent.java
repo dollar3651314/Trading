@@ -19,5 +19,7 @@ public record SecurityEvent(String type, LocalDateTime at) {
   public static final String PIN_SET = "PIN_SET";
   public static final String PIN_CHANGE = "PIN_CHANGE";
   public static final String PIN_RESET = "PIN_RESET";
+  /** 第 4 批 4b：人工换绑 Telegram（48 小时不能提现） */
+  public static final String REBIND = "REBIND";
   public static final String KYC_FIRST = "KYC_FIRST";
 }

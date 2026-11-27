@@ -352,6 +352,28 @@ class FundsOps {
     return views(List.of(require(id))).getFirst();
   }
 
+  /** 第 4 批 4b 审查 🟡1：冻结时暂停的已审核待放款提现——继续放款（客户还冻结着不行） */
+  WithdrawalView releaseHeld(AdminContext actor, long no, String reason) {
+    String r = Audit.requireReason(reason);
+    long id = internal(no);
+    audit.run("withdrawal.release_held", String.valueOf(no), true, r, () -> {
+      withdraws.releaseHeld(id, actor.adminId(), r);
+      return Audit.Change.of(null, Map.of("held", true), Map.of("held", false));
+    });
+    return views(List.of(require(id))).getFirst();
+  }
+
+  /** 同上——取消并退回（只允许从没交过钱包提供方的） */
+  WithdrawalView cancelHeld(AdminContext actor, long no, String reason) {
+    String r = Audit.requireReason(reason);
+    long id = internal(no);
+    audit.run("withdrawal.cancel_held", String.valueOf(no), true, r, () -> {
+      withdraws.cancelHeld(id, actor.adminId(), r);
+      return Audit.Change.of(null, Map.of("status", "approved", "held", true), Map.of("status", "cancelled"));
+    });
+    return views(List.of(require(id))).getFirst();
+  }
+
   // ---------- 对账 ----------
 
   @Transactional(readOnly = true)

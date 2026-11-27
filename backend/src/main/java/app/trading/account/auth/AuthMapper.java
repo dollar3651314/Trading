@@ -90,6 +90,15 @@ interface AuthMapper {
 
   int deleteWithdrawFreeze(@Param("userId") long userId);
 
+  /** 第 4 批 4b：只解除指定来源的冻结 */
+  int deleteWithdrawFreezeOf(@Param("userId") long userId, @Param("source") String source);
+
+  /** 第 4 批 4b：清掉提现密码（换绑、人工重设执行时） */
+  int deletePin(@Param("userId") long userId);
+
+  /** 第 4 批 4b：换绑——这个客户的 TG 账户改成新的 TG 用户编号，授权时间改成 at */
+  int rebindTelegram(@Param("userId") long userId, @Param("telegramId") long telegramId, @Param("username") String username, @Param("at") java.time.LocalDateTime at);
+
   /** 注册时间；用户不存在时为 null */
   java.time.LocalDateTime registeredAt(@Param("id") long id);
 

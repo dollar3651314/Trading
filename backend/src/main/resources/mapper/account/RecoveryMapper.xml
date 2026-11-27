@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 找回申请（第 4 批 4b，迁移 V39）：人工换绑、没邮箱忘记提现密码。时间一律 UTC（应用时钟传进来）。 -->
+<mapper namespace="app.trading.account.recovery.RecoveryMapper">
+
+  <sql id="cols">id, kind, user_id, applicant_tg_id, applicant_tg_username, status, disputed, disputed_at, dispute_pin_ok, dispute_frozen,
+    objection_ends_at, proof_note, approved_by, approved_at, execute_at, revoke_requested_by, revoke_requested_at, closed_by, close_reason,
+    closed_at, created_at</sql>
+
+  <select id="identity" resultType="app.trading.account.recovery.RecoveryMapper$Identity">
+    SELECT p.first_name, p.middle_name, p.last_name,
+      (SELECT k.status FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status,
+      (SELECT k.doc_number FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS doc_number
+    FROM account_user u LEFT JOIN account_profile p ON p.user_id = u.id WHERE u.id = #{userId}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO account_recovery (kind, user_id, applicant_tg_id, applicant_tg_username, status, objection_ends_at, created_at)
+    VALUES (#{kind}, #{userId}, #{applicantTgId}, #{applicantTgUsername}, #{status}, #{objectionEndsAt}, #{createdAt})
+  </insert>
+
+  <select id="byId" resultType="app.trading.account.recovery.RecoveryMapper$Row">
+    SELECT <include refid="cols"/> FROM account_recovery WHERE id = #{id}
+  </select>
+
+  <select id="lock" resultType="app.trading.account.recovery.RecoveryMapper$Row">
+    SELECT <include refid="cols"/> FROM account_recovery WHERE id = #{id} FOR UPDATE
+  </select>
+
+  <select id="list" resultType="app.trading.account.recovery.RecoveryMapper$Row">
+    SELECT <include refid="cols"/> FROM account_recovery
+    <where><if test="status != null">status = #{status}</if></where>
+    ORDER BY id DESC LIMIT 200
+  </select>
+
+  <select id="ofUser" resultType="app.trading.account.recovery.RecoveryMapper$Row">
+    SELECT <include refid="cols"/> FROM account_recovery WHERE user_id = #{userId} ORDER BY id DESC LIMIT 20
+  </select>
+
+  <select id="openCount" resultType="int">
+    SELECT COUNT(*) FROM account_recovery WHERE user_id = #{userId} AND status IN ('OBJECTION', 'PROOF', 'APPROVED')
+  </select>
+
+  <select id="countSince" resultType="int">
+    SELECT COUNT(*) FROM account_recovery WHERE user_id = #{userId} AND kind = #{kind} AND created_at &gt;= #{since}
+  </select>
+
+  <insert id="insertAttempt">INSERT INTO account_recovery_attempt (applicant_tg_id, created_at) VALUES (#{tgId}, #{at})</insert>
+
+  <select id="countAttemptsSince" resultType="int">
+    SELECT COUNT(*) FROM account_recovery_attempt WHERE applicant_tg_id = #{tgId} AND created_at &gt;= #{since}
+  </select>
+
+  <insert id="insertBan">
+    INSERT INTO account_recovery_ban (kind, value, until_at, recovery_id, created_at) VALUES (#{kind}, #{value}, #{until}, #{recoveryId}, #{at})
+  </insert>
+
+  <select id="banned" resultType="int">
+    SELECT COUNT(*) FROM account_recovery_ban WHERE kind = #{kind} AND value = #{value} AND until_at &gt; #{now}
+  </select>
+
+  <insert id="insertEvent">
+    INSERT INTO account_recovery_event (recovery_id, action, actor, note, created_at) VALUES (#{recoveryId}, #{action}, #{actor}, #{note}, #{at})
+  </insert>
+
+  <select id="events" resultType="app.trading.account.api.RecoveryApi$Event">
+    SELECT action, actor, note, created_at AS at FROM account_recovery_event WHERE recovery_id = #{recoveryId} ORDER BY id
+  </select>
+
+  <update id="transit">UPDATE account_recovery SET status = #{to} WHERE id = #{id} AND status = #{from}</update>
+
+  <update id="markDisputed">UPDATE account_recovery SET disputed = 1, disputed_at = #{at} WHERE id = #{id} AND disputed = 0</update>
+
+  <update id="markDisputePinOk">UPDATE account_recovery SET dispute_pin_ok = 1 WHERE id = #{id}</update>
+
+  <update id="markDisputeFrozen">UPDATE account_recovery SET dispute_frozen = 1 WHERE id = #{id}</update>
+
+  <update id="approve">
+    UPDATE account_recovery SET status = 'APPROVED', approved_by = #{adminId}, approved_at = #{at}, proof_note = #{note}, execute_at = #{executeAt}
+    WHERE id = #{id} AND status = 'PROOF'
+  </update>
+
+  <update id="requestRevoke">
+    UPDATE account_recovery SET revoke_requested_by = #{by}, revoke_requested_at = #{at} WHERE id = #{id} AND status = 'APPROVED'
+  </update>
+
+  <update id="clearRevoke">UPDATE account_recovery SET revoke_requested_by = NULL, revoke_requested_at = NULL WHERE id = #{id} AND status = 'APPROVED'</update>
+
+  <update id="close">
+    UPDATE account_recovery SET status = #{to}, closed_by = #{by}, close_reason = #{reason}, closed_at = #{at} WHERE id = #{id} AND status = #{from}
+  </update>
+
+  <select id="objectionDue" resultType="long">
+    SELECT id FROM account_recovery WHERE status = 'OBJECTION' AND objection_ends_at &lt;= #{now} ORDER BY id
+  </select>
+
+  <select id="disputeUnfrozen" resultType="long">
+    SELECT id FROM account_recovery WHERE status IN ('OBJECTION', 'PROOF', 'APPROVED') AND disputed = 1 AND dispute_pin_ok = 0 AND dispute_frozen = 0
+      AND disputed_at &lt;= #{before} ORDER BY id
+  </select>
+
+  <select id="executeDue" resultType="long">
+    SELECT id FROM account_recovery WHERE status = 'APPROVED' AND execute_at &lt;= #{now} AND revoke_requested_by IS NULL ORDER BY id
+  </select>
+</mapper>

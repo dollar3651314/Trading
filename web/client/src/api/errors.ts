@@ -56,6 +56,10 @@ export type ApiErrorReason =
   | 'withdrawHold'
   | 'tgDailyLimit'
   | 'noEmail'
+  | 'recoveryOpen'
+  | 'recoveryNotDisputed'
+  | 'hasEmail'
+  | 'notTgAccount'
   | OrderRejectReason;
 
 export class ApiError extends Error {
@@ -117,6 +121,11 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   WITHDRAW_HOLD: 'withdrawHold',
   TG_DAILY_LIMIT: 'tgDailyLimit',
   NO_EMAIL: 'noEmail',
+  // 找回申请（第 4 批 4b）
+  RECOVERY_OPEN: 'recoveryOpen',
+  RECOVERY_NOT_DISPUTED: 'recoveryNotDisputed',
+  HAS_EMAIL: 'hasEmail',
+  NOT_TG_ACCOUNT: 'notTgAccount',
   USER_FROZEN: 'accountFrozen',
   FORBIDDEN: 'forbidden',
   LOGIN_LOCKED: 'accountLocked',

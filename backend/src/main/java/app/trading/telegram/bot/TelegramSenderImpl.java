@@ -52,6 +52,14 @@ public class TelegramSenderImpl implements TelegramSender {
     return Result.QUEUED;
   }
 
+  @Override
+  public Result sendToChat(long telegramId, String text, Priority priority) {
+    if (outbox == null || !props.configured() || "false".equalsIgnoreCase(config.text(ConfigKey.TELEGRAM_ENABLED, "true").strip())) return Result.BOT_OFF;
+    String t = text.length() > MAX_TEXT ? text.substring(0, MAX_TEXT - 1) + "…" : text;
+    outbox.offer(telegramId, priority, SendMessage.builder().chatId(telegramId).text(t).build(), null);
+    return Result.QUEUED;
+  }
+
   /**
    * 打开网页的按钮（第 2 批）：一键登录模式是 login_url 按钮（落地页验过身份后直达 path）；
    * 退路模式是回调按钮 {@code open:path}，点了机器人现发一条 60 秒一次性链接。网页地址没配置时调用方不加这个按钮
