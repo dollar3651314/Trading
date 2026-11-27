@@ -267,6 +267,15 @@ class TelegramBotFlowTest {
   }
 
   @Test
+  void 每个TG用户每分钟最多处理20条_超过的不回应() throws Exception {
+    long id = newId();
+    for (int i = 0; i < 25; i++) tg.push(tg.text(id, null, "/start"));
+    replies(id, 20);
+    Thread.sleep(1000);
+    assertThat(replies(id, 0)).as("需求文档 03 页：每个 TG 账号每分钟最多 20 次").hasSize(20);
+  }
+
+  @Test
   void 后台关了机器人只回暂停服务() throws Exception {
     config.setBySystem(ConfigKey.TELEGRAM_ENABLED, "false", LocalDateTime.now());
     long id = newId();

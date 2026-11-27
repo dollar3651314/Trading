@@ -7,6 +7,7 @@ import app.trading.common.task.TaskService;
 import app.trading.common.task.TaskStatus;
 import app.trading.notification.api.TelegramCategory;
 import app.trading.notification.api.TelegramSender;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -236,6 +237,56 @@ class NotifyWorker {
         boolean dead = after != null && after.status() == TaskStatus.FAILED;
         mapper.updateRecord(recordId, dead ? "FAILED" : "PENDING", cut(msg));
       }
+    }
+  }
+
+  static final String RESUME_TOO_OLD = "进程重启时还没发出，超过补发时限，不再补发";
+  static final String RESUME_LOST = "进程重启时还没发出，找不到原任务，不再补发";
+
+  /**
+   * 启动时补发 Telegram 提醒（审查 🟡1）：发送队列在内存里，进程重启时已交给队列、还没发出的通知记录停在"发送中"。
+   * 对这些记录（还有没做完的 {@code TG_SEND} 任务的跳过，那些会照常发）：创建不超过 {@code within} 的，用原任务的内容重新排一个任务；
+   * 更早的、或者找不到原任务的，记失败（过了很久的成交、预警再发出去只会误导客户）。
+   *
+   * @return [重新排队的条数, 记失败的条数]
+   */
+  int[] resumeTelegram(java.time.Duration within, java.time.LocalDateTime now) {
+    List<Rows.RecordRow> pending = mapper.pendingTelegram();
+    if (pending.isEmpty()) return new int[] {0, 0};
+    java.util.Set<Long> active = new java.util.HashSet<>();
+    for (Task t : tasks.active(NotifyService.TG_TASK)) {
+      Long id = recordIdOf(t.payload());
+      if (id != null) active.add(id);
+    }
+    Map<Long, String> sent = new java.util.HashMap<>();
+    for (Task t : tasks.recentSucceeded(NotifyService.TG_TASK, within.plusMinutes(10).toSeconds())) {
+      Long id = recordIdOf(t.payload());
+      if (id != null) sent.put(id, t.payload());
+    }
+    java.time.LocalDateTime cutoff = now.minus(within);
+    int requeued = 0;
+    int failed = 0;
+    for (Rows.RecordRow r : pending) {
+      if (active.contains(r.id)) continue;
+      String payload = sent.get(r.id);
+      if (payload != null && r.createdAt != null && !r.createdAt.isBefore(cutoff)) {
+        tasks.enqueue(NotifyService.TG_TASK, payload, 0, NotifyService.TG_ATTEMPTS);
+        requeued++;
+      } else {
+        mapper.updateRecord(r.id, "FAILED", payload == null && r.createdAt != null && !r.createdAt.isBefore(cutoff) ? RESUME_LOST : RESUME_TOO_OLD);
+        failed++;
+      }
+    }
+    if (requeued + failed > 0) log.info("重启后 Telegram 提醒：重新排队 {} 条，记失败 {} 条", requeued, failed);
+    return new int[] {requeued, failed};
+  }
+
+  private Long recordIdOf(String payload) {
+    try {
+      Map<String, Object> p = json.readValue(payload, MAP);
+      return p.get("recordId") instanceof Number n ? n.longValue() : null;
+    } catch (RuntimeException e) {
+      return null;
     }
   }
 

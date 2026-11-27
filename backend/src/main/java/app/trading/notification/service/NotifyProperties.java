@@ -9,9 +9,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param workerEnabled 是否定时发送邮件任务（测试环境关，测试里直接调用 {@link NotifyWorker#drain()}）
  * @param mail SMTP 服务器（通知方案 N1）。值都由 负责人 填在服务器环境变量里；host 为空表示没有配置，邮件只写日志、不发
  * @param push Web Push（S15b，通知方案 N2）
+ * @param telegramResumeWithin TG 机器人：启动时还停在"发送中"的 Telegram 通知，这么久以内的重新排队、更早的记失败（默认 30 分钟）
  */
 @ConfigurationProperties("trading.notify")
-record NotifyProperties(@DefaultValue("true") boolean workerEnabled, @DefaultValue Mail mail, @DefaultValue Push push) {
+record NotifyProperties(@DefaultValue("true") boolean workerEnabled, @DefaultValue Mail mail, @DefaultValue Push push,
+    @DefaultValue("30m") java.time.Duration telegramResumeWithin) {
 
   /**
    * @param security STARTTLS（一般是 587 端口）、SSL（一般是 465 端口）或 NONE（只在测试里用）

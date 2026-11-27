@@ -29,7 +29,7 @@ class TelegramOutboxTest {
 
   static TelegramProperties props(Duration perChat, int capacity) {
     return new TelegramProperties(TOKEN, "TradingAssistTestBot", "http://127.0.0.1:1", null, Duration.ofSeconds(1), perChat, 1000, capacity,
-        Duration.ofMinutes(10), 30);
+        Duration.ofMinutes(10), 20);
   }
 
   /** 正常发送：记下聊天、文字、时间 */
@@ -148,13 +148,31 @@ class TelegramOutboxTest {
   }
 
   @Test
-  void 队列满了直接回调失败_不撑爆内存() {
+  void 队列满了先挤掉低档的_同档或更低的拒收() {
     outbox = new TelegramOutbox(ok(), props(Duration.ZERO, 2));
     List<String> results = new CopyOnWriteArrayList<>();
-    assertThat(outbox.offer(1, Priority.LOW, msg(1, "1"), results::add)).isTrue();
-    assertThat(outbox.offer(1, Priority.LOW, msg(1, "2"), results::add)).isTrue();
-    assertThat(outbox.offer(1, Priority.HIGH, msg(1, "3"), results::add)).isFalse();
-    assertThat(results).containsExactly("发送队列满");
+    assertThat(outbox.offer(1, Priority.LOW, msg(1, "低1"), e -> results.add("低1:" + e))).isTrue();
+    assertThat(outbox.offer(1, Priority.NORMAL, msg(1, "中1"), e -> results.add("中1:" + e))).isTrue();
+    assertThat(outbox.offer(1, Priority.LOW, msg(1, "低2"), e -> results.add("低2:" + e))).as("满了，低档不挤低档").isFalse();
+    assertThat(outbox.offer(1, Priority.NORMAL, msg(1, "中2"), e -> results.add("中2:" + e))).as("满了，挤掉低1").isTrue();
+    assertThat(outbox.offer(1, Priority.NORMAL, msg(1, "中3"), e -> results.add("中3:" + e))).as("满了、没有更低档的：中档拒收").isFalse();
+    assertThat(results).containsExactly("低2:" + TelegramOutbox.FULL, "低1:" + TelegramOutbox.EVICTED, "中3:" + TelegramOutbox.FULL);
     assertThat(outbox.size()).isEqualTo(2);
+  }
+
+  @Test
+  void 高档消息不丢_满了先挤低档_全是高档也照收() throws Exception {
+    outbox = new TelegramOutbox(ok(), props(Duration.ZERO, 2));
+    List<String> results = new CopyOnWriteArrayList<>();
+    outbox.offer(1, Priority.LOW, msg(1, "低"), e -> results.add("低:" + e));
+    outbox.offer(2, Priority.NORMAL, msg(2, "中"), e -> results.add("中:" + e));
+    assertThat(outbox.offer(3, Priority.HIGH, msg(3, "高1"), null)).isTrue();
+    assertThat(outbox.offer(4, Priority.HIGH, msg(4, "高2"), null)).isTrue();
+    assertThat(results).as("先挤最低档，再挤中档").containsExactly("低:" + TelegramOutbox.EVICTED, "中:" + TelegramOutbox.EVICTED);
+    for (int i = 0; i < 5; i++) assertThat(outbox.offer(10 + i, Priority.HIGH, msg(10 + i, "强平" + i), null)).as("全是高档也收").isTrue();
+    assertThat(outbox.size()).isEqualTo(7);
+    outbox.start();
+    awaitSent(7);
+    assertThat(sent).extracting(Sent::text).containsExactly("高1", "高2", "强平0", "强平1", "强平2", "强平3", "强平4");
   }
 }

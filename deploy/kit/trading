@@ -909,7 +909,9 @@ cmd_set() {
     [[ "$v" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$ ]] || die "FX_TG_BOT_USERNAME 不像机器人用户名：$2（例：$(prod && echo TradingAssistBot || echo TradingAssistTestBot)）"
   fi
   if [ "$1" = TR_MEM_APP ] || [ "$1" = TR_META_APP ]; then
-    # trading-app 的容器内存上限 / 元空间上限（TG 机器人第 1 批实测：测试机开机器人时元空间约 96 MB、贴着默认 104m，建议 120m、容器 380m）
+    # trading-app 的容器内存上限 / 元空间上限（TG 机器人第 1 批实测：测试机开机器人时元空间约 96 MB、贴着默认 104m，建议 120m、容器 380m）。
+    # 只给测试环境：生产实测够用（1024m、160m），生产的内存和同机 TopUP 生产一起算过，不用这个命令改
+    prod && die "$1 只能在测试环境用 trading set 改；生产内存按 docker-compose.production.yml，不在这里改"
     [[ "$v" =~ ^[1-9][0-9]{1,4}m$ ]] || die "$1 要写成 数字+m，例如 $([ "$1" = TR_MEM_APP ] && echo 380m || echo 120m)"
   fi
   envset "$1" "$v"; ok "$1 已更新"

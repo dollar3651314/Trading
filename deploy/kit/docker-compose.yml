@@ -93,8 +93,9 @@ services:
       FX_REDIS_PORT: "6379"
       FX_REDIS_PASSWORD: ${FX_REDIS_PASSWORD:?缺少 FX_REDIS_PASSWORD}
       # JVM 上限：堆 144 + 元空间 104 + 代码缓存 40 + 直接内存 16 = 304，线程栈 512K × 约 80 + 本机内存，容器 348（开发机实测并发后约 287，测试服务器跑 30 分钟约 286）
-      # TG 机器人（第 1 批，11/27 开发机实测，同样的 JVM 参数）：没填令牌时不变（元空间约 87 MB、容器约 264 MB）；机器人开着 + 每秒约 20 条消息 3 分钟：
-      # 元空间约 96 MB（离 104m 只剩约 8 MB）、容器约 293 MB（峰值 332 / 348）、线程 60 → 69。测试机要填令牌前先 sudo trading set TR_META_APP 120m、TR_MEM_APP 380m
+      # TG 机器人（第 1 批，11/27 开发机实测，同样的 JVM 参数，TelegramBots 10.4）：没填令牌时元空间约 82 MB、容器约 271 MB（峰值 292）；机器人开着 + 每秒约 20 条消息 3 分钟：
+      # 元空间约 91 MB（离 104m 只剩约 13 MB）、容器约 285 MB（峰值 318 / 348）、线程 60 → 68。测试机要填令牌前先 sudo trading set TR_META_APP 120m、TR_MEM_APP 380m
+      # （调完容器合计 996 MB，比 Amos 批准的 964 MB 多 32 MB：列在 Amos 统一验收清单里由 Amos 决定；trading set 改这两项只在测试环境可用）
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx${TR_HEAP_APP:-144m} -XX:MaxMetaspaceSize=${TR_META_APP:-104m} -XX:ReservedCodeCacheSize=${TR_CODE_APP:-40m} -XX:MaxDirectMemorySize=${TR_DIRECT_APP:-16m} -Xss512k -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError -XX:TrimNativeHeapInterval=5000
       # 连接池（MySQL 最多 18 个连接：trading 12 + quote 3 + 备份 1 + 健康检查 1 + 余量 1）
       FX_DB_POOL_SIZE: ${TR_DB_POOL_APP:-12}

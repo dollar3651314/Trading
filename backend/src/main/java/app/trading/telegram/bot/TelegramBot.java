@@ -110,7 +110,7 @@ public class TelegramBot implements TelegramOutbox.Api {
         return;
       }
       outbox.start();
-      app = new TelegramBotsLongPollingApplication(com.fasterxml.jackson.databind.ObjectMapper::new, () -> http,
+      app = new TelegramBotsLongPollingApplication(tools.jackson.databind.json.JsonMapper::new, () -> http,
           () -> Executors.newSingleThreadScheduledExecutor(r -> Thread.ofPlatform().name("tg-poll").daemon(true).unstarted(r)));
       BotSession s = app.registerBot(props.token(), () -> url, this::getUpdates, handler::consume);
       polling = s.isRunning();

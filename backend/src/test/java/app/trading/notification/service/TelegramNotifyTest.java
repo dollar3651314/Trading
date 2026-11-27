@@ -84,4 +84,56 @@ class TelegramNotifyTest extends NotifyTestSupport {
     admin.manual(uid, Set.of(NotifyChannel.EMAIL, NotifyChannel.TELEGRAM), "标题", "正文", 1L);
     assertThat(records(uid)).containsExactlyInAnyOrder("EMAIL SKIPPED 没有邮箱", "TELEGRAM PENDING -");
   }
+
+  @Autowired java.time.Clock clock;
+
+  /** 模拟"已交给发送队列、进程就重启了"：任务标成功，通知记录还停在发送中 */
+  long handedOffThenCrashed(long uid) {
+    notify.toUser(uid, "DEPOSIT_CREDITED", Map.of("amount", "10", "chain", "TRC20"));
+    long rid = jdbc.queryForObject("SELECT MAX(id) FROM notify_record WHERE user_id = ? AND channel = 'TELEGRAM'", Long.class, uid);
+    assertThat(jdbc.update("UPDATE common_task SET status = 'SUCCEEDED' WHERE task_type = 'TG_SEND' AND JSON_EXTRACT(payload, '$.recordId') = ?", rid)).isEqualTo(1);
+    return rid;
+  }
+
+  int tgTasks(long rid, String status) {
+    return jdbc.queryForObject("SELECT COUNT(*) FROM common_task WHERE task_type = 'TG_SEND' AND status = ? AND JSON_EXTRACT(payload, '$.recordId') = ?",
+        Integer.class, status, rid);
+  }
+
+  String status(long rid) {
+    return jdbc.queryForObject("SELECT CONCAT(status, ' ', COALESCE(error, '-')) FROM notify_record WHERE id = ?", String.class, rid);
+  }
+
+  @Test
+  void 重启后补发_30分钟以内的重新排队_更早的记失败_还有任务在排的不动() {
+    java.time.LocalDateTime now = java.time.LocalDateTime.now(clock);
+    long fresh = handedOffThenCrashed(tgUser());
+    long old = handedOffThenCrashed(tgUser());
+    jdbc.update("UPDATE notify_record SET created_at = ? WHERE id = ?", now.minusMinutes(31), old);
+    long waiting = tgUser();
+    notify.toUser(waiting, "DEPOSIT_CREDITED", Map.of("amount", "10", "chain", "TRC20"));
+    long waitingRid = jdbc.queryForObject("SELECT MAX(id) FROM notify_record WHERE user_id = ? AND channel = 'TELEGRAM'", Long.class, waiting);
+
+    int[] r = worker.resumeTelegram(java.time.Duration.ofMinutes(30), now);
+
+    assertThat(r[0]).isGreaterThanOrEqualTo(1);
+    assertThat(tgTasks(fresh, "PENDING")).as("用原任务的内容重新排了一个").isEqualTo(1);
+    assertThat(status(fresh)).isEqualTo("PENDING -");
+    assertThat(status(old)).isEqualTo("FAILED " + NotifyWorker.RESUME_TOO_OLD);
+    assertThat(tgTasks(old, "PENDING")).isZero();
+    assertThat(tgTasks(waitingRid, "PENDING")).as("原任务还在排，不重复排").isEqualTo(1);
+    assertThat(status(waitingRid)).isEqualTo("PENDING -");
+    // 再跑一次：刚排的任务还没做，不会再排
+    worker.resumeTelegram(java.time.Duration.ofMinutes(30), now);
+    assertThat(tgTasks(fresh, "PENDING")).isEqualTo(1);
+  }
+
+  @Test
+  void 重启后补发_找不到原任务的记失败() {
+    java.time.LocalDateTime now = java.time.LocalDateTime.now(clock);
+    long rid = handedOffThenCrashed(tgUser());
+    jdbc.update("DELETE FROM common_task WHERE task_type = 'TG_SEND' AND JSON_EXTRACT(payload, '$.recordId') = ?", rid);
+    worker.resumeTelegram(java.time.Duration.ofMinutes(30), now);
+    assertThat(status(rid)).isEqualTo("FAILED " + NotifyWorker.RESUME_LOST);
+  }
 }

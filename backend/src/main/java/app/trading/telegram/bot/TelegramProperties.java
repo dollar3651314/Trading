@@ -15,7 +15,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 @ConfigurationProperties("trading.telegram")
 public record TelegramProperties(String token, String username, @DefaultValue("https://api.telegram.org") String apiUrl, String webUrl,
     @DefaultValue("50s") Duration pollTimeout, @DefaultValue("1s") Duration perChatInterval, @DefaultValue("25") int globalPerSecond,
-    @DefaultValue("5000") int queueCapacity, @DefaultValue("10m") Duration unhealthyAfter, @DefaultValue("30") int userPerMinute) {
+    @DefaultValue("5000") int queueCapacity, @DefaultValue("10m") Duration unhealthyAfter, @DefaultValue("20") int userPerMinute) {
 
   public boolean configured() {
     return token != null && !token.isBlank();

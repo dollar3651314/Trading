@@ -3,12 +3,14 @@ import { ApiError, validCooldown } from '../errors';
 import { get, post } from '../http';
 import type { EmailCodePurpose, RegisterRequest, Session } from '../types';
 
+/** 后端 SessionView：机器人开户的客户（纯 Telegram）email 为 null；有 TG 账户的带 telegramUsername（TG 机器人第 1 批） */
 interface SessionView {
   userId: string;
-  email: string;
+  email: string | null;
+  telegramUsername?: string | null;
 }
 
-const toSession = (v: SessionView): Session => ({ userId: v.userId, email: v.email });
+const toSession = (v: SessionView): Session => ({ userId: v.userId, email: v.email ?? null, ...(v.telegramUsername ? { telegramUsername: v.telegramUsername } : {}) });
 
 /** 后端的验证码用途是枚举 REGISTER / RESET_PASSWORD */
 const PURPOSE: Record<EmailCodePurpose, string> = { register: 'REGISTER', resetPassword: 'RESET_PASSWORD' };

@@ -23,7 +23,8 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
  *   <li>429：按 retry_after 暂停这个聊天（并且全部暂停同样长时间），放回队头重发；</li>
  *   <li>403（客户屏蔽了机器人）、400（消息有问题）：不重发，回调失败原因；网络错误、5xx：最多试 3 次，每次隔 2 秒。</li>
  * </ul>
- * 队列在内存里、有上限（{@code queue-capacity}）：满了直接回调失败，不撑爆内存；进程重启时没发出的丢掉（通知记录停在"发送中"）。
+ * 队列在内存里、有上限（{@code queue-capacity}）：满了先挤掉低档的，高档不丢（见 {@link #offer}）；
+ * 进程重启时没发出的提醒由通知模块启动时补发（30 分钟以内的重新排队，更早的记失败，{@code NotifyWorker.resumeTelegram}）。
  */
 public class TelegramOutbox {
 
@@ -75,23 +76,53 @@ public class TelegramOutbox {
     for (Priority p : Priority.values()) queues.put(p, new ArrayDeque<>());
   }
 
+  static final String EVICTED = "发送队列满，让给了更重要的消息";
+  static final String FULL = "发送队列满";
+
   /**
    * 排队。{@code done} 在发出后回调 {@code null}，确定发不出时回调原因（不含令牌）；可以为空。
+   * 队列满了（审查 🟡1）：先挤掉一条比它低档的（从最低档、最新排进来的挤起）；没有更低档的——低、中档直接拒收，
+   * <b>高档（安全提醒、强平预警、对客户操作的回复）不丢</b>，超过上限也收下（高档的量受每人每分钟上限约束）。
    *
-   * @return 排上了；队列满了返回 false（并已回调失败）
+   * @return 排上了；拒收返回 false（并已回调失败）
    */
   public boolean offer(long chatId, Priority priority, BotApiMethod<? extends Serializable> method, Consumer<String> done) {
+    Job job = new Job(chatId, priority, method, done);
+    Job evicted = null;
+    boolean accepted = true;
     synchronized (lock) {
       if (size >= props.queueCapacity()) {
-        log.warn("Telegram 发送队列满（{} 条），丢弃一条 {}", size, priority);
-        complete(new Job(chatId, priority, method, done), "发送队列满");
-        return false;
+        evicted = evictBelow(priority);
+        if (evicted == null && priority != Priority.HIGH) accepted = false;
       }
-      queues.get(priority).addLast(new Job(chatId, priority, method, done));
-      size++;
-      lock.notifyAll();
+      if (accepted) {
+        queues.get(priority).addLast(job);
+        size++;
+        lock.notifyAll();
+      }
     }
-    return true;
+    if (evicted != null) {
+      log.warn("Telegram 发送队列满，挤掉一条 {} 给 {}", evicted.priority, priority);
+      complete(evicted, EVICTED);
+    }
+    if (!accepted) {
+      log.warn("Telegram 发送队列满（{} 条），拒收一条 {}", props.queueCapacity(), priority);
+      complete(job, FULL);
+    }
+    return accepted;
+  }
+
+  /** 从比 p 低的档里挤掉一条（最低档、最新的先挤）；没有返回 null。调用方持有 lock */
+  private Job evictBelow(Priority p) {
+    Priority[] all = Priority.values();
+    for (int i = all.length - 1; i > p.ordinal(); i--) {
+      Job j = queues.get(all[i]).pollLast();
+      if (j != null) {
+        size--;
+        return j;
+      }
+    }
+    return null;
   }
 
   public int size() {

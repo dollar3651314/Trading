@@ -16,9 +16,24 @@ class NotifyScheduler {
   private final NotifyWorker worker;
   private final app.trading.common.task.TaskService tasks;
 
-  NotifyScheduler(NotifyWorker worker, app.trading.common.task.TaskService tasks) {
+  private final NotifyProperties props;
+  private final java.time.Clock clock;
+
+  NotifyScheduler(NotifyWorker worker, app.trading.common.task.TaskService tasks, NotifyProperties props, java.time.Clock clock) {
     this.worker = worker;
     this.tasks = tasks;
+    this.props = props;
+    this.clock = clock;
+  }
+
+  /** 启动后补发重启前已交给 Telegram 发送队列、还没发出的提醒（{@link NotifyWorker#resumeTelegram}） */
+  @org.springframework.context.event.EventListener(org.springframework.boot.context.event.ApplicationReadyEvent.class)
+  void resumeTelegram() {
+    try {
+      worker.resumeTelegram(props.telegramResumeWithin(), java.time.LocalDateTime.now(clock));
+    } catch (RuntimeException e) {
+      log.error("重启后补发 Telegram 提醒失败", e);
+    }
   }
 
   @Scheduled(fixedDelay = 2_000, initialDelay = 10_000)

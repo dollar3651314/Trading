@@ -206,8 +206,8 @@ trading:
     queue-capacity: 5000
     # 轮询连续失败多久算告警（alerts.telegram）；收到 409（另一个程序在用同一个令牌）立即告警
     unhealthy-after: 10m
-    # 每个 Telegram 用户每分钟最多处理几条消息 / 按钮（超过的不回应）
-    user-per-minute: 30
+    # 每个 Telegram 用户每分钟最多处理几条消息 / 按钮（超过的不回应；需求文档 TG机器人-03 页）
+    user-per-minute: 20
   # 后台（S16a，内部文档）。登录锁定次数和时长、IP 白名单在后台的系统配置里改
   admin:
     session-ttl: 8h

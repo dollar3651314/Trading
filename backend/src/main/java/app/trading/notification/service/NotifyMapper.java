@@ -42,6 +42,9 @@ interface NotifyMapper {
 
   Rows.RecordRow record(@Param("id") long id);
 
+  /** 还停在"发送中"的 Telegram 通知（最多 1 万条） */
+  List<Rows.RecordRow> pendingTelegram();
+
   /** 同一个推送地址已经有了就改成这个客户、更新密钥 */
   void upsertPushSub(@Param("userId") long userId, @Param("endpoint") String endpoint, @Param("hash") String hash, @Param("p256dh") String p256dh,
       @Param("auth") String auth, @Param("now") LocalDateTime now);

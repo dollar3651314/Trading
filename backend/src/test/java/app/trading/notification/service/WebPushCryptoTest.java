@@ -86,7 +86,7 @@ class WebPushCryptoTest {
   static NotifyProperties props(String pub, String priv, String subject) {
     return new NotifyProperties(false, new NotifyProperties.Mail(null, 587, null, null, null, "STARTTLS"),
         new NotifyProperties.Push(pub, priv, subject, java.time.Duration.ofHours(24),
-            List.of("fcm.googleapis.com", "*.push.apple.com", "updates.push.services.mozilla.com", "*.notify.windows.com"), false, 10));
+            List.of("fcm.googleapis.com", "*.push.apple.com", "updates.push.services.mozilla.com", "*.notify.windows.com"), false, 10), java.time.Duration.ofMinutes(30));
   }
 
   static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-14T10:00:00Z"), ZoneOffset.UTC);

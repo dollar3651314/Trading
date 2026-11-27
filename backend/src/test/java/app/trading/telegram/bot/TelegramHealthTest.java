@@ -20,7 +20,7 @@ class TelegramHealthTest {
   @Test
   void 没配令牌不检查() {
     TelegramProperties none = new TelegramProperties("", "x", "https://api.telegram.org", null, Duration.ofSeconds(50), Duration.ofSeconds(1), 25, 10,
-        Duration.ofMinutes(10), 30);
+        Duration.ofMinutes(10), 20);
     assertThat(new TelegramHealth(none, clock).evaluate()).isEmpty();
   }
 
