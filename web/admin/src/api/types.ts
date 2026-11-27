@@ -866,6 +866,8 @@ export interface NotifyTemplate {
   updatedAt: string;
   /** 第 6 批 TB-37：告警邮件模板（发给 FX_ALERT_EMAILS）不能在后台改 */
   locked?: boolean;
+  /** #46 审查：客户安全提醒模板只能改文案（不能停用、原来的变量不能删），每次改都发告警邮件 */
+  security?: boolean;
 }
 
 export interface NotifyRecord {

@@ -117,7 +117,8 @@
     "unknownVariable": "uses a variable the template does not have",
     "weak": "is too weak (at least 10 characters with letters and digits)",
     "belowFloor": "Below the floor (TB-37: whitelist ≥ 24 h, cooling ≥ 2 h)",
-    "aboveCeiling": "Above the ceiling (TB-37: daily withdrawals ≤ 30,000 USDT)"
+    "aboveCeiling": "Above the ceiling (TB-37: daily withdrawals ≤ 30,000 USDT)",
+    "missingVariable": "removes a variable from the current text (not allowed for security notices)"
   },
   "app": {
     "adminConsole": "Admin"
@@ -671,7 +672,8 @@
     "recoveryOpen": "This customer already has a recovery request in progress; settle it under Recovery requests first",
     "emergencyUnchanged": "The emergency switch is already in that state; refresh the page",
     "intakeUnchanged": "Already in that state; refresh the page",
-    "templateLocked": "Alert email templates cannot be edited in the admin console"
+    "templateLocked": "Alert email templates cannot be edited in the admin console",
+    "securityTemplateCannotDisable": "Security notice templates cannot be disabled"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -1362,7 +1364,8 @@
     "type": "Type",
     "updatedAt": "Updated",
     "variables": "Variables (filled in when sent)",
-    "locked": "Alert email templates cannot be edited in the admin console"
+    "locked": "Alert email templates cannot be edited in the admin console",
+    "securityHint": "Customer security notice: text edits only, cannot be disabled; every variable in the current text (customer ID, time, device, IP…) must stay; every edit sends an alert email."
   },
   "theme": {
     "dark": "Dark",
@@ -2243,8 +2246,10 @@
     "doneHint": "Recorded in the request history and an alert email was sent.",
     "result": {
       "cancelled": "Recovery request #{{id}} cancelled",
-      "not_open": "This request has already ended; nothing changed",
+      "not_open": "This request has already ended (it may have run); the link no longer works. Use the admin console or the server command",
       "invalid": "The link was used, expired or invalid; nothing was cancelled"
-    }
+    },
+    "executedNote": "Note: once the request has run (the rebind or PIN reset has taken effect), this link no longer works. After that, use the admin console (for example re-arrange the Telegram link or freeze withdrawals) or the sudo trading commands on the server.",
+    "closed": "Recovery request #{{id}} has already ended ({{status}}); this link no longer works"
   }
 }

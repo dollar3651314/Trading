@@ -110,6 +110,11 @@ export function TemplatesPage() {
       >
         {editing ? (
           <Form form={form} layout="vertical" name="template-edit">
+            {editing.security ? (
+              <div data-testid="template-security">
+                <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={t('templates.securityHint')} />
+              </div>
+            ) : null}
             {editing.variables.length ? (
               <Alert
                 type="info"

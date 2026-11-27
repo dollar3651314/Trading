@@ -71,6 +71,7 @@ export const ERROR_KEYS: Record<string, string> = {
   // 第 6 批：暂停受理人工申请已经是这个状态；告警邮件模板不能改
   INTAKE_UNCHANGED: 'errors.intakeUnchanged',
   TEMPLATE_LOCKED: 'errors.templateLocked',
+  SECURITY_TEMPLATE_CANNOT_DISABLE: 'errors.securityTemplateCannotDisable',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',

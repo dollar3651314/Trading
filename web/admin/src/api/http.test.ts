@@ -59,7 +59,7 @@ describe('错误码映射', () => {
       // 第 5 批：应急开关
       'EMERGENCY_UNCHANGED',
       // 第 6 批
-      'INTAKE_UNCHANGED', 'TEMPLATE_LOCKED',
+      'INTAKE_UNCHANGED', 'TEMPLATE_LOCKED', 'SECURITY_TEMPLATE_CANNOT_DISABLE',
     ];
     expect(backend.filter((c) => !ERROR_KEYS[c])).toEqual([]);
   });

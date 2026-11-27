@@ -356,10 +356,31 @@ class NotifyService implements NotifyApi, NotifyAdminApi, TelegramPrefsApi {
     String te = text(c, "titleEn", titleEn, t.titleEn, 200, allowed);
     String be = text(c, "bodyEn", bodyEn, t.bodyEn, 1000, allowed);
     boolean en = enabled == null ? t.enabled : enabled;
+    // #46 审查：客户的安全类提醒只能改文案——不能停用（不管是不是内置），原来文案里有的变量（客户号、时间、设备、IP……）一个都不能少
+    boolean security = NotifyAdminApi.securityTemplate(code);
+    if (security && !en) throw new app.trading.common.error.BizException("SECURITY_TEMPLATE_CANNOT_DISABLE", "安全提醒模板不能停用");
     if (t.builtIn && !en) throw new app.trading.common.error.BizException("BUILT_IN_CANNOT_DISABLE", "内置模板不能停用");
+    if (security) {
+      keepVars(c, "titleZh", t.titleZh, tz);
+      keepVars(c, "bodyZh", t.bodyZh, bz);
+      keepVars(c, "titleEn", t.titleEn, te);
+      keepVars(c, "bodyEn", t.bodyEn, be);
+    }
     c.throwIfAny();
     mapper.updateTemplate(code, tz, bz, te, be, en);
     return template(mapper.template(code));
+  }
+
+  /** 安全类模板：新文案要保留旧文案里出现过的全部变量 */
+  private static void keepVars(ValidationException.Collector c, String field, String oldText, String newText) {
+    if (oldText == null || newText == null || newText.equals(oldText)) return;
+    java.util.regex.Matcher m = VAR.matcher(oldText);
+    while (m.find()) {
+      if (!newText.contains("{" + m.group(1) + "}")) {
+        c.add(field, "missingVariable");
+        return;
+      }
+    }
   }
 
   /** 为空不改；不能为空白、不能超长、只能用模板列出的变量 */

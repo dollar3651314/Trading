@@ -117,7 +117,8 @@
     "unknownVariable": "用了模板没有的变量",
     "weak": "强度不够（至少 10 位，含字母和数字）",
     "belowFloor": "低于下限（TB-37：白名单生效至少 24 小时、冷静期至少 2 小时）",
-    "aboveCeiling": "高于上限（TB-37：每天提现累计最多 30,000 USDT）"
+    "aboveCeiling": "高于上限（TB-37：每天提现累计最多 30,000 USDT）",
+    "missingVariable": "删掉了原来文案里的变量（安全提醒不能删）"
   },
   "app": {
     "adminConsole": "管理后台"
@@ -671,7 +672,8 @@
     "recoveryOpen": "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完",
     "emergencyUnchanged": "应急开关已经是这个状态了，刷新看看",
     "intakeUnchanged": "已经是这个状态了，刷新看看",
-    "templateLocked": "告警邮件模板不能在后台改"
+    "templateLocked": "告警邮件模板不能在后台改",
+    "securityTemplateCannotDisable": "安全提醒模板不能停用"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -1362,7 +1364,8 @@
     "type": "类型",
     "updatedAt": "更新时间",
     "variables": "可用变量（发送时替换）",
-    "locked": "告警邮件模板不能在后台改（防止后台账号被盗后删掉告警内容）"
+    "locked": "告警邮件模板不能在后台改（防止后台账号被盗后删掉告警内容）",
+    "securityHint": "客户安全提醒：只能改文案，不能停用；原来文案里的变量（客户号、时间、设备、IP 等）一个都不能删；每次修改都会给告警邮箱发邮件。"
   },
   "theme": {
     "dark": "深色",
@@ -2243,8 +2246,10 @@
     "doneHint": "已写进申请的经过，并发了告警邮件。",
     "result": {
       "cancelled": "找回申请 #{{id}} 已撤销",
-      "not_open": "这份申请已经结束了，没有改",
+      "not_open": "这份申请已经结束了（可能已经执行），链接不能再用；请登录后台或用服务器命令处理",
       "invalid": "链接已经用过、过期或不对，没有撤销"
-    }
+    },
+    "executedNote": "注意：申请一旦执行（换绑已经生效、提现密码已经重设），这个链接就不能用了。执行以后要处理，请登录后台（例如重新安排更换 Telegram 关联、冻结提现），或在服务器上用 sudo trading 命令。",
+    "closed": "找回申请 #{{id}} 已经结束（{{status}}），这个链接不能用了"
   }
 }

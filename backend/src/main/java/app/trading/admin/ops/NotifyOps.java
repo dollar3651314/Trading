@@ -23,7 +23,7 @@ class NotifyOps {
 
   /** 字段和原型 NotifyTemplate 一致（id 就是模板编号） */
   record TemplateView(String id, String code, String nameZh, String nameEn, boolean builtIn, boolean enabled, List<String> channels, String titleZh,
-      String bodyZh, String titleEn, String bodyEn, List<String> variables, String updatedAt, boolean locked) {}
+      String bodyZh, String titleEn, String bodyEn, List<String> variables, String updatedAt, boolean locked, boolean security) {}
 
   record TemplatePatch(String titleZh, String bodyZh, String titleEn, String bodyEn, Boolean enabled) {}
 
@@ -39,7 +39,15 @@ class NotifyOps {
   private final AdminNames names;
   private final Audit audit;
 
-  NotifyOps(NotifyAdminApi notify, CustomerAdminApi customers, AdminNames names, Audit audit) {
+  private final app.trading.notification.api.MailApi mail;
+  private final app.trading.common.health.AlertProperties alerts;
+  private final java.time.Clock clock;
+
+  NotifyOps(NotifyAdminApi notify, CustomerAdminApi customers, AdminNames names, Audit audit, app.trading.notification.api.MailApi mail,
+      app.trading.common.health.AlertProperties alerts, java.time.Clock clock) {
+    this.mail = mail;
+    this.alerts = alerts;
+    this.clock = clock;
     this.notify = notify;
     this.customers = customers;
     this.names = names;
@@ -48,7 +56,8 @@ class NotifyOps {
 
   private static TemplateView view(NotifyAdminApi.Template t) {
     return new TemplateView(t.code(), t.code(), t.nameZh(), t.nameEn(), t.builtIn(), t.enabled(), t.channels().stream().map(c -> c.name().toLowerCase()).toList(),
-        t.titleZh(), t.bodyZh(), t.titleEn(), t.bodyEn(), t.variables(), Ops.time(t.updatedAt()), "STAFF".equals(t.audience()));
+        t.titleZh(), t.bodyZh(), t.titleEn(), t.bodyEn(), t.variables(), Ops.time(t.updatedAt()), "STAFF".equals(t.audience()),
+        NotifyAdminApi.securityTemplate(t.code()));
   }
 
   List<TemplateView> templates() {
@@ -65,7 +74,8 @@ class NotifyOps {
       before.put("bodyEn", t.bodyEn());
       before.put("enabled", t.enabled());
     });
-    return audit.run("notify.template_update", code, false, null, () -> {
+    NotifyAdminApi.Template[] saved = new NotifyAdminApi.Template[1];
+    TemplateView v = audit.run("notify.template_update", code, NotifyAdminApi.securityTemplate(code), null, () -> {
       NotifyAdminApi.Template t = notify.updateTemplate(code, patch.titleZh(), patch.bodyZh(), patch.titleEn(), patch.bodyEn(), patch.enabled());
       Map<String, Object> after = new LinkedHashMap<>();
       after.put("titleZh", t.titleZh());
@@ -73,8 +83,36 @@ class NotifyOps {
       after.put("titleEn", t.titleEn());
       after.put("bodyEn", t.bodyEn());
       after.put("enabled", t.enabled());
+      saved[0] = t;
       return Audit.Change.of(view(t), before, after);
     });
+    if (NotifyAdminApi.securityTemplate(code)) alertSecurityEdit(saved[0], before);
+    return v;
+  }
+
+  static final String SECURITY_TEMPLATE_MAIL = "OPS_SECURITY_TEMPLATE";
+
+  /** #46 审查：客户安全提醒模板的文案改了就给告警邮箱发邮件（只改了的字段；写邮件任务失败只记日志） */
+  private void alertSecurityEdit(NotifyAdminApi.Template t, Map<String, Object> before) {
+    List<String> fields = new java.util.ArrayList<>();
+    if (!java.util.Objects.equals(before.get("titleZh"), t.titleZh())) fields.add("titleZh");
+    if (!java.util.Objects.equals(before.get("bodyZh"), t.bodyZh())) fields.add("bodyZh");
+    if (!java.util.Objects.equals(before.get("titleEn"), t.titleEn())) fields.add("titleEn");
+    if (!java.util.Objects.equals(before.get("bodyEn"), t.bodyEn())) fields.add("bodyEn");
+    if (fields.isEmpty()) return;
+    AdminContext a = AdminContext.find().orElse(null);
+    Map<String, String> p = Map.of("code", t.code(), "nameZh", t.nameZh(), "nameEn", t.nameEn(), "admin", a == null ? "?" : a.username() + "（后台账号 #" + a.adminId() + "）",
+        "fields", String.join(", ", fields), "at", java.time.LocalDateTime.now(clock).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString(),
+        "bodyZh", t.bodyZh(), "bodyEn", t.bodyEn());
+    List<String> to = alerts.recipients();
+    if (to.isEmpty()) org.slf4j.LoggerFactory.getLogger(NotifyOps.class).warn("没有配置告警邮箱（FX_ALERT_EMAILS），安全提醒模板 {} 被改只记了审计", t.code());
+    for (String email : to) {
+      try {
+        mail.send(email, SECURITY_TEMPLATE_MAIL, p);
+      } catch (RuntimeException e) {
+        org.slf4j.LoggerFactory.getLogger(NotifyOps.class).error("安全提醒模板修改的告警邮件写入发送任务失败", e);
+      }
+    }
   }
 
   /** 手动发送给单个客户（高危，必须填原因）；推送和邮件仍然遵守客户的通知偏好 */

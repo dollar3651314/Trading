@@ -1282,8 +1282,15 @@ export function updateTradingParams(p: TradingParamsInput, reason: string): Prom
 }
 
 // ============ 通知 ============
+/** #46 审查：客户安全提醒模板（和后端 NotifyAdminApi.securityTemplate 同一套规则） */
+export function securityTemplateCode(code: string): boolean {
+  const c = code.toUpperCase();
+  return ['WITHDRAW_', 'WHITELIST_', 'RECOVERY_', 'PIN_RESET_'].some((p) => c.startsWith(p))
+    || ['ACCOUNT_FROZEN', 'TELEGRAM_LINK_CHANGED', 'TG_EMERGENCY_LOGIN', 'LOGIN_NEW_DEVICE', 'EMAIL_CODE'].includes(c);
+}
+
 export function listTemplates() {
-  return respond(() => db.templates, { empty: () => [] as NotifyTemplate[] });
+  return respond(() => db.templates.map((t) => ({ ...t, security: securityTemplateCode(t.code) })), { empty: () => [] as NotifyTemplate[] });
 }
 
 export function updateTemplate(id: string, patch: Partial<Pick<NotifyTemplate, 'titleZh' | 'bodyZh' | 'titleEn' | 'bodyEn' | 'enabled'>>): Promise<void> {
@@ -1295,6 +1302,15 @@ export function updateTemplate(id: string, patch: Partial<Pick<NotifyTemplate, '
     if (t.builtIn && patch.enabled === false) throw new ApiError('errors.builtInCannotDisable');
     // 第 6 批 TB-37：告警邮件模板不能在后台改
     if (t.locked) throw new ApiError('errors.templateLocked');
+    // #46 审查：安全提醒只能改文案，不能停用，原来文案里的变量不能删
+    if (securityTemplateCode(t.code)) {
+      if (patch.enabled === false) throw new ApiError('errors.securityTemplateCannotDisable');
+      const missing = (['titleZh', 'bodyZh', 'titleEn', 'bodyEn'] as const).filter((f) => {
+        const nv = patch[f];
+        return nv !== undefined && (t[f].match(/\{[A-Za-z0-9_]+}/g) ?? []).some((v) => !nv.includes(v));
+      });
+      if (missing.length) throw new ApiError('errors.validationFailed', undefined, { status: 400, code: 'VALIDATION_FAILED', fields: missing.map((f) => ({ field: f, code: 'missingVariable' })) });
+    }
     const before = { titleZh: t.titleZh, bodyZh: t.bodyZh, titleEn: t.titleEn, bodyEn: t.bodyEn, enabled: t.enabled };
     Object.assign(t, patch, { updatedAt: nowString() });
     audit('notify.template_update', t.code, false, null, before, { titleZh: t.titleZh, bodyZh: t.bodyZh, titleEn: t.titleEn, bodyEn: t.bodyEn, enabled: t.enabled });
@@ -1768,11 +1784,12 @@ export function setRecoveryIntake(paused: boolean, reason: string, password: str
 
 /** 原型：令牌 demo-revoke-token-0001（对应第一份进行中的申请）能用一次 */
 export const MOCK_REVOKE_TOKEN = 'demo-revoke-token-0001';
-const usedRevokeTokens = new Set<string>();
+export const usedRevokeTokens = new Set<string>();
 
 export function peekRecoveryRevoke(token: string): Promise<RevokePeek> {
   return respond(() => {
-    const r = recoveries.find((x) => ['objection', 'proof', 'approved'].includes(x.status));
+    // 和后端一样：令牌还能用就返回申请（不管申请是不是已经结束），页面按状态决定能不能撤销
+    const r = recoveries[0];
     if (token !== MOCK_REVOKE_TOKEN || usedRevokeTokens.has(token) || !r) return { valid: false, id: null, kind: null, customerId: null, status: null, executeAt: null };
     return { valid: true, id: Number(r.id), kind: r.kind, customerId: r.customerId, status: r.status, executeAt: r.executeAt };
   });
@@ -1782,8 +1799,8 @@ export function revokeRecoveryByLink(token: string): Promise<RevokeLinkResult> {
   return mutate(() => {
     if (token !== MOCK_REVOKE_TOKEN || usedRevokeTokens.has(token)) return 'invalid' as RevokeLinkResult;
     usedRevokeTokens.add(token);
-    const r = recoveries.find((x) => ['objection', 'proof', 'approved'].includes(x.status));
-    if (!r) return 'not_open' as RevokeLinkResult;
+    const r = recoveries[0];
+    if (!r || !['objection', 'proof', 'approved'].includes(r.status)) return 'not_open' as RevokeLinkResult;
     r.status = 'cancelled';
     r.closedBy = 'mail';
     r.closeReason = '告警邮件里的撤销链接';

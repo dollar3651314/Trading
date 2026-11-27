@@ -375,6 +375,7 @@ check "TG 第 2 批 set：FX_TG_WEB_URL 只认 https://域名、FX_TG_LOGIN_MODE
 # 第 5 批应急开关（TB-34）的服务器备用办法：只认 on / off、原因必填；写开关记录和审计（原因只以十六进制进 SQL）、关的时候作废应急登录会话、发告警邮件；已经是这个状态就不写；Trading 停着时不改
 em_run() { : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" FAKE_CURL_ARGS="$tmp/curl-args" FAKE_TRADING_RUNNING=1 "$@" 2>&1; }
 export -f em_run
+check "后台不用登录的接口 /api/admin/public/（告警邮件撤销链接）单独一档低限额（每秒 2、突发 10、连接 10），两个模板都有（#46 审查）" bash -c 'for f in deploy/nginx/site.conf.template deploy/nginx/gateway.conf.template; do grep -q "zone=tr_admin_public:1m rate=2r/s;" "$f" && grep -A2 -F "location /api/admin/public/ {" "$f" | grep -q "limit_req zone=tr_admin_public burst=10 nodelay;" && grep -A3 -F "location /api/admin/public/ {" "$f" | grep -q "limit_conn tr_admin_public_conn 10;" || exit 1; done'
 check "应急开关备用办法：sudo trading set TR_TG_EMERGENCY_LOGIN on|off \"原因\" 写开关记录、审计（原因十六进制）、关时作废应急会话、发告警邮件；值不对、没原因、已经是这个状态、Trading 停着都不写" bash -c '
   mail_env ""
   em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN maybe "x" > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1

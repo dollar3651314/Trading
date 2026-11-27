@@ -68,7 +68,18 @@ export function RecoveryRevokePage() {
   } else if (!peek.valid) {
     body = (
       <div data-testid="revoke-invalid">
-        <Result status="warning" title={t('revokeLink.invalid')} subTitle={t('revokeLink.serverHint')} />
+        <Result status="warning" title={t('revokeLink.invalid')} subTitle={`${t('revokeLink.executedNote')} ${t('revokeLink.serverHint')}`} />
+      </div>
+    );
+  } else if (!['objection', 'proof', 'approved'].includes(peek.status ?? '')) {
+    // 申请已经执行 / 结束：链接不能用了，不显示撤销按钮
+    body = (
+      <div data-testid="revoke-closed">
+        <Result
+          status="warning"
+          title={t('revokeLink.closed', { id: peek.id ?? '', status: t(`recoveries.status.${peek.status}`) })}
+          subTitle={`${t('revokeLink.executedNote')} ${t('revokeLink.serverHint')}`}
+        />
       </div>
     );
   } else {
@@ -82,6 +93,7 @@ export function RecoveryRevokePage() {
           {peek.executeAt ? <Descriptions.Item label={t('revokeLink.executeAt')}>{fullTime(peek.executeAt)}</Descriptions.Item> : null}
         </Descriptions>
         <Alert type="warning" showIcon style={{ marginBottom: 16 }} message={t('revokeLink.impact')} />
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} message={t('revokeLink.executedNote')} />
         <Button type="primary" danger block loading={busy} onClick={() => void revoke()} data-testid="revoke-confirm">
           {t('revokeLink.confirm')}
         </Button>

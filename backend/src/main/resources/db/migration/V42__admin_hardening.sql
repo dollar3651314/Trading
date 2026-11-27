@@ -64,4 +64,9 @@ INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, t
   '人工申请已{actionZh}', 'Manual applications {actionEn}',
   '换绑、没邮箱重设提现密码的人工申请已{actionZh}。\n操作人：{admin}\n原因：{reason}\n时间（UTC）：{at}\n暂停时新的申请会提示"暂停中，请先申请冻结提现"；已提交的申请留在队列里，已批准的照常执行；冻结入口照常可用。如果不是你本人操作的，请立即检查后台账号。',
   'Manual applications (rebind, PIN reset without email) are now {actionEn}.\nBy: {admin}\nReason: {reason}\nAt (UTC): {at}\nWhile paused, new applications are told to freeze withdrawals first; submitted ones stay in the queue and approved ones run as scheduled; the freeze entry keeps working. If you did not do this, check the admin accounts right away.',
-  'actionZh,actionEn,admin,reason,at', 'EMAIL');
+  'actionZh,actionEn,admin,reason,at', 'EMAIL'),
+('OPS_SECURITY_TEMPLATE', 'STAFF', NULL, '安全提醒模板被改了', 'Security notice template changed',
+  '安全提醒模板 {code} 被改了', 'Security notice template {code} changed',
+  '客户安全提醒模板 {code}（{nameZh}）的文案在后台被改了。\n操作人：{admin}\n改了：{fields}\n时间（UTC）：{at}\n现在的中文正文：\n{bodyZh}\n如果不是你们安排的修改，请立即检查后台账号，并在后台"通知模板"里改回来（审计日志里有修改前的文案）。',
+  'The text of the customer security notice template {code} ({nameEn}) was changed in the admin console.\nBy: {admin}\nFields: {fields}\nAt (UTC): {at}\nCurrent English body:\n{bodyEn}\nIf this was not planned, check the admin accounts right away and restore the text under Notification templates (the audit log has the previous text).',
+  'code,nameZh,nameEn,admin,fields,at,bodyZh,bodyEn', 'EMAIL');

@@ -54,6 +54,20 @@ abstract class AdminTestSupport {
     return id;
   }
 
+  /**
+   * 用指定编号建一个超管（应急开关、暂停受理这类"只限配置里那个账号编号"的测试用，#46 审查）：先删掉这个编号和这个用户名原来的记录
+   * （上一次运行留下的，或者自增编号碰巧用到了这个编号的别的测试管理员），再插入，插完核对编号和用户名都是自己的
+   */
+  Admin fixedSuperAdmin(long id, String username) throws Exception {
+    for (String t : new String[] {"admin_user_role", "admin_session"}) jdbc.update("DELETE FROM " + t + " WHERE admin_id = ? OR admin_id IN (SELECT id FROM admin_user WHERE username = ?)", id, username);
+    jdbc.update("DELETE FROM admin_user WHERE id = ? OR username = ?", id, username);
+    jdbc.update("INSERT INTO admin_user (id, username, display_name, email, password_hash, status, must_change_password, created_at) "
+        + "VALUES (?, ?, 'Amos', ?, ?, 'ACTIVE', 0, UTC_TIMESTAMP(3))", id, username, username + "@example.com", Passwords.hash(PASSWORD));
+    jdbc.update("INSERT INTO admin_user_role (admin_id, role_id) SELECT ?, id FROM admin_role WHERE code = 'super_admin'", id);
+    if (!username.equals(jdbc.queryForObject("SELECT username FROM admin_user WHERE id = ?", String.class, id))) throw new AssertionError("编号 " + id + " 不是 " + username);
+    return login(id);
+  }
+
   /** 建一个只有这些权限点的角色，返回角色编码 */
   String role(Permission... perms) {
     String code = unique("r_");

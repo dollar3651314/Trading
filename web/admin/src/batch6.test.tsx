@@ -8,7 +8,7 @@ import { Route, Routes } from 'react-router-dom';
 import * as real from './api/real';
 import type { Recovery } from './api/types';
 import * as db from './mocks/data/db';
-import { intakeLog, MOCK_REVOKE_TOKEN, recoveries } from './mocks/handlers';
+import { intakeLog, MOCK_REVOKE_TOKEN, recoveries, usedRevokeTokens } from './mocks/handlers';
 import { RecoveriesPage } from './pages/customers/RecoveriesPage';
 import { TemplatesPage } from './pages/notify/TemplatesPage';
 import { RecoveryRevokePage, revokeTokenFromHash } from './pages/RecoveryRevokePage';
@@ -33,6 +33,7 @@ function confirmHighRisk(dialog: HTMLElement, reason: string, ok: string) {
 afterEach(() => {
   recoveries.splice(0);
   intakeLog.splice(0);
+  usedRevokeTokens.clear();
   db.session.adminId = 1;
 });
 
@@ -77,6 +78,7 @@ describe('告警邮件里的撤销链接（TB-37 ②）', () => {
     expect(await screen.findByTestId('revoke-confirm')).toBeInTheDocument();
     expect(window.location.hash).toBe('');
     expect(screen.getByText('#41')).toBeInTheDocument();
+    expect(screen.getByText(/一旦执行/)).toBeInTheDocument();
     expect(recoveries[0].status).toBe('approved');
     fireEvent.click(screen.getByTestId('revoke-confirm'));
     expect(await screen.findByTestId('revoke-result')).toHaveTextContent('找回申请 #41 已撤销');
@@ -85,6 +87,17 @@ describe('告警邮件里的撤销链接（TB-37 ②）', () => {
     window.history.replaceState(null, '', `/recovery-revoke#t=${MOCK_REVOKE_TOKEN}`);
     renderAs(<Routes><Route path="/recovery-revoke" element={<RecoveryRevokePage />} /></Routes>, { path: '/recovery-revoke' });
     expect(await screen.findByTestId('revoke-invalid')).toHaveTextContent('已经用过');
+    expect(screen.queryByTestId('revoke-confirm')).toBeNull();
+  }, 30_000);
+
+  it('申请已经执行：不显示撤销按钮，说明链接不能用了、改用后台或服务器命令', async () => {
+    recoveries.push(rec({ status: 'executed' }));
+    window.history.replaceState(null, '', `/recovery-revoke#t=${MOCK_REVOKE_TOKEN}`);
+    renderAs(<Routes><Route path="/recovery-revoke" element={<RecoveryRevokePage />} /></Routes>, { path: '/recovery-revoke' });
+    const closed = await screen.findByTestId('revoke-closed');
+    expect(closed).toHaveTextContent('已经结束');
+    expect(closed).toHaveTextContent('一旦执行');
+    expect(closed).toHaveTextContent('sudo trading cancel-recovery');
     expect(screen.queryByTestId('revoke-confirm')).toBeNull();
   }, 30_000);
 
@@ -121,6 +134,30 @@ describe('告警邮件模板不能在后台改（TB-37）', () => {
       }, { timeout: 5000 });
     } finally {
       delete tpl.locked;
+    }
+  }, 30_000);
+});
+
+describe('客户安全提醒模板（#46 审查）', () => {
+  it('编辑时提示只能改文案、会发告警邮件；不能停用；不能删原来的变量；改文案可以', async () => {
+    const { listTemplates, updateTemplate } = await import('./mocks/handlers');
+    const tpl = db.templates.find((x) => x.code.toUpperCase().startsWith('WITHDRAW_'))!;
+    const before = { ...tpl };
+    try {
+      const listed = (await listTemplates()).find((x) => x.id === tpl.id)!;
+      expect(listed.security).toBe(true);
+      await expect(updateTemplate(tpl.id, { enabled: false })).rejects.toMatchObject({ reasonKey: expect.stringMatching(/CannotDisable/) });
+      await expect(updateTemplate(tpl.id, { bodyZh: '状态变了' })).rejects.toMatchObject({ reasonKey: 'errors.validationFailed' });
+      await updateTemplate(tpl.id, { bodyZh: `${tpl.bodyZh}（请留意）` });
+      expect(tpl.bodyZh).toContain('（请留意）');
+      renderAs(<TemplatesPage />, { path: '/notify/templates' });
+      await waitFor(() => expect(screen.getAllByRole('button', { name: /编辑/ }).some((b) => !(b as HTMLButtonElement).disabled)).toBe(true), { timeout: 5000 });
+      const rows = screen.getAllByRole('row');
+      const row = rows.find((r) => r.textContent?.includes(tpl.nameZh))!;
+      fireEvent.click(within(row).getByRole('button', { name: /编辑/ }));
+      expect(await screen.findByTestId('template-security')).toHaveTextContent('只能改文案');
+    } finally {
+      Object.assign(tpl, before);
     }
   }, 30_000);
 });

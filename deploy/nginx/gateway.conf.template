@@ -55,6 +55,9 @@ limit_req_zone $binary_remote_addr zone=tr_freeze:1m rate=20r/s;
 limit_conn_zone $binary_remote_addr zone=tr_freeze_conn:1m;
 limit_req_zone $binary_remote_addr zone=tr_captcha:1m rate=10r/s;
 limit_conn_zone $binary_remote_addr zone=tr_captcha_conn:1m;
+# 后台不用登录的接口（第 6 批 TB-37 告警邮件撤销链接 /api/admin/public/**，#46 审查）：单独一档低限额，写死。只有 Amos 用，每秒 2 个、突发 10、连接 10 足够
+limit_req_zone $binary_remote_addr zone=tr_admin_public:1m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=tr_admin_public_conn:1m;
 limit_req_status 429;
 limit_conn_status 429;
 limit_req_log_level warn;
@@ -141,6 +144,12 @@ server {
   if ($request_uri ~ ";") { return 400; }
   location = / {
     return 302 /admin/;
+  }
+  location /api/admin/public/ {
+    limit_req zone=tr_admin_public burst=10 nodelay;
+    limit_conn tr_admin_public_conn 10;
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
   }
   location /api/admin/ {
     limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;

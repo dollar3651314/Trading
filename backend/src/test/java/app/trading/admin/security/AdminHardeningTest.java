@@ -50,10 +50,7 @@ class AdminHardeningTest extends AdminTestSupport {
   }
 
   Admin owner() throws Exception {
-    jdbc.update("INSERT IGNORE INTO admin_user (id, username, display_name, email, password_hash, status, must_change_password, created_at) "
-        + "VALUES (?, 'amos_owner_h', 'Amos', 'amos_owner_h@example.com', ?, 'ACTIVE', 0, UTC_TIMESTAMP(3))", OWNER_ID, Passwords.hash(PASSWORD));
-    jdbc.update("INSERT IGNORE INTO admin_user_role (admin_id, role_id) SELECT ?, id FROM admin_role WHERE code = 'super_admin'", OWNER_ID);
-    return login(OWNER_ID);
+    return fixedSuperAdmin(OWNER_ID, "amos_owner_h");
   }
 
   JsonNode body(MockHttpServletResponse r) throws Exception {
@@ -147,5 +144,40 @@ class AdminHardeningTest extends AdminTestSupport {
     }
     // 收件人来自 trading.alert.emails（FX_ALERT_EMAILS，服务器 .env），后台没有改它的接口
     assertThat(call(put("/api/admin/configs/alert.emails"), s.cookie(), "{\"value\":\"evil@example.com\",\"reason\":\"x\"}").getStatus()).isNotEqualTo(200);
+  }
+
+  @Test
+  void 客户安全提醒模板_不能停用_不能删变量_改文案发告警邮件_写高危审计() throws Exception {
+    Admin s = superAdmin();
+    Map<String, Object> orig = jdbc.queryForMap("SELECT title_zh, body_zh, title_en, body_en, enabled FROM notify_template WHERE code = 'LOGIN_NEW_DEVICE'");
+    try {
+      MockHttpServletResponse off = call(put("/api/admin/notify/templates/LOGIN_NEW_DEVICE"), s.cookie(), "{\"enabled\":false}");
+      assertThat(off.getStatus()).isEqualTo(400);
+      assertThat(off.getContentAsString()).contains("SECURITY_TEMPLATE_CANNOT_DISABLE");
+      MockHttpServletResponse drop = call(put("/api/admin/notify/templates/LOGIN_NEW_DEVICE"), s.cookie(), "{\"bodyZh\":\"你的账户刚在浏览器里登录：{device}。\"}");
+      assertThat(drop.getStatus()).as("删掉了 {ip}").isEqualTo(400);
+      assertThat(drop.getContentAsString()).contains("missingVariable").contains("bodyZh");
+      assertThat(jdbc.queryForObject("SELECT body_zh FROM notify_template WHERE code = 'LOGIN_NEW_DEVICE'", String.class)).isEqualTo(orig.get("body_zh"));
+      verify(mail, org.mockito.Mockito.never()).send(eq("ops@example.com"), eq("OPS_SECURITY_TEMPLATE"), anyMap());
+
+      String body = orig.get("body_zh") + "（客服不会私信你）";
+      JsonNode ok = body(call(put("/api/admin/notify/templates/LOGIN_NEW_DEVICE"), s.cookie(), json.writeValueAsString(Map.of("bodyZh", body))));
+      assertThat(ok.get("bodyZh").asString()).isEqualTo(body);
+      assertThat(ok.get("security").asBoolean()).isTrue();
+      verify(mail).send(eq("ops@example.com"), eq("OPS_SECURITY_TEMPLATE"),
+          argThat(p -> p.get("code").equals("LOGIN_NEW_DEVICE") && p.get("fields").equals("bodyZh") && p.get("bodyZh").equals(body) && p.get("admin").contains(s.username())));
+      assertThat(jdbc.queryForObject("SELECT high_risk FROM admin_audit_log WHERE action = 'notify.template_update' AND target = 'LOGIN_NEW_DEVICE' ORDER BY id DESC LIMIT 1", Boolean.class))
+          .as("安全提醒的修改记成高危审计").isTrue();
+      // 不是安全提醒的模板：照旧，不发告警邮件
+      assertThat(call(get("/api/admin/notify/templates"), s.cookie(), null).getContentAsString()).contains("\"code\":\"DEPOSIT_CREDITED\"");
+      assertThat(app.trading.notification.api.NotifyAdminApi.securityTemplate("DEPOSIT_CREDITED")).isFalse();
+      for (String c : new String[] {"ACCOUNT_FROZEN", "WITHDRAW_FROZEN", "WITHDRAW_PIN_SET", "WHITELIST_ADDED", "RECOVERY_REQUESTED", "TELEGRAM_LINK_CHANGED",
+          "TG_EMERGENCY_LOGIN", "LOGIN_NEW_DEVICE", "PIN_RESET_APPROVED", "EMAIL_CODE"}) {
+        assertThat(app.trading.notification.api.NotifyAdminApi.securityTemplate(c)).as(c).isTrue();
+      }
+    } finally {
+      jdbc.update("UPDATE notify_template SET title_zh = ?, body_zh = ?, title_en = ?, body_en = ?, enabled = ? WHERE code = 'LOGIN_NEW_DEVICE'", orig.get("title_zh"),
+          orig.get("body_zh"), orig.get("title_en"), orig.get("body_en"), orig.get("enabled"));
+    }
   }
 }
