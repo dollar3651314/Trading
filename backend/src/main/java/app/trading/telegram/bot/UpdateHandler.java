@@ -20,9 +20,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
-import org.telegram.telegrambots.meta.api.objects.LoginUrl;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.message.MaybeInaccessibleMessage;
@@ -54,6 +54,10 @@ public class UpdateHandler {
   static final String CB_PREFS = "prefs";
   static final String CB_PREF = "pref:";
   static final String CB_NOOP = "noop";
+  /** 退路模式（FX_TG_LOGIN_MODE=link）：打开网页的回调按钮 open:路径，点了现发一条 60 秒一次性链接 */
+  static final String CB_OPEN = "open:";
+  /** "刚在浏览器里登录"提醒里的「不是我，退出所有网页会话」 */
+  static final String CB_LOGOUT_ALL = app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL;
 
   static final String TEXT_FROZEN = "账户已冻结，请联系客服。";
   static final String TEXT_PAUSED = "机器人暂停服务，请稍后再试。";
@@ -68,6 +72,18 @@ public class UpdateHandler {
 
       点「授权开户」表示你已阅读并同意服务条款和隐私政策。""";
   static final String TEXT_FAILED = "操作没有成功：账户服务暂时不可用，可以稍后再试；一直不行请联系客服。";
+  static final String TEXT_LINK = "点「打开」进入网页（60 秒内有效，只能用一次；别转发给别人）。";
+  static final String TEXT_LOGGED_OUT = "已退出所有网页会话。如果不是你本人登录的，建议马上检查账户。";
+
+  /** 60 秒后删一次性链接消息（守护线程，进程重启时没删的就留着：链接本身 60 秒后已经失效） */
+  private static final java.util.concurrent.ScheduledExecutorService DELETER = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+    Thread t = new Thread(r, "tg-link-delete");
+    t.setDaemon(true);
+    return t;
+  });
+
+  /** 一次性链接消息多久后删（和链接有效期 60 秒一样；测试里改短） */
+  static volatile long linkDeleteMillis = 60_000;
 
   private final TelegramAccountApi accounts;
   private final AccountApi account;
@@ -166,6 +182,12 @@ public class UpdateHandler {
       send(chat, TEXT_FROZEN, null);
       return;
     }
+    if (CB_LOGOUT_ALL.equals(data)) {
+      // 「不是我，退出所有网页会话」：只会减少权限，冻结之外不用先重新授权
+      accounts.logoutAllWeb(a.userId());
+      send(chat, TEXT_LOGGED_OUT, null);
+      return;
+    }
     if (CB_REAUTH.equals(data)) {
       accounts.reauthorize(a.userId());
       edit(chat, messageId, "已重新授权。", null);
@@ -180,8 +202,45 @@ public class UpdateHandler {
       send(chat, prefsText(), prefsKeyboard(a.userId()));
     } else if (data.startsWith(CB_PREF)) {
       togglePref(chat, messageId, a, data.substring(CB_PREF.length()));
+    } else if (data.startsWith(CB_OPEN)) {
+      openLink(chat, a, data.substring(CB_OPEN.length()));
     } else if (!CB_DECLINE.equals(data) && !CB_NOOP.equals(data)) {
       send(chat, menuText(a), menuKeyboard());
+    }
+  }
+
+  /**
+   * 退路模式（FX_TG_LOGIN_MODE=link）：现做一条 60 秒、只能用一次的链接，令牌放在网址 # 后面（不进服务器日志、不随请求发出），
+   * 网页读出来用 POST 换会话；这条消息 60 秒后删掉。不排队、直接发（要拿到消息编号才能删）
+   */
+  private void openLink(long chat, TgAccount a, String path) {
+    if (!props.linkMode() || !props.hasWebUrl()) {
+      send(chat, menuText(a), menuKeyboard());
+      return;
+    }
+    String token;
+    try {
+      token = accounts.createLoginLink(a.userId(), path);
+    } catch (RuntimeException e) {
+      log.warn("做一次性链接失败：{}", e.toString());
+      send(chat, TEXT_FAILED, null);
+      return;
+    }
+    InlineKeyboardButton b = InlineKeyboardButton.builder().text("打开").url(props.base() + "/tg-link#t=" + token).build();
+    try {
+      Message m = api.execute(SendMessage.builder().chatId(chat).text(TEXT_LINK).replyMarkup(keyboard(List.of(row(b)))).build());
+      if (m != null && m.getMessageId() != null) {
+        Integer id = m.getMessageId();
+        DELETER.schedule(() -> {
+          try {
+            api.execute(DeleteMessage.builder().chatId(chat).messageId(id).build());
+          } catch (Exception e) {
+            log.debug("删一次性链接消息失败：{}", props.scrub(e.toString()));
+          }
+        }, linkDeleteMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
+      }
+    } catch (Exception e) {
+      log.warn("发一次性链接失败：{}", props.scrub(e.toString()));
     }
   }
 
@@ -292,7 +351,8 @@ public class UpdateHandler {
     List<InlineKeyboardRow> rows = new ArrayList<>();
     if (props.hasWebUrl()) {
       rows.add(row(login("打开交易", "/trade")));
-      rows.add(row(login("行情", "/markets"), login("持仓", "/positions"), login("充值", "/assets")));
+      rows.add(row(login("行情", "/markets"), login("持仓", "/positions")));
+      rows.add(row(login("充值", "/assets"), login("提现", "/assets/withdraw")));
     }
     rows.add(row(cb("通知设置", CB_PREFS)));
     return keyboard(rows);
@@ -309,11 +369,9 @@ public class UpdateHandler {
     return keyboard(rows);
   }
 
-  /** login_url 按钮：网页地址 + 页面路径（批 2 的一键登录落地页做好后改成落地页地址） */
+  /** 打开网页的按钮：一键登录模式是 login_url 按钮（落地页 /api/tg/login），退路模式是回调按钮 open:路径 */
   InlineKeyboardButton login(String text, String path) {
-    String base = props.webUrl().strip();
-    if (base.endsWith("/")) base = base.substring(0, base.length() - 1);
-    return InlineKeyboardButton.builder().text(text).loginUrl(new LoginUrl(base + path)).build();
+    return TelegramSenderImpl.open(props, text, path);
   }
 
   static InlineKeyboardButton cb(String text, String data) {

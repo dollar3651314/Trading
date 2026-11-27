@@ -1,4 +1,4 @@
-import { clientLink, resolveClientUrl } from '../config';
+import { clientLink, resolveBotUrl, resolveClientUrl } from '../config';
 import { parsePublicQuotes } from '../api/quotes';
 import type { PublicQuotes } from '../api/types';
 import { direction, formatPct, formatPrice } from './format';
@@ -32,6 +32,15 @@ describe('客户端地址和注册、登录链接（4.4）', () => {
   it('带上当前语言', () => {
     expect(clientLink('register', 'en', 'https://test-app.trading.online')).toBe('https://test-app.trading.online/register?lang=en');
     expect(clientLink('login', 'zh-CN', '')).toBe('/login?lang=zh-CN');
+  });
+  it('第一阶段只走 Telegram（TG 机器人第 2 批）：注册、登录、开始交易都去机器人；没打开或地址不合法时照旧', () => {
+    expect(resolveBotUrl('https://t.me/TradingAssistBot', 'true')).toBe('https://t.me/TradingAssistBot');
+    expect(resolveBotUrl('https://t.me/TradingAssistBot', 'false')).toBe('');
+    expect(resolveBotUrl('__TR_BOT_URL__', '__TR_TG_ONLY__')).toBe('');
+    expect(resolveBotUrl('https://evil.example/x', 'true')).toBe('');
+    expect(resolveBotUrl('https://t.me/a"><script>', 'true')).toBe('');
+    expect(clientLink('register', 'en', 'https://test-app.trading.online', 'https://t.me/TradingAssistBot')).toBe('https://t.me/TradingAssistBot');
+    expect(clientLink('login', 'en', 'https://test-app.trading.online', '')).toBe('https://test-app.trading.online/login?lang=en');
   });
 });
 

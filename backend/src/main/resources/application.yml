@@ -43,6 +43,12 @@ trading:
     code-ip-hourly-limit: 30
     cookie-name: fx_session
     cookie-secure: ${FX_COOKIE_SECURE:true}
+    # 第一阶段只走 Telegram（TB-33，TG 机器人第 2 批）：true = 关闭注册、邮箱登录、忘记密码（含发验证码），网页没有会话时显示"请在 Telegram 打开"提示页。
+    # 测试、端到端配置里关掉（要走注册流程）；服务器用 sudo trading set FX_PHASE1_TELEGRAM_ONLY 改
+    phase1-telegram-only: ${FX_PHASE1_TELEGRAM_ONLY:true}
+    # 机器人会话（从机器人一键登录）：闲置 30 分钟、最长 12 小时（技术方案 11 页第 2 节）
+    bot-session-idle-minutes: 30
+    bot-session-max-hours: 12
   # 通用限流（功能取舍对照表 P-05，common/ratelimit）：Redis 计数，Redis 不可用时放行。超限返回 429 RATE_LIMITED 和 Retry-After。
   # Nginx 外层还有一道更宽松的限流（deploy/nginx/site.conf.template）。上限填 0 表示这一层不限。
   # IP 是 Nginx 传来的真实客户端 IP；大陆移动网络很多人共用一个出口 IP，按 IP 的上限留足余量
@@ -199,6 +205,9 @@ trading:
     api-url: ${FX_TG_API_URL:https://api.telegram.org}
     # 网页客户端地址（login_url 按钮「打开交易」「查看」用）。批 2 做好一键登录落地页、绑好域名之前不填：不填就不显示这些按钮
     web-url: ${FX_TG_WEB_URL:}
+    # 进入网页的方式（第 2 批）：login-url = login_url 按钮一键登录（默认，要先在 BotFather /setdomain 绑上网页的域名）；
+    # link = 退路：回调按钮 + 机器人现发一条 60 秒、只能用一次的链接（域名绑不上时用）
+    login-mode: ${FX_TG_LOGIN_MODE:login-url}
     poll-timeout: 50s
     # 发送：同一个聊天两条之间至少隔多久；全部聊天每秒最多几条（Telegram 的限制是每个聊天每秒 1 条、全部每秒约 30 条）
     per-chat-interval: 1s

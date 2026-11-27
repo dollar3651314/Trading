@@ -10,12 +10,14 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param token 机器人令牌（FX_TG_BOT_TOKEN，只由 Amos 填进服务器）；为空 = 机器人不启动
  * @param username 机器人用户名（FX_TG_BOT_USERNAME，不带 @）；启动时用 getMe 核对令牌属于它
  * @param apiUrl Telegram 接口地址（测试里换成本机的假 Telegram）
- * @param webUrl 网页客户端地址（login_url 按钮用；批 2 之前不填 = 不显示按钮）
+ * @param webUrl 网页客户端地址（「打开交易」等按钮用；不填 = 不显示这些按钮）
+ * @param loginMode 进入网页的方式（第 2 批）：{@code login-url} 一键登录（默认，要在 BotFather 绑域名）；{@code link} 退路：回调按钮 + 60 秒一次性链接
  */
 @ConfigurationProperties("trading.telegram")
 public record TelegramProperties(String token, String username, @DefaultValue("https://api.telegram.org") String apiUrl, String webUrl,
     @DefaultValue("50s") Duration pollTimeout, @DefaultValue("1s") Duration perChatInterval, @DefaultValue("25") int globalPerSecond,
-    @DefaultValue("5000") int queueCapacity, @DefaultValue("10m") Duration unhealthyAfter, @DefaultValue("20") int userPerMinute) {
+    @DefaultValue("5000") int queueCapacity, @DefaultValue("10m") Duration unhealthyAfter, @DefaultValue("20") int userPerMinute,
+    @DefaultValue("login-url") String loginMode) {
 
   public boolean configured() {
     return token != null && !token.isBlank();
@@ -23,6 +25,20 @@ public record TelegramProperties(String token, String username, @DefaultValue("h
 
   boolean hasWebUrl() {
     return webUrl != null && !webUrl.isBlank();
+  }
+
+  boolean linkMode() {
+    return "link".equalsIgnoreCase(loginMode == null ? "" : loginMode.strip());
+  }
+
+  /** 网页地址（不带结尾的 /） */
+  String base() {
+    return webUrl.strip().replaceAll("/+$", "");
+  }
+
+  /** 一键登录的网址：落地页 /api/tg/login，登录后打开 path（Telegram 会在后面加身份参数） */
+  String loginUrl(String path) {
+    return base() + "/api/tg/login?tr_next=" + java.net.URLEncoder.encode(path, java.nio.charset.StandardCharsets.UTF_8);
   }
 
   /** 用户名去掉开头的 @ */

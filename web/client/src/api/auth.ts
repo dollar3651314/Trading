@@ -7,7 +7,7 @@ import * as mock from '../mocks/user';
 import { IS_MOCK } from './mode';
 import * as real from './real/auth';
 import { setLoggedIn } from './real/session';
-import type { EmailCodePurpose, RegisterRequest, Session } from './types';
+import type { AuthOptions, EmailCodePurpose, RegisterRequest, Session, TgLoginReason } from './types';
 import { unsubscribeThisDevice } from './webPush';
 
 const SESSION_KEY = 'fx.session';
@@ -78,3 +78,20 @@ export async function logout(): Promise<void> {
 
 /** 原型：邮件验证码固定值，页面上会提示（真实环境不显示） */
 export const PROTOTYPE_EMAIL_CODE = mock.MOCK_EMAIL_CODE;
+
+/** 登录方式（TG 机器人第 2 批）。原型：不限制（照常显示注册、登录），机器人用户名是测试机器人 */
+let optionsPromise: Promise<AuthOptions> | null = null;
+export function getAuthOptions(): Promise<AuthOptions> {
+  if (IS_MOCK) return Promise.resolve({ telegramOnly: false, botUsername: 'TradingAssistTestBot', loginMode: 'login-url' });
+  if (!optionsPromise) {
+    optionsPromise = real.getAuthOptions().catch((e) => {
+      optionsPromise = null;
+      throw e;
+    });
+  }
+  return optionsPromise;
+}
+
+/** 一次性链接换会话（退路模式）。原型里没有这个流程 */
+export const tgLink = (token: string): Promise<{ next: string } | { reason: TgLoginReason }> =>
+  IS_MOCK ? Promise.resolve({ reason: 'disabled' as TgLoginReason }) : real.tgLink(token);

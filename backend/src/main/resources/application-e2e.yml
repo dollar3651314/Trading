@@ -6,6 +6,9 @@
 trading:
   e2e:
     enabled: ${FX_E2E_ENABLED:false}
+  # 端到端主流程要走邮箱注册、登录：关掉"第一阶段只走 Telegram"（TB-33，生产默认开）
+  auth:
+    phase1-telegram-only: false
   # 通用限流（P-05）：端到端测试和压测（e2e/load/，同样用 e2e profile）的所有请求都来自同一个 IP，压测几十个客户集中下单，上限放大。
   # 限流本身在后端 RateLimitTest 里单独测；Nginx 那一层见 deploy/nginx/site.conf.template
   rate-limit:

@@ -29,4 +29,14 @@ public interface TelegramAccountApi {
 
   /** 客户改了 Telegram 用户名：跟着改（只用来显示） */
   void updateUsername(long userId, String username);
+
+  /**
+   * 一次性登录链接（第 2 批，一键登录的退路，{@code FX_TG_LOGIN_MODE=link}）：返回令牌原值（库里只存哈希），60 秒、只能用一次。
+   *
+   * @param next 登录后打开的页面（站内路径，不合法的回首页）
+   */
+  String createLoginLink(long userId, String next);
+
+  /** "不是我，退出所有网页会话"（第 2 批）：作废这个客户的全部网页会话（网页登录的和从机器人进入的） */
+  void logoutAllWeb(long userId);
 }

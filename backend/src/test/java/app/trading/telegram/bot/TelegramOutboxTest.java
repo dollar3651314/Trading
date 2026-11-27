@@ -29,7 +29,7 @@ class TelegramOutboxTest {
 
   static TelegramProperties props(Duration perChat, int capacity) {
     return new TelegramProperties(TOKEN, "TradingAssistTestBot", "http://127.0.0.1:1", null, Duration.ofSeconds(1), perChat, 1000, capacity,
-        Duration.ofMinutes(10), 20);
+        Duration.ofMinutes(10), 20, "login-url");
   }
 
   /** 正常发送：记下聊天、文字、时间 */

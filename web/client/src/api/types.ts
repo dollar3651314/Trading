@@ -7,6 +7,17 @@
 export type Lang = 'zh-CN' | 'en';
 
 // ---------- 账户与认证 ----------
+/** 登录方式（GET /api/auth/options，TG 机器人第 2 批）：第一阶段只走 Telegram 时不显示注册、邮箱登录、忘记密码 */
+export interface AuthOptions {
+  telegramOnly: boolean;
+  /** 机器人用户名（不带 @）；没配置时为空 */
+  botUsername: string | null;
+  loginMode: 'login-url' | 'link';
+}
+
+/** 从机器人进入网页没有成功的原因（后端 TelegramWebLogin.Outcome，提示页 /tg?r=… 按它显示文案） */
+export type TgLoginReason = 'refused' | 'invalid' | 'expired' | 'used' | 'no_account' | 'frozen' | 'reauth' | 'disabled';
+
 export interface Session {
   /** 只有原型（mock 模式）有；真实环境的令牌在 HttpOnly Cookie 里，前端拿不到 */
   token?: string;

@@ -90,8 +90,12 @@ class AuthController {
     return view(u);
   }
 
-  /** HttpOnly：页面脚本读不到令牌；SameSite=Strict：其他网站发起的请求不带上它（防跨站请求伪造） */
   private String cookie(String value, Duration maxAge) {
+    return sessionCookie(props, value, maxAge);
+  }
+
+  /** HttpOnly：页面脚本读不到令牌；SameSite=Strict：其他网站发起的请求不带上它（防跨站请求伪造） */
+  static String sessionCookie(AuthProperties props, String value, Duration maxAge) {
     return ResponseCookie.from(props.cookieName(), value)
         .httpOnly(true).secure(props.cookieSecure()).sameSite("Strict").path("/api").maxAge(maxAge)
         .build().toString();

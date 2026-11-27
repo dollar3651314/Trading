@@ -100,6 +100,20 @@ describe('HTTP：同源、Cookie、错误转换', () => {
     expect(calls[0]).toMatchObject({ url: '/api/auth/login', method: 'POST', credentials: 'same-origin', body: { email: 'a@b.com', password: 'password1' } });
   });
 
+  it('一次性链接换会话（TG 机器人第 2 批）：成功返回要打开的页面，失败按错误码给原因', async () => {
+    stubFetch({ body: { next: '/positions' } });
+    expect(await auth.tgLink('tok')).toEqual({ next: '/positions' });
+    expect(calls[0]).toMatchObject({ url: '/api/tg/link', method: 'POST', credentials: 'same-origin', body: { token: 'tok' } });
+    stubFetch({ status: 400, body: { code: 'TG_LOGIN_EXPIRED' } });
+    expect(await auth.tgLink('tok')).toEqual({ reason: 'expired' });
+    stubFetch({ status: 403, body: { code: 'TG_LOGIN_FROZEN' } });
+    expect(await auth.tgLink('tok')).toEqual({ reason: 'frozen' });
+    stubFetch({ status: 502, body: '<html>' });
+    expect(await auth.tgLink('tok')).toEqual({ reason: 'invalid' });
+    stubFetch({ body: { telegramOnly: true, botUsername: 'TradingAssistBot', loginMode: 'login-url' } });
+    expect(await auth.getAuthOptions()).toEqual({ telegramOnly: true, botUsername: 'TradingAssistBot', loginMode: 'login-url' });
+  });
+
   it('会话：纯 Telegram 客户邮箱为 null、带 TG 用户名（TG 机器人第 1 批）', async () => {
     stubFetch({ body: { userId: '8', email: null, telegramUsername: 'amos_tg' } });
     expect(await auth.login('a@b.com', 'password1')).toEqual({ userId: '8', email: null, telegramUsername: 'amos_tg' });

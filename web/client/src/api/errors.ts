@@ -45,6 +45,7 @@ export type ApiErrorReason =
   | 'badRequest'
   | 'forbidden'
   | 'fileTooLarge'
+  | 'telegramOnly'
   | OrderRejectReason;
 
 export class ApiError extends Error {
@@ -92,6 +93,8 @@ export function errorKey(e: unknown): string {
 /** 后端业务错误码（`BizException`、`GlobalExceptionHandler`）对应的 reason */
 export const SERVER_CODES: Record<string, ApiErrorReason> = {
   UNAUTHORIZED: 'unauthorized',
+  // 第一阶段只走 Telegram（TB-33）：注册、邮箱登录、忘记密码关闭
+  TELEGRAM_ONLY: 'telegramOnly',
   USER_FROZEN: 'accountFrozen',
   FORBIDDEN: 'forbidden',
   LOGIN_LOCKED: 'accountLocked',

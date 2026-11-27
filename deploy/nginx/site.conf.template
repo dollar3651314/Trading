@@ -91,6 +91,15 @@ server {
     include /etc/nginx/snippets/proxy.inc;
     proxy_read_timeout 1h;
   }
+  # 一键登录落地页（TG 机器人第 2 批，技术方案 12 页）：访问日志不记参数；错误日志只留最严重的（限流、上游错误的日志行会带完整请求行）
+  location = /api/tg/login {
+    access_log /var/log/nginx/access.log main_noq;
+    error_log /var/log/nginx/error.log emerg;
+    limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
+    limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
+  }
   location /api/ {
     limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
     limit_conn tr_api_conn ${FX_NGINX_API_CONN};
@@ -189,6 +198,9 @@ server {
     expires -1;
     sub_filter_once on;
     sub_filter '__TR_CLIENT_URL__' 'https://${APP_DOMAIN}';
+    # 第一阶段只走 Telegram（TB-33）：官网的"开始交易"、注册、登录去机器人（FX_NGINX_BOT_URL、FX_NGINX_TG_ONLY 由 compose 按 FX_TG_BOT_USERNAME、FX_PHASE1_TELEGRAM_ONLY 给）
+    sub_filter '__TR_BOT_URL__' '${FX_NGINX_BOT_URL}';
+    sub_filter '__TR_TG_ONLY__' '${FX_NGINX_TG_ONLY}';
     try_files $uri /index.html;
   }
 }

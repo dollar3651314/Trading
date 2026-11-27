@@ -16,6 +16,8 @@ trading:
   # 测试都从 127.0.0.1 发请求、共用一个 Redis，按 IP 的发验证码限次（SEC-03）放大；限次本身在 SendCodeLimiterTest 里单独测
   auth:
     code-ip-hourly-limit: 1000000
+    # 大部分测试走邮箱注册：关掉"第一阶段只走 Telegram"（生产默认开）；只走 Telegram 的行为在 TelegramWebLoginTest 里单独打开测
+    phase1-telegram-only: false
   # 通用限流（P-05）：测试都从 127.0.0.1 或少数几个 IP 发请求、共用一个 Redis，上限放大；限流本身在 RateLimitTest 里用很小的上限单独测
   rate-limit:
     ip-per-minute: 1000000

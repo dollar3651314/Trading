@@ -791,7 +791,7 @@ apply() {
   if wait_healthy "$(current_rev)"; then ok "已生效，健康检查通过"; else bad "改完后健康检查没通过（看 sudo trading status，截图给主会话）"; return 1; fi
 }
 
-SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED FX_TG_BOT_USERNAME TR_MEM_APP TR_META_APP"
+SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED FX_TG_BOT_USERNAME FX_TG_WEB_URL FX_TG_LOGIN_MODE FX_PHASE1_TELEGRAM_ONLY TR_MEM_APP TR_META_APP"
 # 只有生产能改的：真实 IP（实测平台网关后打开，两项都填才开）、报价对外端口 8085 绑在哪（127.0.0.1 = 不对外，0.0.0.0 = 平台上发布时）
 SET_PROD="TR_REAL_IP_FROM TR_REAL_IP_HEADER TR_QUOTE_BIND"
 
@@ -908,6 +908,12 @@ cmd_set() {
     v=${v#@}
     [[ "$v" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$ ]] || die "FX_TG_BOT_USERNAME 不像机器人用户名：$2（例：$(prod && echo TradingAssistBot || echo TradingAssistTestBot)）"
   fi
+  case "$1" in
+    # TG 机器人第 2 批：机器人按钮打开的网页地址（https://域名，不带路径；一键登录要先在 BotFather /setdomain 绑这个域名）
+    FX_TG_WEB_URL) [[ "$v" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]] || die "FX_TG_WEB_URL 要写成 https://域名（例：https://$(envget APP_DOMAIN)）" ;;
+    FX_TG_LOGIN_MODE) [[ "$v" =~ ^(login-url|link)$ ]] || die "FX_TG_LOGIN_MODE 只能是 login-url（一键登录）或 link（一次性链接，绑不上域名时的退路）" ;;
+    FX_PHASE1_TELEGRAM_ONLY) [[ "$v" =~ ^(true|false)$ ]] || die "FX_PHASE1_TELEGRAM_ONLY 只能是 true（只走 Telegram）或 false" ;;
+  esac
   if [ "$1" = TR_MEM_APP ] || [ "$1" = TR_META_APP ]; then
     # trading-app 的容器内存上限 / 元空间上限（TG 机器人第 1 批实测：测试机开机器人时元空间约 96 MB、贴着默认 104m，建议 120m、容器 380m）。
     # 只给测试环境：生产实测够用（1024m、160m），生产的内存和同机 TopUP 生产一起算过，不用这个命令改

@@ -704,7 +704,8 @@
     "fileTooLarge": "文件太大，每张不能超过 2MB",
     "walletUnavailable": "暂时无法获取充值地址，请稍后再试",
     "networkClosed": "这条网络暂时不能充值",
-    "symbolNotTradable": "该品种暂不开放交易"
+    "symbolNotTradable": "该品种暂不开放交易",
+    "telegramOnly": "现在只能从 Telegram 机器人进入"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -875,5 +876,33 @@
     "clearFilters": "清除筛选",
     "creditedAt": "到账时间 {{time}}",
     "txHash": "交易哈希 {{hash}}"
+  },
+  "tg": {
+    "title": "请在 Telegram 里打开",
+    "subtitle": "Trading 现在只能从 Telegram 机器人 @{{bot}} 进入",
+    "subtitleNoBot": "Trading 现在只能从 Telegram 机器人进入",
+    "step1": "在 Telegram 里打开机器人，发 /start（第一次要先授权开户）。",
+    "step2": "点机器人里的「打开交易」，会直接打开网页、已经登录。",
+    "open": "打开 @{{bot}}",
+    "qrLabel": "打开机器人的二维码",
+    "qrHint": "用手机扫码，在 Telegram 里打开机器人",
+    "entriesTitle": "遇到问题",
+    "freeze": "申请冻结提现",
+    "freezeDesc": "Telegram 账号被别人占用了？先冻结提现，保护资金",
+    "recover": "找回 Telegram 账户",
+    "recoverDesc": "Telegram 账号丢了或换了号",
+    "entryPending": "这项功能会在后续版本开放（填写本人信息、人工审核），现在还不能在网页上提交。",
+    "back": "返回",
+    "entering": "正在进入…",
+    "reason": {
+      "refused": "你在 Telegram 的确认框里点了取消，所以没有登录。请回到机器人重新点「打开交易」，在确认框里点登录。",
+      "invalid": "登录信息校验没有通过。请回到机器人重新点按钮。",
+      "expired": "按钮已经过期（超过 60 秒）。请回到机器人重新点按钮。",
+      "used": "这次登录已经用过了，不能再用。请回到机器人重新点按钮。",
+      "no_account": "你还没有开户。请先在机器人里发 /start，点「授权开户」。",
+      "frozen": "账户已冻结，请联系客服。",
+      "reauth": "你的账户最近有安全变更。请先回到机器人，点「重新授权」，再打开交易。",
+      "disabled": "这个进入方式现在没有开放。请回到机器人重新点按钮。"
+    }
   }
 }
