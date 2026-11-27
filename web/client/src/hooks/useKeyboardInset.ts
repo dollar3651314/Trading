@@ -35,7 +35,11 @@ function isEditable(el: Element | null): boolean {
   return (el as HTMLElement).isContentEditable === true;
 }
 
-/** 装在应用最外层，跟着窗口、visualViewport、焦点变化更新 */
+/**
+ * 装在应用最外层，跟着窗口、visualViewport、焦点变化更新。
+ * 边界情况（TG 机器人第 3 批审查）：屏幕方向变了，记录的最高窗口高度重置成当前高度（横竖屏高度本来就不同，不能当成键盘）；
+ * 弹层关闭、输入框被移除时浏览器不一定发 focusout——监听 DOM 变化主动重新判断；卸载时清掉 data-kb 和变量，底部导航不会一直藏着。
+ */
 export function useKeyboardInset(): void {
   useEffect(() => {
     let maxH = window.innerHeight;
@@ -55,21 +59,44 @@ export function useKeyboardInset(): void {
       if (s.open) root.dataset.kb = '1';
       else delete root.dataset.kb;
     };
+    const onOrientation = () => {
+      maxH = window.innerHeight;
+      update();
+    };
     update();
     const vv = window.visualViewport;
     vv?.addEventListener('resize', update);
     vv?.addEventListener('scroll', update);
     window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', onOrientation);
+    screen.orientation?.addEventListener?.('change', onOrientation);
     document.addEventListener('focusin', update);
     // 失焦后键盘收起有动画：稍等再算
     const onOut = () => window.setTimeout(update, 50);
     document.addEventListener('focusout', onOut);
+    // 输入框所在的弹层被关掉（节点被移除）时不一定有 focusout：DOM 有增删就在下一帧重新判断（只在键盘开着时才需要）
+    let pending = false;
+    const mo = new MutationObserver(() => {
+      if (pending || root.dataset.kb !== '1') return;
+      pending = true;
+      window.setTimeout(() => {
+        pending = false;
+        update();
+      }, 0);
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
     return () => {
       vv?.removeEventListener('resize', update);
       vv?.removeEventListener('scroll', update);
       window.removeEventListener('resize', update);
+      window.removeEventListener('orientationchange', onOrientation);
+      screen.orientation?.removeEventListener?.('change', onOrientation);
       document.removeEventListener('focusin', update);
       document.removeEventListener('focusout', onOut);
+      mo.disconnect();
+      delete root.dataset.kb;
+      root.style.removeProperty('--kb');
+      root.style.removeProperty('--vvh');
     };
   }, []);
 }

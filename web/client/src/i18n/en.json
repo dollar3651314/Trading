@@ -266,7 +266,9 @@
     "detail": "Details",
     "noticeNotTradable": "This symbol is not open for trading yet: you can view quotes and charts but can't place orders",
     "noticeNoQuote": "No quote: quotes are temporarily interrupted, so new positions can't be opened. Existing positions won't be closed at stale prices; prices update automatically once quotes are back",
-    "notInPositions": "{{symbol}} won't appear in your positions"
+    "notInPositions": "{{symbol}} won't appear in your positions",
+    "btnPaused": "Opening paused",
+    "btnClosed": "Market closed"
   },
   "units": {
     "baseCcy": "{{n}} {{ccy}}/lot",

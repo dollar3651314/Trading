@@ -2,16 +2,23 @@
  * TG 机器人第 3 批：手机交易界面（照原型 trade-ui，验收标准 UX-B1～B4）。
  * 这里测逻辑和结构；实际的样子（375、390、1280 宽，内容要滚动、键盘弹出）用 Playwright 截图检查，见 PR 说明。
  */
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { vi } from 'vitest';
 import { TrackingModeExitMode } from 'lightweight-charts';
 import { OrderSheet } from './components/OrderSheet';
 import { SymbolList } from './components/SymbolList';
-import { KEYBOARD_MIN, keyboardState } from './hooks/useKeyboardInset';
+import { KEYBOARD_MIN, keyboardState, useKeyboardInset } from './hooks/useKeyboardInset';
+import { OrderPanel } from './components/OrderPanel';
+import { ClosePositionDialog } from './components/PositionDialogs';
+import { db } from './mocks/db';
+import { symbolInfo } from './mocks/market';
 import { CHART_GESTURES } from './lib/chartGestures';
 import { SYMBOL_SEEDS } from './mocks/data/symbols';
 import { renderPage } from './test/renderApp';
 
-const btc = SYMBOL_SEEDS.find((s) => s.info.code === 'BTCUSD')!.info;
+const btcSeed = SYMBOL_SEEDS.find((s) => s.info.code === 'BTCUSD')!.info;
+/** 可以下单的状态（原型数据里 BTCUSD 是"暂停开仓"） */
+const btc = { ...btcSeed, openPaused: false, tradingOpen: true, tradable: true };
 
 describe('键盘弹出时（UX-B2）', () => {
   const base = { innerHeight: 844, vvHeight: 844, vvOffsetTop: 0, maxInnerHeight: 844, editing: true };
@@ -53,5 +60,101 @@ describe('手机下单抽屉（UX-B1）', () => {
     renderPage(<OrderSheet symbol={btc} side="buy" onClose={() => undefined} />, '/trade/BTCUSD');
     const sticky = await screen.findByTestId('os-sticky');
     expect(within(sticky).getByRole('button', { name: /买入.*BTCUSD|BTCUSD.*买入/ })).toBeInTheDocument();
+  });
+});
+
+describe('暂停开仓、休市时不能下单（C140），平仓照常', () => {
+  for (const [name, patch, text] of [
+    ['暂停开仓', { openPaused: true }, '暂停开仓'],
+    ['休市', { tradingOpen: false }, '休市中'],
+  ] as const) {
+    it(`${name}：手机下单抽屉、电脑下单面板的按钮写"${text}"，点不了`, async () => {
+      const sym = { ...btc, ...patch };
+      const { unmount } = renderPage(<OrderSheet symbol={sym} side="buy" onClose={() => undefined} />, '/trade/BTCUSD');
+      const b1 = within(await screen.findByTestId('os-sticky')).getByRole('button');
+      expect(b1).toHaveTextContent(text);
+      expect(b1).toBeDisabled();
+      unmount();
+      renderPage(<OrderPanel symbol={sym} inline />, '/trade/BTCUSD');
+      const b2 = await screen.findByRole('button', { name: text });
+      expect(b2).toBeDisabled();
+      fireEvent.click(b2);
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+  }
+
+  it('暂停开仓的品种照样能平仓', async () => {
+    const p = db.positions.find((x) => symbolInfo(x.symbol)?.tradingOpen && Number(x.lots) >= 0.5)!;
+    const onClose = vi.fn();
+    renderPage(<ClosePositionDialog position={{ ...p }} symbol={{ ...symbolInfo(p.symbol)!, openPaused: true }} onClose={onClose} />, '/positions');
+    const dialog = await screen.findByRole('dialog');
+    const all = within(dialog).getAllByRole('button', { name: '全部平仓' });
+    const confirm = all[all.length - 1];
+    expect(confirm).toBeEnabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(db.positions.find((x) => x.id === p.id)).toBeUndefined();
+  });
+});
+
+describe('键盘检测的边界情况（审查）', () => {
+  function Probe() {
+    useKeyboardInset();
+    return null;
+  }
+  const setH = (h: number) => Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
+  const root = document.documentElement;
+
+  afterEach(() => setH(768));
+
+  it('安卓：输入时窗口变矮算键盘；输入框被移除（弹层关掉）后主动恢复，底部导航不会一直藏着', async () => {
+    setH(844);
+    const { unmount } = render(<Probe />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    act(() => input.focus());
+    act(() => {
+      setH(500);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(root.dataset.kb).toBe('1');
+    act(() => {
+      setH(844);
+      input.remove();
+    });
+    await waitFor(() => expect(root.dataset.kb).toBeUndefined());
+    unmount();
+  });
+
+  it('屏幕方向变了：最高窗口高度重置，横屏变矮不当成键盘', () => {
+    setH(844);
+    const { unmount } = render(<Probe />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    act(() => input.focus());
+    act(() => {
+      setH(390);
+      window.dispatchEvent(new Event('orientationchange'));
+    });
+    expect(root.dataset.kb).toBeUndefined();
+    input.remove();
+    unmount();
+  });
+
+  it('卸载时清掉 data-kb 和变量', () => {
+    setH(844);
+    const { unmount } = render(<Probe />);
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    act(() => input.focus());
+    act(() => {
+      setH(500);
+      window.dispatchEvent(new Event('resize'));
+    });
+    expect(root.dataset.kb).toBe('1');
+    unmount();
+    expect(root.dataset.kb).toBeUndefined();
+    expect(root.style.getPropertyValue('--kb')).toBe('');
+    input.remove();
   });
 });

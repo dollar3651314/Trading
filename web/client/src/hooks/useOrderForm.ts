@@ -135,7 +135,9 @@ export function useOrderForm(symbol: SymbolInfo, initialSide: Side, onDone?: () 
   // 第 3 批（原型 P3）：暂无报价（报价服务中断）、该品种暂不开放交易（没有交易用途授权）时下单按钮灰
   const quoteAvailable = useQuoteAvailable();
   const notTradable = symbol.tradable === false;
-  const blocked = notTradable || !quoteAvailable;
+  // 暂停开仓、休市时也不能下单（C140：按钮写清为什么点不了；TG 机器人第 3 批审查）。平仓走持仓的平仓流程，不受影响
+  const blockedReason: 'paused' | 'closed' | null = !symbol.tradingOpen ? 'closed' : symbol.openPaused ? 'paused' : null;
+  const blocked = notTradable || !quoteAvailable || blockedReason !== null;
   const notice = !quoteAvailable
     ? t('order.noticeNoQuote')
     : notTradable
@@ -164,6 +166,7 @@ export function useOrderForm(symbol: SymbolInfo, initialSide: Side, onDone?: () 
     available: metrics?.available ?? ZERO,
     notice,
     blocked,
+    blockedReason,
     notTradable,
     reject,
     confirm,

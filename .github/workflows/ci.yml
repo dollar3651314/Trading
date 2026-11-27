@@ -80,6 +80,8 @@ jobs:
             e2e:
               - 'e2e/*'
               - 'e2e/tests/**'
+              # 端到端用真实接口模式构建的客户端：客户端改了也要跑（TG 机器人第 3 批审查）
+              - 'web/client/**'
             deploy:
               - 'deploy/**'
               - '.dockerignore'
