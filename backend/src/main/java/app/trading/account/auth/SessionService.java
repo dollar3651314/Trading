@@ -40,11 +40,18 @@ class SessionService {
   /** 有效时返回用户 ID，否则返回 null */
   @Transactional
   Long resolve(String token) {
+    SessionRow s = resolveSession(token);
+    return s == null ? null : s.userId();
+  }
+
+  /** 有效时返回会话（用户 ID、种类 WEB / BOT），否则返回 null；顺带续期 */
+  @Transactional
+  SessionRow resolveSession(String token) {
     if (token == null || token.isBlank()) return null;
     SessionRow s = mapper.findActiveSession(Secrets.sha256(token));
     if (s == null) return null;
     if (s.idleSeconds() >= 60) mapper.extendSession(s.id(), props.sessionTtlHours(), props.botSessionIdleMinutes());
-    return s.userId();
+    return s;
   }
 
   @Transactional

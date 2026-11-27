@@ -366,11 +366,47 @@ export interface WithdrawInfo {
   coolingHours: number;
   fees: Record<Network, string>;
   maxWhitelist: number;
+  /** TG 客户（第 4 批）：按 TG 规则——每天额度（网页和机器人合并）、要提现密码、什么时候以后才能提；不是 TG 客户时没有这一项 */
+  tg?: WithdrawTgInfo;
+}
+
+export interface WithdrawTgInfo {
+  dailyLimit: string;
+  hasEmail: boolean;
+  pinSet: boolean;
+  /** 提现密码锁到什么时候（ISO UTC），没锁时为空 */
+  pinLockedUntil: string | null;
+  withdrawFrozen: boolean;
+  /** 最早能提现的时间（开户满 24 小时、安全变更后 24 小时、重设提现密码后 48 小时），现在能提时为空 */
+  holdUntil: string | null;
+  /** 后台的 TG 提现总开关（第 4 批验收后由 Amos 打开）；关着时不能加白名单、提现 */
+  enabled: boolean;
+}
+
+/** 一次提现密码输入（第 4 批）：服务器发的随机键盘编号 + 按了第几个键（不是数字本身） */
+export interface PinInput {
+  keypadId: string;
+  positions: number[];
+}
+
+/** 服务器发的随机键盘：10 个键上的数字（顺序每次不同），只能用一次、5 分钟有效 */
+export interface PinKeypad {
+  keypadId: string;
+  digits: number[];
+}
+
+export interface PinStatus {
+  set: boolean;
+  lockedUntil: string | null;
+  withdrawFrozen: boolean;
+  hasEmail: boolean;
 }
 
 export interface WithdrawRequest {
   whitelistId: string;
   amount: string;
+  /** TG 客户要输提现密码 */
+  pin?: PinInput;
 }
 
 // ---------- 通知 ----------

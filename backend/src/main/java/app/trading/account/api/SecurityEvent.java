@@ -15,4 +15,9 @@ public record SecurityEvent(String type, LocalDateTime at) {
   public static final String EMAIL_CHANGE = "EMAIL_CHANGE";
   public static final String FREEZE = "FREEZE";
   public static final String UNFREEZE = "UNFREEZE";
+  /** TG 机器人第 4 批：第一次设提现密码 / 改提现密码 / 忘记后重设（重设后 48 小时不能提现）/ TG 客户第一次提交 KYC（03 页第 4 节、场景 H） */
+  public static final String PIN_SET = "PIN_SET";
+  public static final String PIN_CHANGE = "PIN_CHANGE";
+  public static final String PIN_RESET = "PIN_RESET";
+  public static final String KYC_FIRST = "KYC_FIRST";
 }

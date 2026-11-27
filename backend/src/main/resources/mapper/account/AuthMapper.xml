@@ -34,6 +34,40 @@
     SELECT type, created_at AS at FROM account_security_event WHERE user_id = #{userId} AND created_at &gt; #{since} ORDER BY created_at DESC, id DESC LIMIT 1
   </select>
 
+  <select id="securityEventsSince" resultType="app.trading.account.api.SecurityEvent">
+    SELECT type, created_at AS at FROM account_security_event WHERE user_id = #{userId} AND created_at &gt; #{since} ORDER BY created_at DESC, id DESC
+  </select>
+
+  <!-- 提现密码（TG 机器人第 4 批）：只存 BCrypt 哈希；输错计数和锁定在锁住的这一行上改 -->
+  <select id="lockPin" resultType="app.trading.account.auth.AuthMapper$PinRow">
+    SELECT user_id, pin_hash, failed_count, locked_until FROM account_withdraw_pin WHERE user_id = #{userId} FOR UPDATE
+  </select>
+  <select id="pin" resultType="app.trading.account.auth.AuthMapper$PinRow">
+    SELECT user_id, pin_hash, failed_count, locked_until FROM account_withdraw_pin WHERE user_id = #{userId}
+  </select>
+  <insert id="insertPin">
+    INSERT INTO account_withdraw_pin (user_id, pin_hash, failed_count, created_at, updated_at) VALUES (#{userId}, #{hash}, 0, #{now}, #{now})
+  </insert>
+  <update id="updatePinHash">
+    UPDATE account_withdraw_pin SET pin_hash = #{hash}, failed_count = 0, locked_until = NULL, updated_at = #{now} WHERE user_id = #{userId}
+  </update>
+  <update id="updatePinFailures">
+    UPDATE account_withdraw_pin SET failed_count = #{failed}, locked_until = #{lockedUntil}, updated_at = #{now} WHERE user_id = #{userId}
+  </update>
+  <insert id="insertPinLock">INSERT INTO account_withdraw_pin_lock (user_id, locked_at) VALUES (#{userId}, #{at})</insert>
+  <select id="countPinLocksSince" resultType="int">
+    SELECT COUNT(*) FROM account_withdraw_pin_lock WHERE user_id = #{userId} AND locked_at &gt; #{since}
+  </select>
+
+  <!-- 冻结提现（只能人工解冻） -->
+  <select id="withdrawFreeze" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
+    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId}
+  </select>
+  <insert id="insertWithdrawFreeze">
+    INSERT IGNORE INTO account_withdraw_freeze (user_id, source, reason, created_at) VALUES (#{userId}, #{source}, #{reason}, #{at})
+  </insert>
+  <delete id="deleteWithdrawFreeze">DELETE FROM account_withdraw_freeze WHERE user_id = #{userId}</delete>
+
   <select id="registeredAt" resultType="java.time.LocalDateTime">SELECT created_at FROM account_user WHERE id = #{id}</select>
 
   <!-- 从机器人进入网页（TG 机器人第 2 批）：一键登录用过的 hash（主键防重放）、一次性链接 -->

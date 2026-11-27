@@ -183,6 +183,12 @@ class RateLimitTest {
         "[POST] [/api/trading/positions/{id}/margin]",
         "[POST] [/api/wallet/withdrawals]",
         "[POST] [/api/wallet/whitelist]",
-        "[DELETE] [/api/wallet/whitelist/{id}]");
+        "[DELETE] [/api/wallet/whitelist/{id}]",
+        // 第 4 批：提现密码的写操作（取键盘、设置、修改、忘记发码、忘记重设）同样按客户限流
+        "[POST] [/api/me/withdraw-pin/keypad]",
+        "[POST] [/api/me/withdraw-pin]",
+        "[POST] [/api/me/withdraw-pin/change]",
+        "[POST] [/api/me/withdraw-pin/forgot/code]",
+        "[POST] [/api/me/withdraw-pin/forgot]");
   }
 }

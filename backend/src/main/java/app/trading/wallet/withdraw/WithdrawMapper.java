@@ -10,6 +10,18 @@ import org.apache.ibatis.annotations.Param;
 @Mapper
 interface WithdrawMapper {
 
+  long completedCount(@Param("userId") long userId);
+
+  int markFirstChecked(@Param("id") long id, @Param("adminId") long adminId);
+
+  java.util.List<WhitelistRow> whitelistToNotifySoon(@Param("now") java.time.LocalDateTime now, @Param("soon") java.time.LocalDateTime soon);
+
+  java.util.List<WhitelistRow> whitelistToNotifyActive(@Param("now") java.time.LocalDateTime now, @Param("since") java.time.LocalDateTime since);
+
+  int markWhitelistSoon(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
+  int markWhitelistActive(@Param("id") long id, @Param("now") java.time.LocalDateTime now);
+
   // ---------- 白名单 ----------
   List<WhitelistRow> whitelist(@Param("userId") long userId);
 

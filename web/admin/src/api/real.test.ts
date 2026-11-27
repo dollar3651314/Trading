@@ -162,6 +162,9 @@ describe('资金、通知', () => {
     await real.approveWithdrawal('55');
     await real.rejectWithdrawal('55', '地址可疑');
     await real.emergencyCancelWithdrawal('56', '客户来电称被盗');
+    // 第 4 批：首笔核实单通过时带 firstChecked: true
+    await real.approveWithdrawal('55', true);
+    expect(calls[4].body).toEqual({ firstChecked: true });
     expect(calls[0].url).toBe('/api/admin/withdrawals?status=open&chain=TRC20&minAmount=100&maxAmount=5000&keyword=wang&page=1&pageSize=8');
     expect(calls[1].body).toBeUndefined();
     expect(calls[2].body).toEqual({ reason: '地址可疑' });

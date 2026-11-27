@@ -4,7 +4,7 @@
 <mapper namespace="app.trading.wallet.withdraw.WithdrawMapper">
 
   <sql id="wlCols">id, user_id, network, address, address_key, label, active_at, created_at</sql>
-  <sql id="wdCols">id, public_no, user_id, network, address, amount, fee, status, cooling_ends_at, delay_ends_at, tx_hash, reject_reason, created_at, last_check_id</sql>
+  <sql id="wdCols">id, public_no, user_id, network, address, amount, fee, status, rule_type, source, first_check, first_checked_by, cooling_ends_at, delay_ends_at, tx_hash, reject_reason, created_at, last_check_id</sql>
 
   <select id="whitelist" resultType="app.trading.wallet.withdraw.WhitelistRow">
     SELECT <include refid="wlCols"/> FROM wallet_whitelist WHERE user_id = #{userId} ORDER BY id
@@ -28,8 +28,8 @@
   </delete>
 
   <insert id="insertWithdrawal" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO wallet_withdrawal (public_no, user_id, network, address, amount, fee, status, cooling_ends_at, created_at)
-    VALUES (#{publicNo}, #{userId}, #{network}, #{address}, #{amount}, #{fee}, #{status}, #{coolingEndsAt}, #{createdAt})
+    INSERT INTO wallet_withdrawal (public_no, user_id, network, address, amount, fee, status, rule_type, source, first_check, cooling_ends_at, created_at)
+    VALUES (#{publicNo}, #{userId}, #{network}, #{address}, #{amount}, #{fee}, #{status}, #{ruleType}, #{source}, #{firstCheck}, #{coolingEndsAt}, #{createdAt})
   </insert>
 
   <select id="lock" resultType="app.trading.wallet.withdraw.WithdrawalRow">
@@ -56,6 +56,25 @@
   <select id="countByUser" resultType="long">
     SELECT COUNT(*) FROM wallet_withdrawal WHERE user_id = #{userId}
   </select>
+
+  <!-- 首笔人工核实（第 4 批）：这个客户有没有完成过的提现 -->
+  <select id="completedCount" resultType="long">
+    SELECT COUNT(*) FROM wallet_withdrawal WHERE user_id = #{userId} AND status = 'COMPLETED'
+  </select>
+
+  <update id="markFirstChecked">UPDATE wallet_withdrawal SET first_checked_by = #{adminId} WHERE id = #{id} AND first_check = 1</update>
+
+  <!-- TG 客户的白名单通知（第 4 批）：生效前 1 小时、生效时各一次 -->
+  <select id="whitelistToNotifySoon" resultType="app.trading.wallet.withdraw.WhitelistRow">
+    SELECT <include refid="wlCols"/> FROM wallet_whitelist
+    WHERE notified_soon_at IS NULL AND active_at &gt; #{now} AND active_at &lt;= #{soon} ORDER BY id LIMIT 200
+  </select>
+  <select id="whitelistToNotifyActive" resultType="app.trading.wallet.withdraw.WhitelistRow">
+    SELECT <include refid="wlCols"/> FROM wallet_whitelist
+    WHERE notified_active_at IS NULL AND active_at &lt;= #{now} AND active_at &gt; #{since} ORDER BY id LIMIT 200
+  </select>
+  <update id="markWhitelistSoon">UPDATE wallet_whitelist SET notified_soon_at = #{now} WHERE id = #{id} AND notified_soon_at IS NULL</update>
+  <update id="markWhitelistActive">UPDATE wallet_whitelist SET notified_active_at = #{now} WHERE id = #{id} AND notified_active_at IS NULL</update>
 
   <select id="usedSince" resultType="java.math.BigDecimal">
     SELECT COALESCE(SUM(amount), 0) FROM wallet_withdrawal

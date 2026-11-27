@@ -95,7 +95,18 @@ public class WithdrawService implements WithdrawAdminApi {
    * 提交提现（AC-17）。顺序：字段 → KYC → 白名单（存在、已生效）→ 最小、单笔 → 锁账户后查当日累计和可提金额 → 冻结。
    */
   WithdrawalRow submit(long userId, String whitelistId, String amountText) {
+    return submit(userId, whitelistId, amountText, null, "WEB");
+  }
+
+  /**
+   * TG 客户（第 4 批，{@link TelegramWithdrawGate}）：总开关 → 字段 → 提现密码 → KYC → 开户满 24 小时、安全事件禁提 → 白名单 → 锁账户后查 TG 每天额度。
+   * 记规则（TG：一律人工审核）、入口（WEB / BOT）、没邮箱的首笔标人工核实。
+   *
+   * @param source 提交入口：WEB 网页登录的会话 / BOT 从机器人进入的会话
+   */
+  WithdrawalRow submit(long userId, String whitelistId, String amountText, app.trading.account.api.WithdrawPinApi.PinInput pin, String source) {
     tgGate.check(userId); // TB-1：TG 客户提现默认关（第 4 批验收后打开）
+    boolean tg = tgGate.isTg(userId);
     ValidationException.Collector errs = new ValidationException.Collector();
     BigDecimal amount = null;
     String a = amountText == null ? "" : amountText.trim();
@@ -112,7 +123,11 @@ public class WithdrawService implements WithdrawAdminApi {
     if (wid == null) errs.add("whitelistId", "selectAddress");
     errs.throwIfAny();
 
+    // TG 规则：先核对提现密码（输错计数），再查其他条件
+    TelegramWithdrawGate.TgContext tgc = tg ? tgGate.context(userId) : null;
+    if (tg) tgGate.verifyPin(userId, pin);
     if (account.kycStatus(userId) != KycStatus.APPROVED) throw new BizException("KYC_REQUIRED", "提现前需要通过身份认证");
+    if (tg) tgGate.checkHold(userId, now());
     WhitelistRow w = mapper.whitelistById(userId, wid);
     if (w == null) throw new BizException("NOT_WHITELISTED", "只能提到白名单地址");
     if (w.activeAt.isAfter(now())) throw new BizException("WHITELIST_NOT_ACTIVE", "白名单地址添加满 24 小时后才能使用");
@@ -126,7 +141,13 @@ public class WithdrawService implements WithdrawAdminApi {
     WithdrawalRow r = tx.execute(st -> {
       ledger.lock(userId);
       // 当日累计必须严格小于上限（需求 4.4-4，和客户端一致）；锁住账户后再算，并发提交不会一起超过
-      if (usedToday(userId).add(amt).compareTo(props().dailyLimit()) >= 0) throw new BizException("DAILY_LIMIT_EXCEEDED", "超过当日提现累计上限");
+      BigDecimal used = usedToday(userId);
+      if (used.add(amt).compareTo(props().dailyLimit()) >= 0) throw new BizException("DAILY_LIMIT_EXCEEDED", "超过当日提现累计上限");
+      // TG 每天额度（网页和机器人合并：今天所有没撤销、没驳回、没失败的提现都算），和上面同一把锁里
+      if (tgc != null && used.add(amt).compareTo(tgc.dailyQuota()) > 0) {
+        throw new BizException("TG_DAILY_LIMIT", "超过今天的提现额度（每天 " + tgc.dailyQuota().stripTrailingZeros().toPlainString() + " USDT，还能提 "
+            + tgc.dailyQuota().subtract(used).max(BigDecimal.ZERO).stripTrailingZeros().toPlainString() + "）");
+      }
       if (amt.compareTo(funds.withdrawable(userId)) > 0) throw new BizException("INSUFFICIENT_BALANCE", "可提金额不足");
       WithdrawalRow n = new WithdrawalRow();
       n.publicNo = ids.next();
@@ -136,6 +157,10 @@ public class WithdrawService implements WithdrawAdminApi {
       n.amount = amt;
       n.fee = fee;
       n.status = "COOLING";
+      n.ruleType = tg ? "TG" : "WEB";
+      n.source = "BOT".equals(source) ? "BOT" : "WEB";
+      // 没邮箱的 TG 客户：首笔（还没有完成过的提现）一律人工核实，没有豁免（03 页第 0 节、08 页第 0 节）
+      n.firstCheck = tgc != null && !tgc.hasEmail() && mapper.completedCount(userId) == 0;
       n.createdAt = now();
       n.coolingEndsAt = n.createdAt.plus(props().cooling());
       mapper.insertWithdrawal(n);
@@ -168,8 +193,18 @@ public class WithdrawService implements WithdrawAdminApi {
 
   @Override
   public void approve(long withdrawalId, long adminId) {
+    approve(withdrawalId, adminId, false);
+  }
+
+  /** 首笔人工核实（第 4 批）：标了 first_check 的，审核员要确认"已核实"（firstChecked = true）才能通过 */
+  @Override
+  public void approve(long withdrawalId, long adminId, boolean firstChecked) {
     WithdrawalRow r = tx.execute(st -> {
       WithdrawalRow w = reviewing(withdrawalId);
+      if (w.firstCheck) {
+        if (!firstChecked) throw new BizException("FIRST_CHECK_REQUIRED", "这是没邮箱客户的首笔提现：要先人工核实（视频核对本人、来源证明）再通过");
+        mapper.markFirstChecked(w.id, adminId);
+      }
       boolean large = w.amount.compareTo(props().largeAmount()) >= 0;
       LocalDateTime delay = large ? now().plus(props().largeDelay()) : null;
       mapper.setReview(w.id, adminId, now(), null, delay);
@@ -241,8 +276,10 @@ public class WithdrawService implements WithdrawAdminApi {
         WithdrawalRow w = mapper.lock(id);
         if (w == null || !"COOLING".equals(w.status) || now().isBefore(w.coolingEndsAt)) return null;
         AutoApproveService.Decision d = auto.decideFinal(w, s);
-        move(w, "REVIEWING", "system", "冷静期结束");
-        if (d.approved()) autoApprove(w, d);
+        // TG 规则一律人工审核（TB-20、TB-22）：判定照记（后台参考），不自动通过
+        boolean tgRule = "TG".equals(w.ruleType);
+        move(w, "REVIEWING", "system", tgRule ? "冷静期结束（TG 规则，一律人工审核）" : "冷静期结束");
+        if (d.approved() && !tgRule) autoApprove(w, d);
         return w;
       });
     } catch (RuntimeException e) {

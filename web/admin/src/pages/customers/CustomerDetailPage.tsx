@@ -9,7 +9,7 @@ import { Alert, Button, Descriptions, Form, Input, Radio, Skeleton, Space } from
 import { ArrowLeftOutlined, LockOutlined, UnlockOutlined, DollarOutlined, EditOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { adjustBalance, getAdjustLimits, getCustomer, setCustomerFrozen, updateCustomerProfile } from '../../api';
+import { adjustBalance, getAdjustLimits, getCustomer, setCustomerFrozen, unfreezeCustomerWithdraw, updateCustomerProfile } from '../../api';
 import type { ClosedPosition, LedgerEntry, Position } from '../../api/types';
 import { closedColumns } from '../trading/closedColumns';
 import { useApi } from '../../hooks/useApi';
@@ -48,6 +48,25 @@ export function CustomerDetailPage() {
       ),
       confirmText: freezing ? t('customers.confirmFreeze') : t('customers.confirmUnfreeze'),
       onConfirm: (v) => setCustomerFrozen(c.id, freezing, v.reason),
+      onDone: reload,
+    });
+  };
+
+  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解冻；高危、填原因、写审计） */
+  const askWithdrawUnfreeze = () => {
+    if (!c?.withdrawSafety?.withdrawFrozen) return;
+    const src = c.withdrawSafety.frozenSource;
+    hr.ask({
+      title: t('customers.wdSafety.unfreeze'),
+      description: (
+        <>
+          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: contact(c.email, c.telegramUsername) })}</div>
+          <div>{t('customers.wdSafety.frozenLine', { source: src ? t(`customers.wdSafety.source.${src}`) : '—', time: c.withdrawSafety.frozenAt ? fullTime(c.withdrawSafety.frozenAt) : '—' })}</div>
+          <div>{t('customers.wdSafety.unfreezeImpact')}</div>
+        </>
+      ),
+      confirmText: t('customers.wdSafety.confirmUnfreeze'),
+      onConfirm: (v) => unfreezeCustomerWithdraw(c.id, v.reason),
       onDone: reload,
     });
   };
@@ -247,6 +266,24 @@ export function CustomerDetailPage() {
               <Descriptions.Item label={t('customers.id')}><Num>{c.id}</Num></Descriptions.Item>
               <Descriptions.Item label={t('customers.email')}>{c.email ?? '—'}</Descriptions.Item>
               {c.telegramId && <Descriptions.Item label="Telegram">{contact(null, c.telegramUsername)} · {c.telegramId}</Descriptions.Item>}
+              {c.withdrawSafety ? (
+                <Descriptions.Item label={t('customers.wdSafety.title')}>
+                  <Space size={4} wrap>
+                    <Pill tone={c.withdrawSafety.pinSet ? 'ok' : 'muted'}>{t(c.withdrawSafety.pinSet ? 'customers.wdSafety.pinSet' : 'customers.wdSafety.pinNotSet')}</Pill>
+                    {c.withdrawSafety.pinLockedUntil ? <Pill tone="warn">{t('customers.wdSafety.pinLocked', { time: fullTime(c.withdrawSafety.pinLockedUntil) })}</Pill> : null}
+                    {c.withdrawSafety.withdrawFrozen ? (
+                      <>
+                        <Pill tone="danger">
+                          {t('customers.wdSafety.frozen', { source: c.withdrawSafety.frozenSource ? t(`customers.wdSafety.source.${c.withdrawSafety.frozenSource}`) : '—' })}
+                        </Pill>
+                        <PermButton perm="customer:freeze" size="small" danger icon={<UnlockOutlined />} onClick={askWithdrawUnfreeze}>
+                          {t('customers.wdSafety.unfreeze')}
+                        </PermButton>
+                      </>
+                    ) : null}
+                  </Space>
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label={t('customers.nationality')}>{c.nationality}</Descriptions.Item>
               <Descriptions.Item label={t('customers.firstName')}>{c.firstName || '—'}</Descriptions.Item>
               <Descriptions.Item label={t('customers.middleName')}>{c.middleName || '—'}</Descriptions.Item>

@@ -48,7 +48,8 @@ class FundsOps {
    */
   record WithdrawalView(String id, long customerId, String customerName, String email, String amount, String fee, String chain, String address,
       boolean firstUse, String whitelistAddedAt, String status, Long delayRemainingMinutes, String submittedAt, String reviewer, String reason,
-      String txHash, AutoApproveOps.ReviewView autoReview, String provider, String payoutNo, String payoutStatus, String payoutReason, String statusAt) {}
+      String txHash, AutoApproveOps.ReviewView autoReview, String provider, String payoutNo, String payoutStatus, String payoutReason, String statusAt,
+      String ruleType, String source, boolean firstCheck, boolean firstChecked) {}
 
   record Recent(String time, String chain, String amount) {}
 
@@ -219,7 +220,8 @@ class FundsOps {
           Ops.money(w.fee()), w.chain(), w.address(), w.firstUse(), Ops.time(w.whitelistAddedAt()), withdrawStatus(w.status()), remaining,
           Ops.time(w.submittedAt()), w.reviewerId() == null ? null : reviewers.get(w.reviewerId()), w.rejectReason(), w.txHash(), reviews.get(w.id()),
           pay == null ? null : pay.provider(), pay == null ? null : pay.providerRef(), pay == null ? null : pay.state().name().toLowerCase(),
-          pay == null ? null : pay.reason(), Ops.time(w.statusAt() == null ? w.submittedAt() : w.statusAt()));
+          pay == null ? null : pay.reason(), Ops.time(w.statusAt() == null ? w.submittedAt() : w.statusAt()),
+          w.ruleType() == null ? "web" : w.ruleType().toLowerCase(), w.source() == null ? "web" : w.source().toLowerCase(), w.firstCheck(), w.firstCheckedBy() != null);
     }).toList();
   }
 
@@ -276,9 +278,14 @@ class FundsOps {
   }
 
   WithdrawalView approve(AdminContext actor, long no) {
+    return approve(actor, no, false);
+  }
+
+  /** firstChecked：首笔人工核实已做（第 4 批：没邮箱 TG 客户的首笔必须确认），写进审计 */
+  WithdrawalView approve(AdminContext actor, long no, boolean firstChecked) {
     long id = internal(no);
     audit.run("withdrawal.approve", String.valueOf(no), false, null, () -> {
-      withdraws.approve(id, actor.adminId());
+      withdraws.approve(id, actor.adminId(), firstChecked);
       return Audit.Change.of(null, Map.of("status", "pending"), Map.of("status", withdrawStatus(require(id).status())));
     });
     return views(List.of(require(id))).getFirst();

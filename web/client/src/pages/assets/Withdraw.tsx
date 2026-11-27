@@ -8,20 +8,21 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router-dom';
 import { errorKey, isApiError } from '../../api/errors';
 import { cancelWithdraw, getWithdrawInfo, listWhitelist, listWithdrawals, submitWithdraw } from '../../api/wallet';
-import type { WhitelistAddress, Withdrawal, WithdrawInfo } from '../../api/types';
+import type { PinInput, WhitelistAddress, Withdrawal, WithdrawInfo } from '../../api/types';
 import { useToast } from '../../app/contexts';
 import { EmptyState, ErrorState, Loading } from '../../components/AsyncView';
 import { FieldErrors, Select, TextField } from '../../components/Form';
 import { Icon } from '../../components/Icon';
 import { PageHeader } from '../../components/Layout';
 import { ConfirmDialog } from '../../components/Modal';
+import { PinPad } from '../../components/PinPad';
 import { useAsync } from '../../hooks/useAsync';
 import { useNow } from '../../hooks/useCountdown';
 import { usePaged } from '../../hooks/usePaged';
 import { useServerEvent } from '../../hooks/useServerEvent';
 import { cmp, dec, div, isDecimalString, mul, sub, toFixed, ZERO } from '../../lib/decimal';
 import { formatAmount, formatCountdown, formatDateTime, shortAddress } from '../../lib/format';
-import { dailyRemaining, hasErrors, validateWithdraw, type FieldErrors as Errs } from '../../lib/validators';
+import { dailyRemaining, hasErrors, tgRemaining, validateWithdraw, type FieldErrors as Errs } from '../../lib/validators';
 import { statusLabel } from './withdrawStatus';
 import { Timeline } from './withdrawView';
 
@@ -51,6 +52,53 @@ function KycBanner({ info }: { info: WithdrawInfo }) {
   );
 }
 
+/** TG 客户（第 4 批）：每天额度、提现密码、什么时候能提、是否冻结；挡住提现的情况在这里一次写清楚 */
+function tgBlocked(info: WithdrawInfo, now: number): boolean {
+  const g = info.tg;
+  if (!g) return false;
+  return !g.enabled || g.withdrawFrozen || !g.pinSet || (!!g.pinLockedUntil && new Date(g.pinLockedUntil).getTime() > now) || (!!g.holdUntil && new Date(g.holdUntil).getTime() > now);
+}
+
+function TgBox({ info }: { info: WithdrawInfo }) {
+  const { t } = useTranslation();
+  const now = useNow(30_000);
+  const g = info.tg;
+  if (!g) return null;
+  const locked = !!g.pinLockedUntil && new Date(g.pinLockedUntil).getTime() > now;
+  const hold = !!g.holdUntil && new Date(g.holdUntil).getTime() > now;
+  return (
+    <section className="card tg-rules" data-testid="tg-box">
+      <h2 className="card-title">{t('withdraw.tg.title')}</h2>
+      <p className="small">{t(g.hasEmail ? 'withdraw.tg.quotaEmail' : 'withdraw.tg.quotaNoEmail', { limit: formatAmount(g.dailyLimit, { dp: 0 }) })}</p>
+      <p className="muted small">{t('withdraw.tg.manual')}</p>
+      {!g.enabled && (
+        <div className="notice warn" role="alert">
+          {t('withdraw.tg.disabled')}
+        </div>
+      )}
+      {g.withdrawFrozen && (
+        <div className="notice error" role="alert">
+          {t('withdraw.tg.frozen')}
+        </div>
+      )}
+      {!g.pinSet ? (
+        <div className="notice warn" role="alert">
+          {t('withdraw.tg.pinNotSet')} <Link to="/me/withdraw-pin">{t('withdraw.tg.setPin')}</Link>
+        </div>
+      ) : locked ? (
+        <div className="notice error" role="alert">
+          {t('withdraw.tg.pinLocked', { time: formatDateTime(g.pinLockedUntil!) })} <Link to="/me/withdraw-pin">{t('withdraw.tg.forgotPin')}</Link>
+        </div>
+      ) : null}
+      {hold && (
+        <div className="notice info" role="status">
+          {t('withdraw.tg.hold', { time: formatDateTime(g.holdUntil!) })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whitelist: WhitelistAddress[]; onDone: () => void }) {
   const { t } = useTranslation();
   const toast = useToast();
@@ -60,6 +108,10 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
   const [submitted, setSubmitted] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pin, setPin] = useState<PinInput | null>(null);
+  const [pinRound, setPinRound] = useState(0);
+  const tg = info.tg;
+  const blocked = tgBlocked(info, now);
   const [serverErr, setServerErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   // 后端返回的字段错误（VALIDATION_FAILED 的 fields），显示在对应输入框下面；改了这个字段就清掉
@@ -81,12 +133,15 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
   const amt = isDecimalString(amount) ? dec(amount) : null;
   const receive = amt && fee ? sub(amt, dec(fee)) : null;
   const used = dec(info.usedToday);
-  const pct = cmp(dec(info.dailyLimit), ZERO) > 0 ? Number(toFixed(mul(div(used, dec(info.dailyLimit)), dec(100)), 1)) : 0;
+  // TG 客户按 TG 额度显示（网页和机器人合并）
+  const limit = tg ? tg.dailyLimit : info.dailyLimit;
+  const pct = cmp(dec(limit), ZERO) > 0 ? Number(toFixed(mul(div(used, dec(limit)), dec(100)), 1)) : 0;
   const large = amt !== null && cmp(amt, dec(info.largeAmount)) >= 0;
 
   const fillAll = () => {
     let m = dec(info.available);
-    for (const cap of [dec(info.maxPerTx), sub(dailyRemaining(info), dec('0.01'))]) if (cmp(cap, m) < 0) m = cap;
+    const tgLeft = tgRemaining(info);
+    for (const cap of [dec(info.maxPerTx), sub(dailyRemaining(info), dec('0.01')), ...(tgLeft ? [tgLeft] : [])]) if (cmp(cap, m) < 0) m = cap;
     if (cmp(m, ZERO) < 0) m = ZERO;
     // 向下取整到 0.01
     changeAmount(toFixed(sub(m, dec('0.004999999')), 2));
@@ -96,14 +151,16 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
     setSubmitted(true);
     setServerErr(null);
     setServerFields({});
-    if (hasErrors(errs)) return;
+    if (hasErrors(errs) || blocked) return;
+    setPin(null);
+    setPinRound((r) => r + 1);
     setConfirm(true);
   };
 
   const doSubmit = async () => {
     setBusy(true);
     try {
-      const created = await submitWithdraw({ whitelistId: wid, amount: amount.trim() });
+      const created = await submitWithdraw({ whitelistId: wid, amount: amount.trim(), ...(tg && pin ? { pin } : {}) });
       setConfirm(false);
       setAmount('');
       setSubmitted(false);
@@ -194,7 +251,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
           <div>
             <dt>{t('withdraw.limits', { min: formatAmount(info.minAmount, { dp: 0 }), max: formatAmount(info.maxPerTx, { dp: 0 }) })}</dt>
             <dd>
-              <span className="num">{formatAmount(info.usedToday)}</span> / <span className="num">{formatAmount(info.dailyLimit, { dp: 0 })}</span>
+              <span className="num">{formatAmount(info.usedToday)}</span> / <span className="num">{formatAmount(limit, { dp: 0 })}</span>
             </dd>
           </div>
         </dl>
@@ -241,11 +298,11 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
           {serverErr}
         </div>
       )}
-      <button type="button" className="btn btn-primary btn-lg btn-block submit-wd sticky-submit" onClick={submit}>
+      <button type="button" className="btn btn-primary btn-lg btn-block submit-wd sticky-submit" onClick={submit} disabled={blocked}>
         {t('withdraw.submit')}
       </button>
 
-      <ConfirmDialog open={confirm} title={t('withdraw.confirmTitle')} confirmText={t('withdraw.confirm')} busy={busy} onConfirm={doSubmit} onClose={() => setConfirm(false)}>
+      <ConfirmDialog open={confirm} title={t('withdraw.confirmTitle')} confirmText={t('withdraw.confirm')} busy={busy} disabled={!!tg && !pin} onConfirm={doSubmit} onClose={() => setConfirm(false)}>
         <dl className="kv-list">
           <div>
             <dt>{t('withdraw.address')}</dt>
@@ -272,6 +329,7 @@ function WithdrawForm({ info, whitelist, onDone }: { info: WithdrawInfo; whiteli
           {t('withdraw.confirmNote', { h: info.coolingHours })}
           {t('withdraw.twoReviewNight')}
         </p>
+        {tg && <PinPad id="wd-pin" label={t('pin.withdrawLabel')} onChange={setPin} resetKey={pinRound} />}
       </ConfirmDialog>
     </>
   );
@@ -425,6 +483,7 @@ export default function Withdraw() {
           ) : (
             <>
               <KycBanner info={info.data} />
+              <TgBox info={info.data} />
               {info.data.kycStatus === 'approved' && <WithdrawForm info={info.data} whitelist={wl.data} onDone={info.reload} />}
             </>
           )}

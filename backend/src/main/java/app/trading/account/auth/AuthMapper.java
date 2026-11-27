@@ -61,6 +61,35 @@ interface AuthMapper {
   /** (since, 现在] 里最近的一条；没有时为 null */
   app.trading.account.api.SecurityEvent lastSecurityEventSince(@Param("userId") long userId, @Param("since") java.time.LocalDateTime since);
 
+  /** (since, 现在] 里的全部安全事件，最新的在前 */
+  java.util.List<app.trading.account.api.SecurityEvent> securityEventsSince(@Param("userId") long userId, @Param("since") java.time.LocalDateTime since);
+
+  // ---------- 提现密码（TG 机器人第 4 批） ----------
+  record PinRow(long userId, String pinHash, int failedCount, java.time.LocalDateTime lockedUntil) {}
+
+  PinRow lockPin(@Param("userId") long userId);
+
+  PinRow pin(@Param("userId") long userId);
+
+  int insertPin(@Param("userId") long userId, @Param("hash") String hash, @Param("now") java.time.LocalDateTime now);
+
+  int updatePinHash(@Param("userId") long userId, @Param("hash") String hash, @Param("now") java.time.LocalDateTime now);
+
+  int updatePinFailures(@Param("userId") long userId, @Param("failed") int failed, @Param("lockedUntil") java.time.LocalDateTime lockedUntil,
+      @Param("now") java.time.LocalDateTime now);
+
+  int insertPinLock(@Param("userId") long userId, @Param("at") java.time.LocalDateTime at);
+
+  int countPinLocksSince(@Param("userId") long userId, @Param("since") java.time.LocalDateTime since);
+
+  record WithdrawFreezeRow(long userId, String source, String reason, java.time.LocalDateTime createdAt) {}
+
+  WithdrawFreezeRow withdrawFreeze(@Param("userId") long userId);
+
+  int insertWithdrawFreeze(@Param("userId") long userId, @Param("source") String source, @Param("reason") String reason, @Param("at") java.time.LocalDateTime at);
+
+  int deleteWithdrawFreeze(@Param("userId") long userId);
+
   /** 注册时间；用户不存在时为 null */
   java.time.LocalDateTime registeredAt(@Param("id") long id);
 

@@ -5,6 +5,9 @@
  */
 import { ApiError } from '../api/errors';
 import type {
+  PinInput,
+  PinKeypad,
+  PinStatus,
   DepositAddress,
   DepositRecord,
   LedgerItem,
@@ -127,7 +130,7 @@ export function listWhitelist(): Promise<WhitelistAddress[]> {
   return respond(() => db.whitelist.map((w) => ({ ...w })), () => []);
 }
 
-export function addWhitelist(f: { network: Network; address: string; label: string }): Promise<WhitelistAddress> {
+export function addWhitelist(f: { network: Network; address: string; label: string; pin?: PinInput }): Promise<WhitelistAddress> {
   return mutate(() => {
     const errs = validateWhitelist(f, db.whitelist, 10);
     if (errs.form) throw new ApiError('whitelistFull');
@@ -207,5 +210,61 @@ export function cancelWithdraw(id: string): Promise<Withdrawal> {
     emit({ type: 'account' });
     emit({ type: 'withdraw', status: 'cancelled', amount: w.amount });
     return { ...w };
+  });
+}
+
+// ---------- 提现密码（原型：内存里的假实现；真实的规则在后端 WithdrawPins） ----------
+const pinState: { pin: string | null; failed: number; keypads: Map<string, number[]> } = { pin: null, failed: 0, keypads: new Map() };
+
+export function getPinStatus(): Promise<PinStatus> {
+  return respond(() => ({ set: pinState.pin !== null, lockedUntil: null, withdrawFrozen: false, hasEmail: true }));
+}
+
+export function getPinKeypad(): Promise<PinKeypad> {
+  return mutate(() => {
+    const d = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+    for (let i = d.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [d[i], d[j]] = [d[j], d[i]];
+    }
+    const id = nextId('K');
+    pinState.keypads.set(id, d);
+    return { keypadId: id, digits: d };
+  });
+}
+
+function decode(p: PinInput): string {
+  const d = pinState.keypads.get(p.keypadId);
+  pinState.keypads.delete(p.keypadId);
+  if (!d) throw new ApiError('pinKeypadExpired');
+  return p.positions.map((i) => d[i]).join('');
+}
+
+export function setPin(pin: PinInput, confirm: PinInput): Promise<void> {
+  return mutate(() => {
+    const a = decode(pin);
+    if (a !== decode(confirm)) throw new ApiError('validationFailed', { confirm: ['validation.pinMismatch'] });
+    pinState.pin = a;
+  });
+}
+
+export function changePin(old: PinInput, pin: PinInput, confirm: PinInput): Promise<void> {
+  return mutate(() => {
+    if (decode(old) !== pinState.pin) throw new ApiError('pinWrong');
+    const a = decode(pin);
+    if (a !== decode(confirm)) throw new ApiError('validationFailed', { confirm: ['validation.pinMismatch'] });
+    pinState.pin = a;
+  });
+}
+
+export function sendPinResetCode(): Promise<{ cooldownSeconds: number }> {
+  return mutate(() => ({ cooldownSeconds: 60 }));
+}
+
+export function resetPin(_code: string, pin: PinInput, confirm: PinInput): Promise<void> {
+  return mutate(() => {
+    const a = decode(pin);
+    if (a !== decode(confirm)) throw new ApiError('validationFailed', { confirm: ['validation.pinMismatch'] });
+    pinState.pin = a;
   });
 }

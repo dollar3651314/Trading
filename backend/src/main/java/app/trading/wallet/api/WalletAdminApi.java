@@ -23,7 +23,7 @@ public interface WalletAdminApi {
    */
   record Withdrawal(long id, long no, long userId, BigDecimal amount, BigDecimal fee, String chain, String address, boolean firstUse,
       LocalDateTime whitelistAddedAt, String status, LocalDateTime delayEndsAt, LocalDateTime submittedAt, Long reviewerId, String rejectReason,
-      String txHash, LocalDateTime statusAt) {}
+      String txHash, LocalDateTime statusAt, String ruleType, String source, boolean firstCheck, Long firstCheckedBy) {}
 
   /** 某个状态的笔数和金额 */
   record Bucket(long count, BigDecimal amount) {}

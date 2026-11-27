@@ -29,6 +29,9 @@ public interface AccountApi {
    */
   Optional<SecurityEvent> lastSecurityEventSince(long userId, LocalDateTime since);
 
+  /** 时间在 (since, 现在] 里的全部安全事件，最新的在前（TG 提现规则：24 小时内有任何安全事件、48 小时内重设过提现密码都不能提，第 4 批） */
+  java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since);
+
   /** 当前 KYC 状态。只在提现前要求 APPROVED（需求 4.1-6）。 */
   KycStatus kycStatus(long userId);
 

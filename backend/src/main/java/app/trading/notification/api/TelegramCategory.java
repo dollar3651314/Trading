@@ -37,7 +37,9 @@ public enum TelegramCategory {
       Map.entry("ORDER_FILLED", TRADE), Map.entry("POSITION_OPENED", TRADE), Map.entry("POSITION_CLOSED", TRADE), Map.entry("POSITION_PARTIAL_CLOSED", TRADE),
       Map.entry("TP_SL_TRIGGERED", TPSL), Map.entry("MARGIN_CALL", RISK), Map.entry("LIQUIDATED", RISK), Map.entry("DEPOSIT_CREDITED", FUNDS),
       Map.entry("WITHDRAW_STATUS", FUNDS), Map.entry("KYC_APPROVED", KYC), Map.entry("KYC_REJECTED", KYC), Map.entry("ACCOUNT_FROZEN", SECURITY),
-      Map.entry("LOGIN_NEW_DEVICE", SECURITY));
+      Map.entry("LOGIN_NEW_DEVICE", SECURITY), Map.entry("WITHDRAW_PIN_SET", SECURITY), Map.entry("WITHDRAW_PIN_CHANGED", SECURITY),
+      Map.entry("WITHDRAW_PIN_LOCKED", SECURITY), Map.entry("WITHDRAW_FROZEN", SECURITY), Map.entry("WHITELIST_ADDED", SECURITY),
+      Map.entry("WHITELIST_SOON", SECURITY), Map.entry("WHITELIST_ACTIVE", SECURITY));
 
   /** 模板编号 → 分类；不认识的（后台新加的模板、手动发送）算 {@link #SYSTEM} */
   public static TelegramCategory ofTemplate(String templateCode) {

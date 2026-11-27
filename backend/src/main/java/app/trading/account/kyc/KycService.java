@@ -28,8 +28,12 @@ class KycService {
   private final KycMapper mapper;
   private final ObjectStorage storage;
   private final NotifyApi notify;
+  private final app.trading.account.api.TelegramAccountApi telegram;
+  private final app.trading.account.auth.AuthAccess auth;
 
-  KycService(KycMapper mapper, ObjectStorage storage, NotifyApi notify) {
+  KycService(KycMapper mapper, ObjectStorage storage, NotifyApi notify, app.trading.account.api.TelegramAccountApi telegram, app.trading.account.auth.AuthAccess auth) {
+    this.telegram = telegram;
+    this.auth = auth;
     this.mapper = mapper;
     this.storage = storage;
     this.notify = notify;
@@ -88,6 +92,8 @@ class KycService {
       keys.put(img.field(), key);
     }
     mapper.updateKeys(row.id, keys.get("front"), keys.get("back"), keys.get("selfie"));
+    // TG 客户第一次提交 KYC 是安全事件（03 页场景 H：盗号的人用盗来的证件做 KYC）：24 小时不能提现、作废全部网页会话
+    if (last == null && telegram.byUserId(userId).isPresent()) auth.securityEvent(userId, app.trading.account.api.SecurityEvent.KYC_FIRST);
   }
 
   @Transactional

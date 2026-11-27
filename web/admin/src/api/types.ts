@@ -210,6 +210,19 @@ export interface CustomerDetail extends CustomerSummary {
   ledger: LedgerEntry[];
   /** 最近 20 条已平仓记录（部分平仓的标出原持仓编号） */
   closedPositions: ClosedPosition[];
+  /** 第 4 批：提现安全（提现密码、提现冻结） */
+  withdrawSafety?: WithdrawSafety | null;
+}
+
+/** 冻结来源：30 天内提现密码锁 2 次 / 网页申请冻结 / 机器人里自己冻结 / 换绑争议 / 换绑证明阶段 */
+export type WithdrawFreezeSource = 'pin_locks' | 'web_request' | 'bot_self' | 'dispute' | 'recovery';
+
+export interface WithdrawSafety {
+  pinSet: boolean;
+  pinLockedUntil: string | null;
+  withdrawFrozen: boolean;
+  frozenSource: WithdrawFreezeSource | null;
+  frozenAt: string | null;
 }
 
 /** 后台编辑客户资料（v2 E1）：只有这 5 项；邮箱不能改，状态只能用冻结 / 解冻改 */
@@ -323,6 +336,13 @@ export interface Withdrawal {
   payoutStatus?: PayoutStatus | null;
   payoutReason?: string | null;
   statusAt?: string | null;
+  /** 第 4 批：tg 按 TG 规则（一律人工审核）；web 原规则 */
+  ruleType?: 'web' | 'tg';
+  /** 提交入口：web 网页登录的会话 / bot 从机器人进入的会话 */
+  source?: 'web' | 'bot';
+  /** 没邮箱的 TG 客户的首笔：通过前要人工核实（勾"已核实首笔"） */
+  firstCheck?: boolean;
+  firstChecked?: boolean;
 }
 
 /** 钱包提供方那边的付款状态：提交中 / 待放款审核 / 已批准、已广播（放款中）/ 成功 / 失败、驳回、取消 / 未知（查不清，不退款） */

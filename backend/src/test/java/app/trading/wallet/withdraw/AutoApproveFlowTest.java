@@ -64,6 +64,7 @@ class AutoApproveFlowTest {
   @Autowired LedgerApi ledger;
   @Autowired SystemConfig config;
   @Autowired JdbcTemplate jdbc;
+  @Autowired org.springframework.data.redis.core.StringRedisTemplate redis;
   @Autowired Clock clock;
   @MockitoBean MailApi mail;
   @MockitoBean HotWalletApi hot;
@@ -191,6 +192,27 @@ class AutoApproveFlowTest {
     assertThat(row(w.id).get("review_mode")).isEqualTo("MANUAL");
     assertThat(jdbc.queryForObject("SELECT COALESCE(SUM(amount), 0) FROM wallet_withdrawal WHERE review_mode = 'AUTO' AND auto_approved_at > ?", BigDecimal.class,
         NOW.minusDays(1))).as("不占 R2 / R3 额度").isEqualByComparingTo("0");
+  }
+
+  @Test
+  void TG规则一律人工_规则全部通过也不自动通过() {
+    save(true, Map.of("R8.enabled", "false"));
+    long[] c = customer("1000");
+    app.trading.support.PinTestSupport.makeTg(jdbc, c[0]);
+    app.trading.support.PinTestSupport.setPin(jdbc, c[0], "135790");
+    config.setBySystem(ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "true", java.time.LocalDateTime.now());
+    try {
+      WithdrawalRow w = withdraws.submit(c[0], String.valueOf(c[1]), "100", app.trading.support.PinTestSupport.input(redis, c[0], "135790"), "BOT");
+      coolDown();
+      withdraws.advance();
+      assertThat(checks(w.id)).as("判定照记（后台参考）").containsExactly("PRECHECK AUTO_APPROVED", "FINAL AUTO_APPROVED");
+      assertThat(status(w.id)).isEqualTo("REVIEWING");
+      assertThat(events(w.id)).contains("COOLING→REVIEWING system");
+      assertThat(jdbc.queryForObject("SELECT note FROM wallet_withdraw_event WHERE withdrawal_id = ? AND to_status = 'REVIEWING'", String.class, w.id))
+          .contains("TG 规则，一律人工审核");
+    } finally {
+      config.setBySystem(ConfigKey.TELEGRAM_WITHDRAW_ENABLED, "false", java.time.LocalDateTime.now());
+    }
   }
 
   @Test

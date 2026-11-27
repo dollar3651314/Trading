@@ -56,6 +56,20 @@ class AuthService {
     mapper.insertSecurityEvent(userId, type, LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));
   }
 
+  /**
+   * 安全事件（第 4 批）：记一条，并作废这个账户的全部网页会话（含 BOT 会话）。机器人那边授权时间早于这次事件，要先「重新授权」才能继续，
+   * 一键登录也会拒绝（TelegramWebLogin），所以客户回机器人重新授权、再点「打开交易」。
+   */
+  @Transactional
+  void securityEventAndLogout(long userId, String type) {
+    securityEvent(userId, type);
+    sessions.revokeAll(userId, null);
+  }
+
+  java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since) {
+    return mapper.securityEventsSince(userId, since);
+  }
+
   LocalDateTime registeredAt(long userId) {
     LocalDateTime t = mapper.registeredAt(userId);
     if (t == null) throw new BizException("USER_NOT_FOUND", "用户不存在");

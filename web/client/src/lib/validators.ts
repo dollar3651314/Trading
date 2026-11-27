@@ -243,9 +243,18 @@ export function validateWithdraw(
     if (cmp(amt, dec(info.maxPerTx)) > 0) push(errs, 'amount', 'validation.withdrawMaxPerTx');
     // 当日累计必须严格小于上限
     if (cmp(add(dec(info.usedToday), amt), dec(info.dailyLimit)) >= 0) push(errs, 'amount', 'validation.withdrawDaily');
+    // TG 客户（第 4 批）：每天额度网页和机器人合并，正好用满可以（服务器在 ledger.lock 事务里同样按 ≤ 判）
+    else if (info.tg && cmp(add(dec(info.usedToday), amt), dec(info.tg.dailyLimit)) > 0) push(errs, 'amount', 'validation.withdrawTgDaily');
     if (cmp(amt, dec(info.available)) > 0) push(errs, 'amount', 'validation.withdrawBalance');
   }
   return errs;
+}
+
+/** TG 客户今天还能提多少（额度 − 已用，网页和机器人合并；不是 TG 客户时为空） */
+export function tgRemaining(info: WithdrawInfo): Dec | null {
+  if (!info.tg) return null;
+  const r = sub(dec(info.tg.dailyLimit), dec(info.usedToday));
+  return cmp(r, ZERO) < 0 ? ZERO : r;
 }
 
 /** 今日剩余额度（严格小于上限，所以展示为 上限 − 已用） */

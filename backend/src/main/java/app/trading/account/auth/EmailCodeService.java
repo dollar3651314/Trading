@@ -17,7 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class EmailCodeService {
 
-  enum Purpose { REGISTER, RESET_PASSWORD }
+  /** RESET_PIN：忘记提现密码时发到绑定的邮箱（TG 机器人第 4 批） */
+  enum Purpose { REGISTER, RESET_PASSWORD, RESET_PIN }
 
   private final AuthMapper mapper;
   private final MailApi mail;

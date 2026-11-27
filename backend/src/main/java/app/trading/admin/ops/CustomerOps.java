@@ -50,7 +50,12 @@ class CustomerOps {
   record Detail(long id, String name, String email, String nationality, String status, String kycStatus, String balance, int openPositions,
       String registeredAt, String lastLoginAt, String lastLoginIp, String lastLoginIpAt, String firstName, String middleName, String lastName,
       String birthDate, String frozenReason, Kyc kyc, Account account, List<PositionView> positions, List<LedgerView> ledger,
-      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername) {}
+      List<TradingOps.ClosedView> closedPositions, String telegramId, String telegramUsername, WithdrawSafety withdrawSafety) {}
+
+  /**
+   * 提现安全（TG 机器人第 4 批）：提现密码设了没有、锁到什么时候、提现有没有被冻结（来源：PIN_LOCKS 30 天锁 2 次 / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY）
+   */
+  record WithdrawSafety(boolean pinSet, String pinLockedUntil, boolean withdrawFrozen, String frozenSource, String frozenAt) {}
 
   /** 客户详情里最近的已平仓记录条数（部分平仓拆出来的记录标出原持仓编号） */
   static final int RECENT_CLOSED = 20;
@@ -72,9 +77,11 @@ class CustomerOps {
   private final AdjustMapper adjusts;
   private final Audit audit;
   private final Clock clock;
+  private final app.trading.account.api.WithdrawPinApi pins;
 
   CustomerOps(CustomerAdminApi customers, TradingAdminApi trading, LedgerApi ledger, FundsApi funds, SystemConfig config, AdminNames names,
-      AdjustMapper adjusts, Audit audit, Clock clock) {
+      AdjustMapper adjusts, Audit audit, Clock clock, app.trading.account.api.WithdrawPinApi pins) {
+    this.pins = pins;
     this.customers = customers;
     this.trading = trading;
     this.ledger = ledger;
@@ -144,7 +151,25 @@ class CustomerOps {
     LocalDate birth = d.birthDate();
     return new Detail(c.id(), c.name(), c.email(), c.nationality(), apiStatus(c.status()), apiStatus(c.kycStatus()), Ops.money(m.balance()), positions.size(),
         Ops.time(c.registeredAt()), Ops.time(c.lastLoginAt()), d.lastLoginIp(), Ops.time(d.lastLoginIpAt()), d.firstName(), d.middleName(), d.lastName(),
-        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername());
+        birth == null ? null : birth.toString(), d.frozenReason(), kyc, account, positions, lines, closed, tgId(c), c.telegramUsername(), safety(c.id()));
+  }
+
+  private WithdrawSafety safety(long userId) {
+    var s = pins.status(userId);
+    return new WithdrawSafety(s.set(), Ops.time(s.lockedUntil()), s.withdrawFrozen(), s.frozenSource() == null ? null : s.frozenSource().toLowerCase(),
+        Ops.time(s.frozenAt()));
+  }
+
+  /** 人工解冻提现（第 4 批：冻结提现只能人工解冻；高危、必须填原因、写审计）。没冻结时报 NOT_FROZEN */
+  @Transactional
+  void unfreezeWithdraw(long id, String reason) {
+    String r = Audit.requireReason(reason);
+    audit.run("customer.withdraw_unfreeze", String.valueOf(id), true, r, () -> {
+      customers.customer(id).orElseThrow(() -> new BizException("NOT_FOUND", "客户不存在"));
+      String was = pins.unfreezeWithdraw(id);
+      if (was == null) throw new BizException("NOT_FROZEN", "这个客户的提现没有被冻结");
+      return Audit.Change.of(null, Map.of("withdrawFrozen", was.toLowerCase()), Map.of("withdrawFrozen", "no"));
+    });
   }
 
   /**

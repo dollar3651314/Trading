@@ -377,3 +377,23 @@ button.menu-item { width: 100%; text-align: left; font-size: inherit; background
 /* ---------- 第 6 条：部分平仓 ---------- */
 .pc-lots { margin: 10px 0 6px; }
 .pc-lots .stepper input { text-align: left; padding: 0 8px; }
+
+/* 提现密码随机键盘（components/PinPad.tsx，第 4 批） */
+.pinpad { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.pinpad-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 14px; }
+.pinpad-dots { display: inline-flex; gap: 8px; }
+.pinpad-dots i { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--s1); }
+.pinpad-dots i.on { background: var(--primary); border-color: var(--primary); }
+.pinpad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
+.pinpad-grid.loading { min-height: 200px; background: var(--s3); border-radius: var(--r-md); }
+.pinpad-key { min-height: 48px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--s1); color: var(--text); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; touch-action: manipulation; }
+.pinpad-key.fn { font-size: 14px; font-weight: 500; color: var(--muted); background: var(--s2); }
+.pinpad-key:active:not(:disabled) { background: var(--cyan-soft); }
+.pinpad-key:disabled { opacity: 0.5; cursor: default; }
+.pinpad-key:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.pinpad-note { margin: 0; }
+.pin-modes { display: flex; gap: 8px; flex-wrap: wrap; }
+.pin-page { display: flex; flex-direction: column; gap: 14px; }
+.pin-form { display: flex; flex-direction: column; gap: 18px; }
+.pin-form > p, .pin-page > p { margin: 0; }
+.tg-rules { display: flex; flex-direction: column; gap: 6px; }

@@ -13,6 +13,7 @@ import {
   type AuditValue,
   type CurrentAdmin,
   type CustomerDetail,
+  type WithdrawSafety,
   type CustomerProfileInput,
   type CustomerQuery,
   type CustomerSummary,
@@ -296,8 +297,24 @@ export function getCustomer(id: number): Promise<CustomerDetail> {
       positions,
       ledger: ledgerFor(c, false),
       closedPositions: db.closedPositions.filter((p) => p.customerId === id).slice(0, 20),
+      withdrawSafety: c.telegramId ? (withdrawSafety.get(id) ?? { pinSet: false, pinLockedUntil: null, withdrawFrozen: false, frozenSource: null, frozenAt: null }) : null,
     };
   });
+}
+
+/** 第 4 批：TG 客户的提现安全（原型里只放在内存，刷新即恢复） */
+export const withdrawSafety = new Map<number, WithdrawSafety>();
+
+export function unfreezeCustomerWithdraw(id: number, reason: string): Promise<CustomerDetail> {
+  return mutate(() => {
+    requirePerm('customer:freeze');
+    const r = requireReason(reason);
+    const s = withdrawSafety.get(id);
+    if (!s?.withdrawFrozen) throw new ApiError('errors.notWithdrawFrozen');
+    const was = s.frozenSource;
+    withdrawSafety.set(id, { ...s, withdrawFrozen: false, frozenSource: null, frozenAt: null });
+    audit('customer.withdraw_unfreeze', String(id), true, r, { withdrawFrozen: was }, { withdrawFrozen: 'no' });
+  }).then(() => getCustomer(id));
 }
 
 /** 详情类接口：空数据场景下返回的明细列表为空 */
@@ -598,12 +615,15 @@ export function getWithdrawal(id: string): Promise<WithdrawalDetail> {
   });
 }
 
-export function approveWithdrawal(id: string): Promise<Withdrawal> {
+export function approveWithdrawal(id: string, firstChecked = false): Promise<Withdrawal> {
   return mutate(() => {
     requirePerm('withdrawal:review');
     const w = db.withdrawals.find((x) => x.id === id);
     if (!w) throw new ApiError('errors.notFound');
     if (w.status !== 'pending') throw new ApiError('errors.stateChanged');
+    // 第 4 批：首笔核实单没勾"已核实"不能通过（和后端 FIRST_CHECK_REQUIRED 一致）
+    if (w.firstCheck && !w.firstChecked && !firstChecked) throw new ApiError('errors.firstCheckRequired');
+    if (w.firstCheck && firstChecked) w.firstChecked = true;
     const large = compareAmounts(w.amount, db.systemConfigs.find((c) => c.key === 'withdraw.largeThreshold')!.value) >= 0;
     w.status = large ? 'delayed' : 'broadcasting';
     w.delayRemainingMinutes = large ? 360 : null;
