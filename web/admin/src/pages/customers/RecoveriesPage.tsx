@@ -187,6 +187,32 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
           </PermButton>
         </div>
       ) : null}
+      <div className="mini" role="group" aria-label={t('recoveries.deposits')}>
+        <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{t('recoveries.deposits')}</div>
+        <div className="muted">{t('recoveries.depositsHint')}</div>
+        {data.deposits?.length ? (
+          data.deposits.map((d, i) => (
+            <div className="row" key={i}>
+              <span>
+                {shortTime(d.time)} · {d.chain}
+                {d.explorerUrl ? (
+                  <>
+                    {' · '}
+                    <a href={d.explorerUrl} target="_blank" rel="noreferrer noopener" title={d.txHash ?? ''}>
+                      {t('withdrawals.viewTx')}
+                    </a>
+                  </>
+                ) : null}
+              </span>
+              <span className="num up">+{d.amount}</span>
+            </div>
+          ))
+        ) : (
+          <div className="row">
+            <span>{t('common.none')}</span>
+          </div>
+        )}
+      </div>
       <div className="mini">
         <div style={{ fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{t('recoveries.events')}</div>
         {data.events.map((e, i) => (

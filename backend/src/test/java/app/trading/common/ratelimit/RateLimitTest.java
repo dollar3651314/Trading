@@ -193,6 +193,8 @@ class RateLimitTest {
         // 第 4 批 4b：找回申请（原 TG 输提现密码、撤销）、没邮箱申请人工重设提现密码
         "[POST] [/api/me/recoveries/{id}/object]",
         "[POST] [/api/me/recoveries/{id}/revoke]",
-        "[POST] [/api/me/withdraw-pin/forgot/manual]");
+        "[POST] [/api/me/withdraw-pin/forgot/manual]",
+        // 第 4 批 4c：机器人里自己冻结的自助解冻
+        "[POST] [/api/me/withdraw-freeze/self-unfreeze]");
   }
 }

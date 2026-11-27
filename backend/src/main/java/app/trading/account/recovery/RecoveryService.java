@@ -272,6 +272,53 @@ class RecoveryService implements RecoveryApi {
     return out[0] == null ? object(userId, recoveryId) : out[0];
   }
 
+  // ---------- 第 4 批 4c ----------
+
+  @Override
+  public IdentityCheck checkIdentity(long customerNo, String name, String docLast4) {
+    RecoveryMapper.Identity id = mapper.identity(customerNo);
+    if (id == null) return IdentityCheck.NOT_FOUND;
+    if (!"APPROVED".equals(id.kycStatus())) return IdentityCheck.NO_KYC;
+    return lastFourMatches(id.docNumber(), docLast4) && nameMatches(id, name) ? IdentityCheck.KYC_MATCH : IdentityCheck.KYC_MISMATCH;
+  }
+
+  @Override
+  public boolean hasOpen(long userId) {
+    return mapper.openCount(userId) > 0;
+  }
+
+  @Override
+  public Long adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason) {
+    return tx.execute(st -> {
+      Long old = telegram.byUserId(userId).map(TelegramAccountApi.TgAccount::telegramId).orElse(null);
+      if (newTelegramId == null && old == null) throw new BizException("NOT_TG_ACCOUNT", "这个客户没有 Telegram 关联");
+      if (newTelegramId != null) {
+        var other = telegram.byTelegramId(newTelegramId);
+        if (other.isPresent()) throw new BizException("TELEGRAM_TAKEN", other.get().userId() == userId ? "已经关联的就是这个 Telegram" : "这个 Telegram 已经关联了别的客户");
+      }
+      // 安全事件：作废全部网页会话（含 BOT 会话）；之后才改关联
+      auth.securityEvent(userId, SecurityEvent.REBIND);
+      if (newTelegramId == null) {
+        telegram.unlink(userId);
+      } else if (old == null) {
+        telegram.link(userId, newTelegramId, newUsername, now());
+      } else {
+        telegram.rebind(userId, newTelegramId, newUsername, now());
+        pins.clearPin(userId);
+        events.publishEvent(new AccountRecovered(userId, "ADMIN_RELINK", 0));
+      }
+      pins.freezeWithdraw(userId, "ADMIN", newTelegramId == null ? "后台解除了 Telegram 关联" : "后台更换了 Telegram 关联");
+      notify.toUser(userId, "TELEGRAM_LINK_CHANGED", Map.of("userId", String.valueOf(userId), "actionZh", newTelegramId == null ? "解除" : "更换",
+          "actionEn", newTelegramId == null ? "removed" : "changed"));
+      if (old != null) {
+        long o = old;
+        toApplicant(o, "你的 Telegram 已经不再关联客户号 #" + userId + "（客服操作）。如果不是你本人申请的，请马上联系客服。");
+      }
+      if (newTelegramId != null) toApplicant(newTelegramId, "客服已把客户号 #" + userId + " 关联到这个 Telegram。发 /start 进入；提现已冻结，人工核对后解冻。");
+      return old;
+    });
+  }
+
   // ---------- 后台 ----------
 
   @Override

@@ -117,8 +117,14 @@ class RecoveryFlowTest {
     return mapper.byId(id);
   }
 
-  String freeze(long uid) {
-    return pins.status(uid).frozenSource();
+  /** 4b 复审 🟡：冻结按来源记录，判断"有没有这个来源"要用 frozenBy（frozenSource 只给最早的那个） */
+  boolean frozenBy(long uid, String source) {
+    return pins.status(uid).frozenBy(source);
+  }
+
+  /** 全部冻结来源 */
+  List<String> sources(long uid) {
+    return pins.status(uid).freezes().stream().map(f -> f.source()).toList();
   }
 
   long session(long uid) {
@@ -168,7 +174,7 @@ class RecoveryFlowTest {
     assertThat(r.status).isEqualTo("OBJECTION");
     assertThat(r.objectionEndsAt).isEqualTo(r.createdAt.plusHours(48));
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_REQUESTED'", Integer.class, uid)).isPositive();
-    assertThat(freeze(uid)).as("反对期里不冻结").isNull();
+    assertThat(sources(uid)).as("反对期里不冻结").isEmpty();
     assertThat(recovery.applyRebind(newTg(), "y", uid, "张 三", last4(uid))).isEqualTo(ApplyResult.ACCEPTED);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_recovery WHERE user_id = ?", Integer.class, uid)).as("同时只能 1 份").isEqualTo(1);
   }
@@ -206,7 +212,7 @@ class RecoveryFlowTest {
     time().advance(Duration.ofHours(1).plusSeconds(1));
     recovery.objectionEnded(id);
     assertThat(row(id).status).isEqualTo("PROOF");
-    assertThat(freeze(uid)).as("证明阶段冻结提现").isEqualTo("RECOVERY");
+    assertThat(frozenBy(uid, "RECOVERY")).as("证明阶段冻结提现").isTrue();
     verify(sender).sendToChat(eq(newTg), contains("48 小时反对期已过"), eq(TelegramSender.Priority.HIGH));
 
     assertThat(code(() -> recovery.approve(id, 1L, " "))).isEqualTo("PROOF_NOTE_REQUIRED");
@@ -227,7 +233,7 @@ class RecoveryFlowTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM wallet_whitelist WHERE user_id = ?", Integer.class, uid)).as("白名单清空").isZero();
     assertThat(jdbc.queryForList("SELECT type FROM account_security_event WHERE user_id = ?", String.class, uid)).contains("REBIND");
     assertThat(revoked(s)).as("安全事件作废全部网页会话").isTrue();
-    assertThat(freeze(uid)).as("申请结束解除 RECOVERY 冻结").isNull();
+    assertThat(sources(uid)).as("申请结束解除 RECOVERY 冻结").isEmpty();
     verify(sender).sendToChat(eq(oldTg), contains("已按找回申请"), eq(TelegramSender.Priority.HIGH));
     assertThat(jdbc.queryForList("SELECT channel FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_EXECUTED'", String.class, uid))
         .as("换绑完成也发到原账户的邮箱").contains("EMAIL");
@@ -249,7 +255,7 @@ class RecoveryFlowTest {
     assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定").contains("提现冻结保持不变");
     assertThat(row(id).status).as("撤销不作废申请").isEqualTo("APPROVED");
     assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
-    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    assertThat(frozenBy(uid, "RECOVERY")).isTrue();
     verify(mail).send(eq("ops@example.com"), eq("OPS_RECOVERY_REVOKE_REQ"), anyMap());
     time().advance(Duration.ofHours(25));
     recovery.execute(id);
@@ -266,10 +272,10 @@ class RecoveryFlowTest {
     long id2 = toProof(uid2, newTg());
     recovery.approve(id2, 1L, "视频");
     recovery.revokeByOwner(uid2, id2);
-    assertThat(freeze(uid2)).isEqualTo("RECOVERY");
+    assertThat(frozenBy(uid2, "RECOVERY")).isTrue();
     recovery.revokeByAdmin(id2, 1L, "视频核对，申请人不是本人");
     assertThat(row(id2).status).isEqualTo("CANCELLED");
-    assertThat(freeze(uid2)).isNull();
+    assertThat(sources(uid2)).isEmpty();
   }
 
   /** 4b 复审：Amos 维持过一次以后，原 TG 再撤销只记经过、发告警，不再暂停执行（防止反复撤销拖住申请） */
@@ -287,7 +293,7 @@ class RecoveryFlowTest {
     assertThat(row(id).revokeRequestedBy).as("不再记撤销请求").isNull();
     assertThat(actions(id)).endsWith("KEEP", "REVOKE_AFTER_KEEP");
     verify(mail).send(eq("ops@example.com"), eq("OPS_RECOVERY_REVOKE_REQ"), org.mockito.ArgumentMatchers.argThat(m -> m.get("who").contains("维持过一次")));
-    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    assertThat(frozenBy(uid, "RECOVERY")).isTrue();
     time().advance(Duration.ofHours(25));
     assertThat(mapper.executeDue(now())).contains(id);
     recovery.execute(id);
@@ -302,7 +308,7 @@ class RecoveryFlowTest {
     assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定");
     assertThat(row(id).status).isEqualTo("PROOF");
     assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
-    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    assertThat(frozenBy(uid, "RECOVERY")).isTrue();
     assertThat(code(() -> recovery.approve(id, 1L, "视频"))).isEqualTo("RECOVERY_REVOKE_PENDING");
     recovery.keep(id, 1L, "视频核对后继续审核");
     recovery.approve(id, 1L, "视频");
@@ -347,7 +353,7 @@ class RecoveryFlowTest {
     long id = toProof(uid, newTg);
     recovery.reject(id, 1L, "视频对不上");
     assertThat(row(id).status).isEqualTo("REJECTED");
-    assertThat(freeze(uid)).isNull();
+    assertThat(sources(uid)).isEmpty();
     long other = customer(null);
     assertThat(recovery.applyRebind(newTg, "x", other, "张三", last4(other))).isEqualTo(ApplyResult.BANNED);
     verify(sender).sendToChat(eq(newTg), contains("没有通过"), eq(TelegramSender.Priority.HIGH));
@@ -376,35 +382,35 @@ class RecoveryFlowTest {
     assertThat(recovery.object(uid, id)).startsWith("已记下");
     assertThat(row(id).status).as("争议直接转加严人工").isEqualTo("PROOF");
     assertThat(row(id).disputed).isTrue();
-    assertThat(freeze(uid)).isNull();
+    assertThat(sources(uid)).isEmpty();
     recovery.objectWithPin(uid, id, PinTestSupport.input(redis, uid, PIN));
     assertThat(row(id).disputePinOk).isTrue();
     time().advance(Duration.ofMinutes(31));
     recovery.disputeGraceEnded(id);
-    assertThat(freeze(uid)).as("输对了不冻结").isNull();
+    assertThat(sources(uid)).as("输对了不冻结").isEmpty();
 
     long uid2 = customer(null);
     long id2 = apply(uid2, newTg());
     recovery.object(uid2, id2);
     time().advance(Duration.ofMinutes(31));
     recovery.disputeGraceEnded(id2);
-    assertThat(freeze(uid2)).as("30 分钟没输").isEqualTo("DISPUTE");
+    assertThat(frozenBy(uid2, "DISPUTE")).as("30 分钟没输").isTrue();
     // 冻结之后再输对：解除这次争议冻结
     recovery.objectWithPin(uid2, id2, PinTestSupport.input(redis, uid2, PIN));
-    assertThat(freeze(uid2)).isNull();
+    assertThat(sources(uid2)).isEmpty();
 
     long uid3 = customer(null);
     long id3 = apply(uid3, newTg());
     recovery.object(uid3, id3);
     assertThat(code(() -> recovery.objectWithPin(uid3, id3, PinTestSupport.input(redis, uid3, "000111")))).isEqualTo("PIN_WRONG");
-    assertThat(freeze(uid3)).as("输错冻结").isEqualTo("DISPUTE");
+    assertThat(frozenBy(uid3, "DISPUTE")).as("输错冻结").isTrue();
     assertThat(actions(id3)).containsExactly("APPLY", "OBJECT", "PIN_WRONG", "DISPUTE_FREEZE");
 
     long uid4 = customer(null);
     long id4 = apply(uid4, newTg());
     recovery.object(uid4, id4);
     recovery.freezeNow(uid4, id4);
-    assertThat(freeze(uid4)).as("选了直接冻结").isEqualTo("DISPUTE");
+    assertThat(frozenBy(uid4, "DISPUTE")).as("选了直接冻结").isTrue();
     assertThat(code(() -> recovery.objectWithPin(uid4 + 1, id4, PinTestSupport.input(redis, uid4 + 1, PIN)))).as("别人的申请").isEqualTo("NOT_FOUND");
   }
 
@@ -442,7 +448,7 @@ class RecoveryFlowTest {
     recovery.revokeByAdmin(id, 1L, "视频核对，申请人不是本人");
     assertThat(row(id).status).isEqualTo("CANCELLED");
     assertThat(row(id).closedBy).isEqualTo("admin:1");
-    assertThat(freeze(uid)).as("申请结束解除争议冻结").isNull();
+    assertThat(sources(uid)).as("申请结束解除争议冻结").isEmpty();
   }
 
   // ---------- 没邮箱忘记提现密码 ----------
@@ -456,7 +462,7 @@ class RecoveryFlowTest {
     long id = recovery.applyPinReset(uid);
     assertThat(row(id).status).isEqualTo("PROOF");
     assertThat(code(() -> recovery.applyPinReset(uid))).isEqualTo("RECOVERY_OPEN");
-    assertThat(freeze(uid)).isNull();
+    assertThat(sources(uid)).isEmpty();
     LocalDateTime at = recovery.approve(id, 1L, "视频共享 App 提币记录");
     assertThat(at).isEqualTo(now().plusHours(48));
     time().advance(Duration.ofHours(47));
@@ -487,12 +493,12 @@ class RecoveryFlowTest {
     recovery.approve(id, 1L, "视频");
     time().advance(Duration.ofHours(49));
     recovery.execute(id);
-    assertThat(freeze(uid)).isNull();
+    assertThat(sources(uid)).isEmpty();
   }
 
   @Test
   void 姓名和证件号后4位的比对() {
-    var id = new RecoveryMapper.Identity("San", "", "Zhang", "APPROVED", "E12345678");
+    var id = new RecoveryMapper.Identity(1L, "San", "", "Zhang", "APPROVED", "E12345678");
     assertThat(RecoveryService.nameMatches(id, "zhang san")).isTrue();
     assertThat(RecoveryService.nameMatches(id, "San Zhang")).isTrue();
     assertThat(RecoveryService.nameMatches(id, "Li Si")).isFalse();

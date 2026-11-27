@@ -71,7 +71,7 @@ class CustomerOps {
   record FreezeView(String source, String reason, String at) {}
 
   /** 能在后台单独解除的冻结来源（小写），空 = 全部 */
-  static final java.util.Set<String> SOURCES = java.util.Set.of("pin_locks", "web_request", "bot_self", "dispute", "recovery");
+  static final java.util.Set<String> SOURCES = java.util.Set.of("pin_locks", "web_request", "bot_self", "dispute", "recovery", "admin");
 
   /** 客户详情里最近的已平仓记录条数（部分平仓拆出来的记录标出原持仓编号） */
   static final int RECENT_CLOSED = 20;
@@ -95,6 +95,7 @@ class CustomerOps {
   private final Clock clock;
   private final app.trading.account.api.WithdrawPinApi pins;
   private final AdminAuthService auth;
+  private final app.trading.account.api.RecoveryApi recovery;
   private final app.trading.wallet.api.WithdrawAdminApi withdraws;
   private final MailApi mail;
   private final AlertProperties alerts;
@@ -104,7 +105,8 @@ class CustomerOps {
 
   CustomerOps(CustomerAdminApi customers, TradingAdminApi trading, LedgerApi ledger, FundsApi funds, SystemConfig config, AdminNames names,
       AdjustMapper adjusts, Audit audit, Clock clock, app.trading.account.api.WithdrawPinApi pins, AdminAuthService auth, MailApi mail,
-      AlertProperties alerts, app.trading.wallet.api.WithdrawAdminApi withdraws) {
+      AlertProperties alerts, app.trading.wallet.api.WithdrawAdminApi withdraws, app.trading.account.api.RecoveryApi recovery) {
+    this.recovery = recovery;
     this.withdraws = withdraws;
     this.pins = pins;
     this.auth = auth;
@@ -222,6 +224,49 @@ class CustomerOps {
         mail.send(email, UNFREEZE_MAIL, p);
       } catch (RuntimeException e) {
         log.error("解除提现冻结的告警邮件写入发送任务失败", e);
+      }
+    }
+  }
+
+  /** 告警邮件模板：后台解除 / 更换 Telegram 关联（迁移 V40） */
+  static final String TG_LINK_MAIL = "OPS_TELEGRAM_LINK";
+
+  /**
+   * 后台"解除关联 / 更换 Telegram 关联"（第 4 批 4c，需求文档 08 页第 5 节）：<b>只有超管</b>（不看权限点）、再输自己的后台密码、原因必填、写审计、
+   * 发告警邮件；账户模块记安全事件（作废全部网页会话含 BOT 会话）、冻结提现（来源 ADMIN，人工核对后解冻），更换时提现密码和白名单清空。
+   * newTelegramId 为空是解除关联
+   */
+  @Transactional
+  void changeTelegram(AdminContext actor, long id, String newTelegramId, String newUsername, String reason, String password) {
+    if (!actor.superAdmin()) throw new BizException("FORBIDDEN", "只有超级管理员可以解除或更换 Telegram 关联");
+    String r = Audit.requireReason(reason);
+    Long tg = null;
+    if (newTelegramId != null && !newTelegramId.isBlank()) {
+      if (!newTelegramId.strip().matches("\\d{1,19}")) throw new ValidationException(List.of(new ValidationException.Field("telegramId", "invalid")));
+      tg = Long.valueOf(newTelegramId.strip());
+    }
+    String uname = newUsername == null || newUsername.isBlank() ? null : newUsername.strip().replaceFirst("^@", "");
+    if (uname != null && !uname.matches("[A-Za-z0-9_]{3,32}")) throw new ValidationException(List.of(new ValidationException.Field("username", "invalid")));
+    auth.requirePassword(actor, password);
+    Long newTg = tg;
+    Long[] old = new Long[1];
+    String action = newTg == null ? "customer.telegram_unlink" : "customer.telegram_relink";
+    audit.run(action, String.valueOf(id), true, r, () -> {
+      customers.customer(id).orElseThrow(() -> new BizException("NOT_FOUND", "客户不存在"));
+      old[0] = recovery.adminChangeTelegram(id, newTg, uname, actor.adminId(), r);
+      return Audit.Change.of(null, Map.of("telegramId", old[0] == null ? "" : String.valueOf(old[0])), Map.of("telegramId", newTg == null ? "" : String.valueOf(newTg)));
+    });
+    String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
+    Map<String, String> p = Map.of("customerId", String.valueOf(id), "actionZh", newTg == null ? "解除" : "更换", "actionEn", newTg == null ? "removed" : "changed",
+        "oldTg", old[0] == null ? "—" : String.valueOf(old[0]), "newTg", newTg == null ? "—" : String.valueOf(newTg), "admin", who, "reason", r, "at",
+        now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString());
+    List<String> to = alerts.recipients();
+    if (to.isEmpty()) log.warn("没有配置告警邮箱（FX_ALERT_EMAILS），客户 {} 的 Telegram 关联变更只记了日志（操作人 {}）", id, who);
+    for (String email : to) {
+      try {
+        mail.send(email, TG_LINK_MAIL, p);
+      } catch (RuntimeException e) {
+        log.error("Telegram 关联变更的告警邮件写入发送任务失败", e);
       }
     }
   }

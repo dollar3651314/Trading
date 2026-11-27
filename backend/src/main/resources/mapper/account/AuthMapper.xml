@@ -62,7 +62,7 @@
   <!-- 冻结提现（只能人工解冻） -->
   <!-- 4b 审查 🔴R2：一个来源一行，有任何一行就是冻结；最早的在前 -->
   <select id="withdrawFreezes" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
-    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId} ORDER BY created_at, source
+    SELECT user_id, source, reason, created_at, release_at FROM account_withdraw_freeze WHERE user_id = #{userId} ORDER BY created_at, source
   </select>
   <insert id="insertWithdrawFreeze">
     INSERT IGNORE INTO account_withdraw_freeze (user_id, source, reason, created_at) VALUES (#{userId}, #{source}, #{reason}, #{at})
@@ -185,4 +185,18 @@
   <update id="rebindTelegram">
     UPDATE account_telegram SET telegram_id = #{telegramId}, username = #{username}, authorized_at = #{at} WHERE user_id = #{userId}
   </update>
+  <!-- 第 4 批 4c：机器人里自己冻结的自助解冻、后台解除 Telegram 关联 -->
+  <update id="setFreezeRelease">
+    UPDATE account_withdraw_freeze SET release_at = #{at} WHERE user_id = #{userId} AND source = #{source} AND release_at IS NULL
+  </update>
+
+  <select id="dueSelfUnfreezes" resultType="long">
+    SELECT user_id FROM account_withdraw_freeze WHERE source = 'BOT_SELF' AND release_at IS NOT NULL AND release_at &lt;= #{now}
+  </select>
+
+  <delete id="deleteDueSelfUnfreeze">
+    DELETE FROM account_withdraw_freeze WHERE user_id = #{userId} AND source = 'BOT_SELF' AND release_at IS NOT NULL AND release_at &lt;= #{now}
+  </delete>
+
+  <delete id="deleteTelegram">DELETE FROM account_telegram WHERE user_id = #{userId}</delete>
 </mapper>

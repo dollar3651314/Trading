@@ -44,6 +44,26 @@ public interface RecoveryApi {
   /** 没邮箱的 TG 客户申请人工重设提现密码；返回申请编号 */
   long applyPinReset(long userId);
 
+  /** 第 4 批 4c：核对网页"申请冻结提现"填的本人信息。NO_KYC 时由调用方核对最近一笔充值（金额 + 日期） */
+  enum IdentityCheck {
+    NOT_FOUND,
+    KYC_MATCH,
+    KYC_MISMATCH,
+    NO_KYC
+  }
+
+  IdentityCheck checkIdentity(long customerNo, String name, String docLast4);
+
+  /** 这个客户有没有进行中的找回申请（网页入口"7 天只能冻结 1 次"不受限） */
+  boolean hasOpen(long userId);
+
+  /**
+   * 第 4 批 4c 后台"解除关联 / 更换 Telegram 关联"（08 页第 5 节；只有超管、再输后台密码、审计、告警邮件在后台模块）：
+   * 安全事件（作废全部网页会话含 BOT 会话）+ 冻结提现（来源 ADMIN，人工核对后解冻）；更换时新 TG 不能已经绑了别的客户，提现密码、白名单清空。
+   * newTelegramId 为空是解除关联。返回原来的 TG 用户编号（没有时为空）
+   */
+  Long adminChangeTelegram(long userId, Long newTelegramId, String newUsername, long adminId, String reason);
+
   // ---------- 后台（权限、再输密码、审计、告警邮件在后台模块） ----------
 
   record Event(String action, String actor, String note, LocalDateTime at) {}

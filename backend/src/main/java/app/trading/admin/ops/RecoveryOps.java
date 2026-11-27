@@ -39,7 +39,11 @@ class RecoveryOps {
 
   record EventView(String action, String actor, String note, String at) {}
 
-  record Detail(View recovery, List<EventView> events) {}
+  /**
+   * deposits（第 4 批 4c，KYC 核来源，08 页第 0 节）：这个客户最近 10 笔充值，带交易哈希和区块浏览器链接，审核员按它查付款地址、判断"合格来源地址"
+   * （早于申请 30 天以上并且早于最近一次安全事件、没有交易所标签、不是多人共用、最近 30 天没出现新的付款地址）
+   */
+  record Detail(View recovery, List<EventView> events, List<FundsOps.Recent> deposits) {}
 
   private final RecoveryApi recovery;
   private final CustomerAdminApi customers;
@@ -49,7 +53,11 @@ class RecoveryOps {
   private final MailApi mail;
   private final AlertProperties alerts;
 
-  RecoveryOps(RecoveryApi recovery, CustomerAdminApi customers, AdminAuthService auth, AdminNames names, Audit audit, MailApi mail, AlertProperties alerts) {
+  private final app.trading.wallet.api.WalletAdminApi wallet;
+
+  RecoveryOps(RecoveryApi recovery, CustomerAdminApi customers, AdminAuthService auth, AdminNames names, Audit audit, MailApi mail, AlertProperties alerts,
+      app.trading.wallet.api.WalletAdminApi wallet) {
+    this.wallet = wallet;
     this.recovery = recovery;
     this.customers = customers;
     this.auth = auth;
@@ -66,8 +74,11 @@ class RecoveryOps {
 
   Detail detail(long id) {
     RecoveryApi.Detail d = recovery.detail(id).orElseThrow(() -> new BizException("NOT_FOUND", "申请不存在"));
+    var funds = wallet.customerFunds(d.recovery().userId(), 10);
     return new Detail(views(List.of(d.recovery())).getFirst(),
-        d.events().stream().map(e -> new EventView(e.action().toLowerCase(), e.actor(), e.note(), Ops.time(e.at()))).toList());
+        d.events().stream().map(e -> new EventView(e.action().toLowerCase(), e.actor(), e.note(), Ops.time(e.at()))).toList(),
+        funds.recentDeposits().stream().map(x -> new FundsOps.Recent(Ops.time(x.creditedAt() == null ? x.detectedAt() : x.creditedAt()), x.chain(),
+            Ops.money(x.amount()), x.txHash(), FundsOps.explorer(x.chain(), x.txHash()))).toList());
   }
 
   Detail approve(AdminContext actor, long id, String note, String password) {

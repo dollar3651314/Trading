@@ -60,6 +60,8 @@ export type ApiErrorReason =
   | 'recoveryNotDisputed'
   | 'hasEmail'
   | 'notTgAccount'
+  | 'captchaInvalid'
+  | 'notSelfFrozen'
   | OrderRejectReason;
 
 export class ApiError extends Error {
@@ -126,6 +128,9 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   RECOVERY_NOT_DISPUTED: 'recoveryNotDisputed',
   HAS_EMAIL: 'hasEmail',
   NOT_TG_ACCOUNT: 'notTgAccount',
+  // 申请冻结提现、自助解冻（第 4 批 4c）
+  CAPTCHA_INVALID: 'captchaInvalid',
+  NOT_SELF_FROZEN: 'notSelfFrozen',
   USER_FROZEN: 'accountFrozen',
   FORBIDDEN: 'forbidden',
   LOGIN_LOCKED: 'accountLocked',

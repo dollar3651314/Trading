@@ -115,7 +115,9 @@
     "tooLong": "is too long",
     "tooManyDecimals": "has too many decimals (no more than the symbol's digits)",
     "unknownVariable": "uses a variable the template does not have",
-    "weak": "is too weak (at least 10 characters with letters and digits)"
+    "weak": "is too weak (at least 10 characters with letters and digits)",
+    "belowFloor": "Below the floor (TB-37: whitelist ≥ 24 h, cooling ≥ 2 h)",
+    "aboveCeiling": "Above the ceiling (TB-37: daily withdrawals ≤ 30,000 USDT)"
   },
   "app": {
     "adminConsole": "Admin"
@@ -167,7 +169,9 @@
       "edit": "Edit customer profile",
       "freeze": "Froze customer",
       "unfreeze": "Unfroze customer",
-      "withdraw_unfreeze": "Lift withdrawal freeze"
+      "withdraw_unfreeze": "Lift withdrawal freeze",
+      "telegram_relink": "Change Telegram link",
+      "telegram_unlink": "Remove Telegram link"
     },
     "holiday": {
       "create": "Added holiday",
@@ -398,7 +402,8 @@
     "withdraw_maxSingle": "Maximum per withdrawal",
     "withdraw_minAmount": "Minimum withdrawal",
     "telegram_withdraw_dailyLimit": "Telegram daily withdrawal quota (no email)",
-    "telegram_withdraw_dailyLimitEmail": "Telegram daily withdrawal quota (with email)"
+    "telegram_withdraw_dailyLimitEmail": "Telegram daily withdrawal quota (with email)",
+    "withdraw_freeze_platformAlertPerHour": "Web withdrawal-freeze requests: alert when more than this many succeed within an hour"
   },
   "customerStatus": {
     "active": "Active",
@@ -478,7 +483,8 @@
         "web_request": "Freeze requested on the web",
         "bot_self": "Customer froze it in the bot",
         "dispute": "Rebind dispute",
-        "recovery": "Rebind verification"
+        "recovery": "Rebind verification",
+        "admin": "Support action (Telegram link changed)"
       },
       "unfreeze": "Unfreeze withdrawals",
       "frozenLine": "Source: {{source}}; frozen at: {{time}}",
@@ -504,6 +510,18 @@
       "confirmRelease": "Resume",
       "confirmCancel": "Cancel and refund",
       "target": "Withdrawal {{id}}: {{amount}} USDT → {{address}}"
+    },
+    "tg": {
+      "relink": "Change Telegram link",
+      "unlink": "Remove link",
+      "superOnly": "Super admins only",
+      "newId": "New Telegram user ID",
+      "newIdRequired": "Enter a numeric Telegram user ID",
+      "newUsername": "New Telegram username (optional)",
+      "impact": "Records a security event (signs out every web session, including bot ones), freezes withdrawals (lifted after a manual check) and emails the alert recipients; changing also clears the PIN and whitelist.",
+      "unlinkImpact": "After removing, the customer has no Telegram link; without an email they cannot sign in until relinked.",
+      "confirmRelink": "Change",
+      "confirmUnlink": "Remove"
     }
   },
   "dashboard": {
@@ -638,7 +656,9 @@
     "recoveryNotPending": "Only pending requests can be handled",
     "recoveryNotOpen": "This request is already closed",
     "recoveryNoRevokeRequest": "There is no pending cancellation request",
-    "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel"
+    "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel",
+    "telegramTaken": "That Telegram account is linked to another customer",
+    "notTgAccount": "This customer has no Telegram link"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -1515,7 +1535,8 @@
         "pin_reset": "Withdrawal PIN reset",
         "kyc_first": "First KYC submission"
       }
-    }
+    },
+    "viewTx": "View on explorer"
   },
   "hotWallet": {
     "address": "Hot wallet address",
@@ -2135,6 +2156,8 @@
     "confirmKeep": "Keep",
     "keepImpact": "Clears the cancellation request; the rebind runs at its scheduled time. Verify the original holder by video first.",
     "keptTitle": "Already kept",
-    "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution."
+    "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution.",
+    "deposits": "Recent deposits (source check)",
+    "depositsHint": "Check the paying address on the explorer. A qualified source address is older than 30 days before the request and older than the last security event, has no exchange label, is not shared (sent to more than 20 addresses in 90 days), and no new paying address appeared in the last 30 days (page 08 section 0)."
   }
 }

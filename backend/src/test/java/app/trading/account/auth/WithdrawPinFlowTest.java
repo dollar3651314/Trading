@@ -286,4 +286,27 @@ class WithdrawPinFlowTest {
     assertThat(mvc.perform(get("/api/me/withdraw-pin").cookie(c)).andReturn().getResponse().getContentAsString())
         .isEqualTo("{\"set\":false,\"lockedUntil\":null,\"withdrawFrozen\":false,\"hasEmail\":false}");
   }
+
+  /** 第 4 批 4c：机器人里自己冻结的（BOT_SELF）在网页输对提现密码，24 小时后自动解冻；只删 BOT_SELF，网页申请的冻结照旧（转人工） */
+  @Test
+  void 自己冻结的输对提现密码24小时后自动解冻_网页申请的冻结照旧() {
+    long uid = tgUser();
+    PinTestSupport.setPin(jdbc, uid, "246813");
+    assertThat(code(() -> api.requestSelfUnfreeze(uid, in(uid, "246813")))).as("没有自己冻结的").isEqualTo("NOT_SELF_FROZEN");
+    api.freezeWithdraw(uid, "BOT_SELF", "客户在机器人里自己冻结");
+    assertThat(code(() -> api.requestSelfUnfreeze(uid, in(uid, "000000")))).isEqualTo("PIN_WRONG");
+    var at = api.requestSelfUnfreeze(uid, in(uid, "246813"));
+    assertThat(at).isEqualTo(java.time.LocalDateTime.now(clock.withZone(java.time.ZoneOffset.UTC)).plusHours(24));
+    assertThat(api.requestSelfUnfreeze(uid, in(uid, "246813"))).as("再申请一次不顺延").isEqualTo(at);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'WITHDRAW_SELF_UNFREEZE'", Integer.class, uid)).isPositive();
+    // 等待期里有人在网页申请冻结：那一行照旧，要人工解冻
+    api.freezeWithdraw(uid, "WEB_REQUEST", "网页申请冻结提现");
+    ((MutableClock) clock).advance(Duration.ofHours(23));
+    api.releaseDueSelfUnfreezes();
+    assertThat(api.status(uid).freezes()).extracting(WithdrawPinApi.Freeze::source).containsExactlyInAnyOrder("BOT_SELF", "WEB_REQUEST");
+    ((MutableClock) clock).advance(Duration.ofHours(1).plusSeconds(1));
+    api.releaseDueSelfUnfreezes();
+    assertThat(api.status(uid).freezes()).extracting(WithdrawPinApi.Freeze::source).containsExactly("WEB_REQUEST");
+    assertThat(api.status(uid).withdrawFrozen()).isTrue();
+  }
 }

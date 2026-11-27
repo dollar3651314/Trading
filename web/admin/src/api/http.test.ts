@@ -54,6 +54,8 @@ describe('错误码映射', () => {
       // 第 4 批 4b：暂停的提现、找回申请
       'WITHDRAW_NOT_HELD', 'WITHDRAW_SENT_BEFORE', 'PROOF_NOTE_REQUIRED', 'RECOVERY_NOT_READY', 'RECOVERY_NOT_PENDING', 'RECOVERY_NOT_OPEN',
       'RECOVERY_NO_REVOKE_REQUEST', 'RECOVERY_REVOKE_PENDING',
+      // 第 4 批 4c：Telegram 关联
+      'TELEGRAM_TAKEN', 'NOT_TG_ACCOUNT',
     ];
     expect(backend.filter((c) => !ERROR_KEYS[c])).toEqual([]);
   });

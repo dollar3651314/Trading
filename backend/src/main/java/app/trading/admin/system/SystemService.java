@@ -39,11 +39,45 @@ class SystemService {
   private final Audit audit;
   private final Clock clock;
 
-  SystemService(SystemMapper mapper, SystemConfig config, Audit audit, Clock clock) {
+  /**
+   * TB-37 资金配置的下限和上限（第 4 批 4c）：白名单生效 ≥ 24 小时、冷静期 ≥ 2 小时、每天提现累计上限 ≤ 30,000（TG 每天额度的上限 2,000 在
+   * {@link ConfigKey} 里）。端到端测试（profile e2e，E2eGuard 保证只在本机和 CI）不受下限限制，主流程要把冷静期、生效时间设成 0
+   */
+  static final Map<ConfigKey, java.math.BigDecimal> FLOORS = Map.of(ConfigKey.WHITELIST_EFFECTIVE_HOURS, java.math.BigDecimal.valueOf(24),
+      ConfigKey.WITHDRAW_COOLING_HOURS, java.math.BigDecimal.valueOf(2));
+  static final Map<ConfigKey, java.math.BigDecimal> CEILINGS = Map.of(ConfigKey.WITHDRAW_DAILY_LIMIT, java.math.BigDecimal.valueOf(30000));
+  /** 改了要发告警邮件的资金配置（TB-37：改值发告警；告警收件地址只在服务器 FX_ALERT_EMAILS） */
+  static final java.util.Set<String> FUNDS_GROUPS = java.util.Set.of("withdraw", "telegram");
+
+  private final boolean e2e;
+  private final app.trading.notification.api.MailApi mail;
+  private final app.trading.common.health.AlertProperties alerts;
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SystemService.class);
+
+  SystemService(SystemMapper mapper, SystemConfig config, Audit audit, Clock clock, org.springframework.core.env.Environment env,
+      app.trading.notification.api.MailApi mail, app.trading.common.health.AlertProperties alerts) {
+    this.e2e = env.acceptsProfiles(org.springframework.core.env.Profiles.of(app.trading.common.e2e.E2eGuard.PROFILE));
+    this.mail = mail;
+    this.alerts = alerts;
     this.mapper = mapper;
     this.config = config;
     this.audit = audit;
     this.clock = clock;
+  }
+
+  /** TB-37：资金配置改值发告警邮件（OPS_ALERT；收件人为空只记日志，写邮件任务失败不影响保存） */
+  private void fundsAlert(AdminContext actor, ConfigKey k, String old, String v, String reason) {
+    String detail = k.key + "：" + (old == null ? "（默认）" : old) + " → " + v + "；操作人 " + actor.username() + "；原因：" + reason;
+    log.warn("资金配置已修改：{}", detail);
+    Map<String, String> p = Map.of("itemZh", "资金配置已修改：" + k.key, "itemEn", "Funds setting changed: " + k.key, "detail",
+        detail + "。如果不是你们安排的修改，请立即改回并检查后台账号。", "since", LocalDateTime.now(clock).toInstant(java.time.ZoneOffset.UTC).toString());
+    for (String email : alerts.recipients()) {
+      try {
+        mail.send(email, "OPS_ALERT", p);
+      } catch (RuntimeException e) {
+        log.error("资金配置修改的告警邮件写入发送任务失败", e);
+      }
+    }
   }
 
   // ---------- 菜单 ----------
@@ -134,6 +168,12 @@ class SystemService {
     return audit.run("config.update", key, true, r, () -> {
       ConfigKey k = ConfigKey.of(key).filter(x -> x.configPage).orElseThrow(() -> new BizException("NOT_FOUND", "配置项不存在"));
       String v = k.normalize(value).orElseThrow(() -> new ValidationException(List.of(new ValidationException.Field("value", "invalid"))));
+      if (!e2e && FLOORS.containsKey(k) && new java.math.BigDecimal(v).compareTo(FLOORS.get(k)) < 0) {
+        throw new ValidationException(List.of(new ValidationException.Field("value", "belowFloor")));
+      }
+      if (!e2e && CEILINGS.containsKey(k) && new java.math.BigDecimal(v).compareTo(CEILINGS.get(k)) > 0) {
+        throw new ValidationException(List.of(new ValidationException.Field("value", "aboveCeiling")));
+      }
       // 第 4 批（冻结、找回流程）上线前不能对所有人开放开户（TG 机器人第 2 批审查 🟡2；第 4 批合并时把 ConfigKey.SIGNUP_ALL_ALLOWED 改成 true）
       if (k == ConfigKey.TELEGRAM_SIGNUP_ALLOW_IDS && "*".equals(v) && !ConfigKey.SIGNUP_ALL_ALLOWED) {
         throw new BizException("SIGNUP_ALL_LOCKED", "冻结和找回流程上线前不能对所有人开放开户");
@@ -143,6 +183,7 @@ class SystemService {
         if (!ranges.contains(actor.ip())) throw new BizException("WHITELIST_EXCLUDES_SELF", "白名单不包含你当前的 IP，保存后你会无法访问后台");
       }
       String old = config.set(k, v, actor.adminId(), LocalDateTime.now(clock));
+      if (FUNDS_GROUPS.contains(k.group) && !v.equals(old)) fundsAlert(actor, k, old, v, r);
       ConfigView view = configs().stream().filter(c -> c.key().equals(k.key)).findFirst().orElseThrow();
       return Audit.Change.of(view, Map.of("value", old == null ? "" : old), Map.of("value", v));
     });

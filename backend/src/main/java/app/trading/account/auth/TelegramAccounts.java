@@ -77,6 +77,16 @@ class TelegramAccounts implements TelegramAccountApi {
   }
 
   @Override
+  public void unlink(long userId) {
+    mapper.deleteTelegram(userId);
+  }
+
+  @Override
+  public void link(long userId, long telegramId, String username, LocalDateTime at) {
+    mapper.insertTelegram(userId, telegramId, cut(username), "ADMIN", at);
+  }
+
+  @Override
   public void reauthorize(long userId) {
     mapper.updateTgAuthorizedAt(userId, now());
   }

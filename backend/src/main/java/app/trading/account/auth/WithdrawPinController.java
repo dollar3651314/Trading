@@ -37,6 +37,29 @@ class WithdrawPinController {
 
   record CodeSent(int cooldownSeconds) {}
 
+  /** 第 4 批 4c：提现冻结的来源（小写）、什么时候、自助解冻时间（只有机器人里自己冻结的才有） */
+  record FreezeView(String source, String at, String releaseAt) {}
+
+  record UnfreezeBody(PinInput pin) {}
+
+  /** 第 4 批 4c：自己的提现冻结（全部来源） */
+  @GetMapping("/api/me/withdraw-freeze")
+  List<FreezeView> freezes() {
+    return pins.status(CurrentUser.id()).freezes().stream()
+        .map(f -> new FreezeView(f.source().toLowerCase(), utc(f.at()), utc(f.releaseAt()))).toList();
+  }
+
+  /** 第 4 批 4c：机器人里自己冻结的，输对提现密码后 24 小时自动解冻（别的来源要人工） */
+  @UserWriteLimited
+  @PostMapping("/api/me/withdraw-freeze/self-unfreeze")
+  java.util.Map<String, String> selfUnfreeze(@RequestBody(required = false) UnfreezeBody b) {
+    return java.util.Map.of("releaseAt", utc(pins.requestSelfUnfreeze(CurrentUser.id(), b == null ? null : b.pin())));
+  }
+
+  private static String utc(java.time.LocalDateTime t) {
+    return t == null ? null : t.toInstant(java.time.ZoneOffset.UTC).toString();
+  }
+
   @GetMapping("/api/me/withdraw-pin")
   StatusView status() {
     long uid = CurrentUser.id();

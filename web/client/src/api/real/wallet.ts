@@ -3,7 +3,7 @@
  * 资金流水：后端还没有客户端接口（S17 汇报的缺口），这里按约定的 `GET /api/trading/ledger` 调用，接口补上后即可使用。
  */
 import { del, get, post } from '../http';
-import type { MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from '../types';
+import type { FreezeCaptcha, FreezeRequest, MyFreeze, MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from '../types';
 
 /** 开着的充值网络和已经生成的地址（不访问钱包提供方） */
 export const getDepositAddresses = (): Promise<DepositAddress[]> => get<DepositAddress[]>('/api/wallet/networks');
@@ -68,3 +68,10 @@ export async function objectRecovery(id: number, pin: PinInput): Promise<void> {
 export const revokeRecovery = (id: number): Promise<{ message: string }> => post<{ message: string }>(`/api/me/recoveries/${encodeURIComponent(String(id))}/revoke`);
 /** 没邮箱忘记提现密码：申请人工重设 */
 export const requestPinReset = (): Promise<{ id: number }> => post<{ id: number }>('/api/me/withdraw-pin/forgot/manual');
+
+// ---------- 第 4 批 4c：申请冻结提现（不用登录，wallet/freeze/WebFreezeController.java）、自己的冻结和自助解冻 ----------
+export const getFreezeCaptcha = (fp?: string): Promise<FreezeCaptcha> => post<FreezeCaptcha>(`/api/public/withdraw-freeze/captcha${fp ? `?fp=${encodeURIComponent(fp)}` : ''}`);
+/** 不管信息对不对都回同一句；只有验证码不对报 CAPTCHA_INVALID */
+export const requestWithdrawFreeze = (req: FreezeRequest): Promise<{ message: string }> => post<{ message: string }>('/api/public/withdraw-freeze', req, { quiet401: true });
+export const listMyFreezes = (): Promise<MyFreeze[]> => get<MyFreeze[]>('/api/me/withdraw-freeze');
+export const requestSelfUnfreeze = (pin: PinInput): Promise<{ releaseAt: string }> => post<{ releaseAt: string }>('/api/me/withdraw-freeze/self-unfreeze', { pin });

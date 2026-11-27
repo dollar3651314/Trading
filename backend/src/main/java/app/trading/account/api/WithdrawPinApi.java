@@ -19,7 +19,12 @@ public interface WithdrawPinApi {
   record PinInput(String keypadId, List<Integer> positions) {}
 
   /** 一个来源的提现冻结：PIN_LOCKS / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY */
-  record Freeze(String source, String reason, LocalDateTime at) {}
+  record Freeze(String source, String reason, LocalDateTime at, LocalDateTime releaseAt) {
+
+    public Freeze(String source, String reason, LocalDateTime at) {
+      this(source, reason, at, null);
+    }
+  }
 
   /**
    * @param lockedUntil 锁定到期（没锁时为空）
@@ -63,6 +68,15 @@ public interface WithdrawPinApi {
 
   /** 第 4 批 4b：解除指定来源的冻结（找回申请结束时解除 RECOVERY / DISPUTE），别的来源的冻结不动；返回是否解除了 */
   boolean releaseFreeze(long userId, String source);
+
+  /**
+   * 第 4 批 4c：机器人里自己冻结（BOT_SELF）的自助解冻——在网页输对提现密码（提现冻结着也照样核对、照常计数），24 小时后自动解冻，通知 TG 和邮箱。
+   * 没有 BOT_SELF 冻结时抛 {@code NOT_SELF_FROZEN}。别的来源的冻结（网页申请、提现密码锁 2 次等）不受影响，要人工解冻。返回解冻时间
+   */
+  LocalDateTime requestSelfUnfreeze(long userId, PinInput pin);
+
+  /** 到时间的自助解冻（找回申请的定时任务每分钟调）：只删 BOT_SELF 这一行，别的来源照旧；返回解冻了几个客户 */
+  int releaseDueSelfUnfreezes();
 
   /** 冻结提现（已经冻结的不变） */
   void freezeWithdraw(long userId, String source, String reason);

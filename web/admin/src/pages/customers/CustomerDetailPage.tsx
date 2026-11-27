@@ -9,11 +9,12 @@ import { Alert, Button, Descriptions, Form, Input, Radio, Select, Skeleton, Spac
 import { ArrowLeftOutlined, LockOutlined, UnlockOutlined, DollarOutlined, EditOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { adjustBalance, cancelHeldWithdrawal, getAdjustLimits, getCustomer, releaseHeldWithdrawal, setCustomerFrozen, unfreezeCustomerWithdraw, updateCustomerProfile } from '../../api';
+import { adjustBalance, cancelHeldWithdrawal, changeCustomerTelegram, getAdjustLimits, getCustomer, releaseHeldWithdrawal, setCustomerFrozen, unfreezeCustomerWithdraw, updateCustomerProfile } from '../../api';
 import { freezesOf, type ClosedPosition, type HeldWithdrawal, type LedgerEntry, type Position } from '../../api/types';
 import { closedColumns } from '../trading/closedColumns';
 import { useApi } from '../../hooks/useApi';
 import { useHighRisk } from '../../hooks/useConfirmDialogs';
+import { useAuth } from '../../auth/AuthContext';
 import { PageHeader } from '../../components/PageHeader';
 import { ErrorState } from '../../components/ErrorState';
 import { DataTable } from '../../components/DataTable';
@@ -48,6 +49,45 @@ export function CustomerDetailPage() {
       ),
       confirmText: freezing ? t('customers.confirmFreeze') : t('customers.confirmUnfreeze'),
       onConfirm: (v) => setCustomerFrozen(c.id, freezing, v.reason),
+      onDone: reload,
+    });
+  };
+
+  const { me, identity } = useAuth();
+  const isSuper = me ? me.isSuperAdmin : identity === 'super';
+
+  /** 第 4 批 4c：解除 / 更换 Telegram 关联（只有超管；后台密码、原因、审计、告警邮件、安全事件、冻结提现） */
+  const askTelegram = (unlink: boolean) => {
+    if (!c) return;
+    hr.ask({
+      title: t(unlink ? 'customers.tg.unlink' : 'customers.tg.relink'),
+      description: (
+        <>
+          <div>{t('customers.targetLine', { name: c.name, id: c.id, email: contact(c.email, c.telegramUsername) })}</div>
+          <div>{t('customers.tg.impact')}</div>
+          {unlink ? <div className="text-danger">{t('customers.tg.unlinkImpact')}</div> : null}
+        </>
+      ),
+      extra: (
+        <>
+          {unlink ? null : (
+            <>
+              <Form.Item name="telegramId" label={t('customers.tg.newId')} rules={[{ required: true, pattern: /^\d{1,19}$/, message: t('customers.tg.newIdRequired') }]}>
+                <Input inputMode="numeric" autoComplete="off" />
+              </Form.Item>
+              <Form.Item name="username" label={t('customers.tg.newUsername')}>
+                <Input autoComplete="off" />
+              </Form.Item>
+            </>
+          )}
+          <Form.Item name="password" label={t('customers.wdSafety.password')} rules={[{ required: true, message: t('customers.wdSafety.passwordRequired') }]}>
+            <Input.Password autoComplete="current-password" />
+          </Form.Item>
+        </>
+      ),
+      confirmText: t(unlink ? 'customers.tg.confirmUnlink' : 'customers.tg.confirmRelink'),
+      onConfirm: (v) =>
+        changeCustomerTelegram(c.id, unlink ? null : String(v.telegramId ?? ''), unlink ? null : (v.username ? String(v.username) : null), v.reason, String(v.password ?? '')),
       onDone: reload,
     });
   };
@@ -319,7 +359,25 @@ export function CustomerDetailPage() {
             <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 3 }}>
               <Descriptions.Item label={t('customers.id')}><Num>{c.id}</Num></Descriptions.Item>
               <Descriptions.Item label={t('customers.email')}>{c.email ?? '—'}</Descriptions.Item>
-              {c.telegramId && <Descriptions.Item label="Telegram">{contact(null, c.telegramUsername)} · {c.telegramId}</Descriptions.Item>}
+              {c.telegramId && (
+                <Descriptions.Item label="Telegram">
+                  <Space size={4} wrap>
+                    <span>
+                      {contact(null, c.telegramUsername)} · {c.telegramId}
+                    </span>
+                    {isSuper ? (
+                      <>
+                        <Button size="small" onClick={() => askTelegram(false)}>
+                          {t('customers.tg.relink')}
+                        </Button>
+                        <Button size="small" danger onClick={() => askTelegram(true)}>
+                          {t('customers.tg.unlink')}
+                        </Button>
+                      </>
+                    ) : null}
+                  </Space>
+                </Descriptions.Item>
+              )}
               {c.withdrawSafety ? (
                 <Descriptions.Item label={t('customers.wdSafety.title')}>
                   <Space size={4} wrap>

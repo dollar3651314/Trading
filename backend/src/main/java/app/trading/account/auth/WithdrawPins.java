@@ -185,7 +185,7 @@ class WithdrawPins implements WithdrawPinApi {
     AuthMapper.PinRow p = mapper.pin(userId);
     LocalDateTime locked = p != null && p.lockedUntil() != null && p.lockedUntil().isAfter(now()) ? p.lockedUntil() : null;
     return new Status(p != null, locked,
-        mapper.withdrawFreezes(userId).stream().map(f -> new WithdrawPinApi.Freeze(f.source(), f.reason(), f.createdAt())).toList());
+        mapper.withdrawFreezes(userId).stream().map(f -> new WithdrawPinApi.Freeze(f.source(), f.reason(), f.createdAt(), f.releaseAt())).toList());
   }
 
   /** 有任何一个来源的提现冻结 */
@@ -206,6 +206,40 @@ class WithdrawPins implements WithdrawPinApi {
     String p = decode(userId, pin, "pin");
     BizException e = own.execute(st -> check(userId, p));
     if (e != null) throw e;
+  }
+
+  static final String SOURCE_BOT_SELF = "BOT_SELF";
+  static final Duration SELF_UNFREEZE_WAIT = Duration.ofHours(24);
+
+  @Override
+  public LocalDateTime requestSelfUnfreeze(long userId, PinInput pin) {
+    boolean self = mapper.withdrawFreezes(userId).stream().anyMatch(f -> SOURCE_BOT_SELF.equals(f.source()));
+    if (!self) throw new BizException("NOT_SELF_FROZEN", "没有在机器人里自己冻结的提现，网页申请等别的冻结要人工解冻");
+    verifyIdentity(userId, pin);
+    return tx.execute(st -> {
+      AuthMapper.WithdrawFreezeRow f = mapper.withdrawFreezes(userId).stream().filter(x -> SOURCE_BOT_SELF.equals(x.source())).findFirst()
+          .orElseThrow(() -> new BizException("NOT_SELF_FROZEN", "没有在机器人里自己冻结的提现"));
+      if (f.releaseAt() != null) return f.releaseAt();
+      LocalDateTime at = now().plus(SELF_UNFREEZE_WAIT);
+      mapper.setFreezeRelease(userId, SOURCE_BOT_SELF, at);
+      notify.toUser(userId, "WITHDRAW_SELF_UNFREEZE", Map.of("at", at.format(TIME)));
+      return at;
+    });
+  }
+
+  @Override
+  public int releaseDueSelfUnfreezes() {
+    LocalDateTime now = now();
+    int n = 0;
+    for (Long userId : mapper.dueSelfUnfreezes(now)) {
+      Boolean done = tx.execute(st -> {
+        if (mapper.deleteDueSelfUnfreeze(userId, now) != 1) return false;
+        notify.toUser(userId, "WITHDRAW_UNFROZEN", Map.of("source", "机器人里自己冻结", "sourceEn", "frozen yourself in the bot"));
+        return true;
+      });
+      if (Boolean.TRUE.equals(done)) n++;
+    }
+    return n;
   }
 
   @Override

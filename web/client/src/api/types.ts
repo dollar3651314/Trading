@@ -450,3 +450,30 @@ export interface MyRecovery {
   revokeRequested: boolean;
   createdAt: string;
 }
+
+/** 第 4 批 4c：网页"申请冻结提现"的图形验证码（PNG base64；hard = 同一来源失败多了换的更难的） */
+export interface FreezeCaptcha {
+  id: string;
+  pngBase64: string;
+  hard: boolean;
+}
+
+export interface FreezeRequest {
+  customerNo: string;
+  /** 做过 KYC 的填姓名 + 证件号后 4 位 */
+  name?: string;
+  docLast4?: string;
+  /** 没做 KYC 的填最近一笔充值的金额和日期（YYYY-MM-DD，UTC） */
+  depositAmount?: string;
+  depositDate?: string;
+  captchaId: string;
+  captcha: string;
+  fp?: string;
+}
+
+/** 第 4 批 4c：自己的提现冻结（全部来源）；releaseAt 只有机器人里自己冻结、申请了自助解冻的才有 */
+export interface MyFreeze {
+  source: 'pin_locks' | 'web_request' | 'bot_self' | 'dispute' | 'recovery' | 'admin';
+  at: string;
+  releaseAt: string | null;
+}

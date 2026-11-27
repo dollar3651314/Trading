@@ -36,8 +36,8 @@ interface RecoveryMapper {
     LocalDateTime createdAt;
   }
 
-  /** 核对申请人填的信息用：资料里的姓名、最近一份 KYC 的状态和证件号 */
-  record Identity(String firstName, String middleName, String lastName, String kycStatus, String docNumber) {}
+  /** 核对申请人填的信息用：资料里的姓名、最近一份 KYC 的状态和证件号（带上客户号：没有资料、没做 KYC 时其他列全空，MyBatis 会把全空的行当成没有） */
+  record Identity(long userId, String firstName, String middleName, String lastName, String kycStatus, String docNumber) {}
 
   Identity identity(@Param("userId") long userId);
 

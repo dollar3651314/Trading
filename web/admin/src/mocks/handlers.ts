@@ -1643,3 +1643,23 @@ export function cancelHeldWithdrawal(id: string, reason: string): Promise<Withdr
     return { id } as unknown as Withdrawal;
   });
 }
+
+/** 第 4 批 4c 原型：解除 / 更换 Telegram 关联（只有超管） */
+export function changeCustomerTelegram(id: number, telegramId: string | null, username: string | null, reason: string, password: string): Promise<CustomerDetail> {
+  return mutate(() => {
+    if (currentAdmin().roleIds.length && !db.roles.find((r) => r.code === 'super_admin' && currentAdmin().roleIds.includes(r.id))) throw new ApiError('errors.forbidden');
+    const r = requireReason(reason);
+    requireAdminPassword(password);
+    const c = db.customerById(id);
+    if (!c) throw new ApiError('errors.notFound');
+    if (!telegramId && !c.telegramId) throw new ApiError('errors.notTgAccount');
+    if (telegramId && db.customers.some((x) => x.telegramId === telegramId)) throw new ApiError('errors.telegramTaken');
+    const old = c.telegramId ?? null;
+    c.telegramId = telegramId;
+    c.telegramUsername = telegramId ? username : null;
+    const s = withdrawSafety.get(id) ?? { pinSet: false, pinLockedUntil: null, withdrawFrozen: false, frozenSource: null, frozenAt: null };
+    const list = [...freezesOf(s).filter((f) => f.source !== 'admin'), { source: 'admin' as const, reason: telegramId ? '后台更换了 Telegram 关联' : '后台解除了 Telegram 关联', at: nowString() }];
+    withdrawSafety.set(id, { ...s, pinSet: telegramId ? false : s.pinSet, withdrawFrozen: true, frozenSource: list[0].source, frozenAt: list[0].at, freezes: list });
+    audit(telegramId ? 'customer.telegram_relink' : 'customer.telegram_unlink', String(id), true, r, { telegramId: old }, { telegramId });
+  }).then(() => getCustomer(id));
+}

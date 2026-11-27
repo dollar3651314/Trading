@@ -405,3 +405,8 @@ button.menu-item { width: 100%; text-align: left; font-size: inherit; background
 .recovery-item p { margin: 0; }
 .recovery-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .recovery-head .st { margin-left: auto; }
+
+/* 申请冻结提现的图形验证码（pages/tg/FreezeForm.tsx，第 4 批 4c） */
+.captcha-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.captcha-img { display: inline-block; height: 64px; min-width: 160px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--s2); image-rendering: pixelated; }
+.freeze-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }

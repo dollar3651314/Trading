@@ -8,7 +8,7 @@
     closed_at, created_at</sql>
 
   <select id="identity" resultType="app.trading.account.recovery.RecoveryMapper$Identity">
-    SELECT p.first_name, p.middle_name, p.last_name,
+    SELECT u.id AS user_id, p.first_name, p.middle_name, p.last_name,
       (SELECT k.status FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS kyc_status,
       (SELECT k.doc_number FROM account_kyc_application k WHERE k.user_id = u.id ORDER BY k.id DESC LIMIT 1) AS doc_number
     FROM account_user u LEFT JOIN account_profile p ON p.user_id = u.id WHERE u.id = #{userId}

@@ -9,6 +9,9 @@ import type {
   PinKeypad,
   PinStatus,
   MyRecovery,
+  FreezeCaptcha,
+  FreezeRequest,
+  MyFreeze,
   DepositAddress,
   DepositRecord,
   LedgerItem,
@@ -306,4 +309,39 @@ export function requestPinReset(): Promise<{ id: number }> {
     recoveries.unshift({ id, kind: 'pin_reset', status: 'proof', disputed: false, disputePinOk: false, disputeFrozen: false, objectionEndsAt: null, executeAt: null, revokeRequested: false, createdAt: new Date().toISOString() });
     return { id };
   });
+}
+
+// ---------- 申请冻结提现、自助解冻（第 4 批 4c，原型：内存里；验证码答案固定 AC34） ----------
+const freezes: MyFreeze[] = [];
+/** 1×1 的透明 PNG（原型不画字，答案固定 AC34） */
+const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+export function getFreezeCaptcha(): Promise<FreezeCaptcha> {
+  return respond(() => ({ id: 'proto', pngBase64: PNG_1X1, hard: false }));
+}
+
+export function requestWithdrawFreeze(req: FreezeRequest): Promise<{ message: string }> {
+  return mutate(() => {
+    if (req.captcha.trim().toUpperCase() !== 'AC34') throw new ApiError('captchaInvalid');
+    return { message: '已受理；信息正确的话会冻结提现并通知账户持有人。' };
+  });
+}
+
+export function listMyFreezes(): Promise<MyFreeze[]> {
+  return respond(() => freezes.map((f) => ({ ...f })));
+}
+
+export function requestSelfUnfreeze(pin: PinInput): Promise<{ releaseAt: string }> {
+  return mutate(() => {
+    const f = freezes.find((x) => x.source === 'bot_self');
+    if (!f) throw new ApiError('notSelfFrozen');
+    if (decode(pin) !== pinState.pin) throw new ApiError('pinWrong');
+    f.releaseAt ??= new Date(Date.now() + 24 * 3_600_000).toISOString();
+    return { releaseAt: f.releaseAt };
+  });
+}
+
+/** 原型面板 / 测试：设置自己的冻结 */
+export function protoSetFreezes(list: MyFreeze[]): void {
+  freezes.splice(0, freezes.length, ...list);
 }
