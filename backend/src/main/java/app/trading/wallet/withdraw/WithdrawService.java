@@ -355,11 +355,12 @@ public class WithdrawService implements WithdrawAdminApi {
   void send(long id) {
     WithdrawalRow w = mapper.byId(id);
     if (w == null || !"APPROVED".equals(w.status)) return;
-    // 第 4 批审查 🔴4a-1：冻结期间不交钱包提供方（留在已审核待放款，解除冻结后继续）。不在这里取消退回：
+    if (w.heldAt != null) return; // 暂停中（第 4 批 4b 审查 🟡1）：等后台逐笔选"继续放款"或"取消并退回"
+    // 第 4 批审查 🔴4a-1：冻结期间不交钱包提供方，标成暂停（解除冻结后也不自动继续）。不在这里取消退回：
     // 另一个线程可能正在交出去（审核通过的线程和定时任务都会调 send），这时退回会重复出金
     String frozen = frozenReason(w.userId);
     if (frozen != null) {
-      log.warn("提现 {} 的客户{}，暂停交钱包提供方", id, frozen);
+      if (mapper.hold(id, frozen, now()) == 1) log.warn("提现 {} 的客户{}，暂停交钱包提供方", id, frozen);
       return;
     }
     var sender = senders.get(Chain.valueOf(w.network));
@@ -367,6 +368,8 @@ public class WithdrawService implements WithdrawAdminApi {
       log.debug("{} 没有广播器，提现 {} 留在待上链", w.network, id);
       return;
     }
+    // 认领：只有待放款、没暂停的才交出去，次数 +1；后台"取消并退回"只允许从没认领过的（防重复出金）
+    if (mapper.claimSend(id) != 1) return;
     WithdrawSender.Outcome out;
     try {
       out = sender.get().send(new WithdrawSender.Order(w.id, w.publicNo, w.userId, w.network, w.address, w.amount.subtract(w.fee)));
@@ -538,14 +541,17 @@ public class WithdrawService implements WithdrawAdminApi {
   /**
    * 冻结时处理这个客户在途的提现（第 4 批审查 🔴4a-1，由 {@link WithdrawFreezeHandler} 在冻结的事务提交以后调用）：
    * 冷静期、待审核、大额延迟中的取消并退回余额（每笔一个事务，锁住再看状态）；已审核待放款的不取消——可能正有线程在交给钱包提供方，
-   * 退回会重复出金——留在原状态，{@link #send} 看到冻结就不交出去，后台详情标"提现已冻结"；放款中（已交提供方）的拦不住，后台同样标出来，
-   * 提供方那边还有第二道人工放款审核。返回取消的笔数。
+   * 退回会重复出金——标成暂停（4b 审查 🟡1：解除冻结后也不自动继续，要后台逐笔选"继续放款"或"取消并退回"，见 {@link #releaseHeld}、
+   * {@link #cancelHeld}）；放款中（已交提供方）的拦不住，后台同样标出来，提供方那边还有第二道人工放款审核。返回取消的笔数。
    */
   public int blockInFlight(long userId, String reason) {
     // 在冻结事务的 afterCommit 里被调用：原事务的资源还绑着，必须开新事务（REQUIRES_NEW），推送也直接推（不能再登记 afterCommit）
     TransactionTemplate fresh = new TransactionTemplate(tx.getTransactionManager());
     fresh.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     int n = 0;
+    for (Long id : mapper.idsOfUserIn(userId, List.of("APPROVED"))) {
+      fresh.executeWithoutResult(st -> mapper.hold(id, reason, now()));
+    }
     for (Long id : mapper.idsOfUserIn(userId, CANCEL_ON_FREEZE)) {
       WithdrawalRow r = fresh.execute(st -> {
         WithdrawalRow w = mapper.lock(id);
@@ -558,6 +564,52 @@ public class WithdrawService implements WithdrawAdminApi {
       }
     }
     return n;
+  }
+
+  /** 这个客户暂停中的已审核待放款提现（后台解除冻结以后逐笔处理） */
+  @Override
+  public List<WithdrawAdminApi.Held> held(long userId) {
+    return mapper.heldOf(userId).stream().map(w -> new WithdrawAdminApi.Held(w.id, w.publicNo, w.amount, w.network, w.address, w.heldAt, w.heldReason,
+        w.sendAttempts > 0)).toList();
+  }
+
+  /**
+   * 后台选"继续放款"（4b 审查 🟡1）：客户还冻结着时不行（{@code WITHDRAW_FROZEN}）；去掉暂停，提交以后马上交钱包提供方（之后定时任务也会交）
+   */
+  @Override
+  public void releaseHeld(long withdrawalId, long adminId, String reason) {
+    WithdrawalRow r = tx.execute(st -> {
+      WithdrawalRow w = heldRow(withdrawalId);
+      String frozen = frozenReason(w.userId);
+      if (frozen != null) throw new BizException("WITHDRAW_FROZEN", "客户已冻结提现，请先核对（" + frozen + "）");
+      mapper.release(w.id);
+      mapper.insertEvent(w.id, w.status, w.status, "admin:" + adminId, "解除暂停，继续放款：" + reason);
+      return w;
+    });
+    send(r.id);
+  }
+
+  /**
+   * 后台选"取消并退回"（4b 审查 🟡1）：只允许从没交过钱包提供方的（send_attempts = 0；交过的可能已在付款，退回会重复出金，
+   * 报 {@code WITHDRAW_SENT_BEFORE}，要先在钱包提供方核对）。交出去之前都要先认领（{@link #send}），暂停后不能再认领，所以这里锁住检查就够了
+   */
+  @Override
+  public void cancelHeld(long withdrawalId, long adminId, String reason) {
+    WithdrawalRow r = tx.execute(st -> {
+      WithdrawalRow w = heldRow(withdrawalId);
+      if (w.sendAttempts > 0) throw new BizException("WITHDRAW_SENT_BEFORE", "这笔已经交过钱包提供方（可能已在付款），不能直接退回，请先在钱包提供方核对");
+      move(w, "CANCELLED", "admin:" + adminId, "暂停中取消并退回：" + reason);
+      refund(w);
+      return w;
+    });
+    notify(r);
+  }
+
+  private WithdrawalRow heldRow(long id) {
+    WithdrawalRow w = mapper.lock(id);
+    if (w == null) throw new BizException("NOT_FOUND", "提现不存在");
+    if (!"APPROVED".equals(w.status) || w.heldAt == null) throw new BizException("WITHDRAW_NOT_HELD", "这笔提现不在暂停中");
+    return w;
   }
 
   /** 退回：提现冻结 → 余额 */

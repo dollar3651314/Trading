@@ -33,6 +33,19 @@ public interface TelegramSender {
     return send(userId, text, priority, viewPath, java.util.List.of(), done);
   }
 
+  /**
+   * 第 4 批 4b：发给还没绑账户的 Telegram 用户（找回申请的申请人用新 TG 申请，换绑执行前它不对应任何客户号；换绑后通知原来的 TG）。
+   * 只排队；没配令牌、后台关了机器人时返回 {@link Result#BOT_OFF}。默认实现（测试替身）什么都不发
+   */
+  default Result sendToChat(long telegramId, String text, Priority priority) {
+    return Result.BOT_OFF;
+  }
+
+  /** 第 4 批 4b：找回申请的按钮数据前缀（后面跟申请编号）：「不是我」/「不输，直接冻结提现」/「撤销」 */
+  String ACTION_RECOVERY_OBJECT = "rcno:";
+  String ACTION_RECOVERY_FREEZE = "rcfz:";
+  String ACTION_RECOVERY_REVOKE = "rcrv:";
+
   /** 按钮数据：「不是我，退出所有网页会话」（机器人认这个，作废这个客户的全部网页会话） */
   String ACTION_LOGOUT_ALL = "logoutall";
 

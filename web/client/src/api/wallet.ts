@@ -2,7 +2,7 @@
 import * as mock from '../mocks/wallet';
 import { IS_MOCK } from './mode';
 import * as real from './real/wallet';
-import type { DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from './types';
+import type { MyRecovery, DepositAddress, DepositRecord, LedgerItem, LedgerQuery, Network, Page, PinInput, PinKeypad, PinStatus, WhitelistAddress, Withdrawal, WithdrawInfo, WithdrawRequest } from './types';
 
 export const getDepositAddresses = (): Promise<DepositAddress[]> => (IS_MOCK ? mock.getDepositAddresses() : real.getDepositAddresses());
 export const requestDepositAddress = (network: Network): Promise<DepositAddress> => (IS_MOCK ? mock.requestDepositAddress(network) : real.requestDepositAddress(network));
@@ -23,3 +23,9 @@ export const setPin = (pin: PinInput, confirm: PinInput): Promise<void> => (IS_M
 export const changePin = (old: PinInput, pin: PinInput, confirm: PinInput): Promise<void> => (IS_MOCK ? mock.changePin(old, pin, confirm) : real.changePin(old, pin, confirm));
 export const sendPinResetCode = (): Promise<{ cooldownSeconds: number }> => (IS_MOCK ? mock.sendPinResetCode() : real.sendPinResetCode());
 export const resetPin = (code: string, pin: PinInput, confirm: PinInput): Promise<void> => (IS_MOCK ? mock.resetPin(code, pin, confirm) : real.resetPin(code, pin, confirm));
+
+// 找回申请（第 4 批 4b）
+export const listMyRecoveries = (): Promise<MyRecovery[]> => (IS_MOCK ? mock.listMyRecoveries() : real.listMyRecoveries());
+export const objectRecovery = (id: number, pin: PinInput): Promise<void> => (IS_MOCK ? mock.objectRecovery(id, pin) : real.objectRecovery(id, pin));
+export const revokeRecovery = (id: number): Promise<{ message: string }> => (IS_MOCK ? mock.revokeRecovery(id) : real.revokeRecovery(id));
+export const requestPinReset = (): Promise<{ id: number }> => (IS_MOCK ? mock.requestPinReset() : real.requestPinReset());

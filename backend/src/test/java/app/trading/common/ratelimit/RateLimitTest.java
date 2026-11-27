@@ -189,6 +189,10 @@ class RateLimitTest {
         "[POST] [/api/me/withdraw-pin]",
         "[POST] [/api/me/withdraw-pin/change]",
         "[POST] [/api/me/withdraw-pin/forgot/code]",
-        "[POST] [/api/me/withdraw-pin/forgot]");
+        "[POST] [/api/me/withdraw-pin/forgot]",
+        // 第 4 批 4b：找回申请（原 TG 输提现密码、撤销）、没邮箱申请人工重设提现密码
+        "[POST] [/api/me/recoveries/{id}/object]",
+        "[POST] [/api/me/recoveries/{id}/revoke]",
+        "[POST] [/api/me/withdraw-pin/forgot/manual]");
   }
 }

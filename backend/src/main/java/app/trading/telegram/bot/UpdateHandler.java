@@ -56,6 +56,20 @@ public class UpdateHandler {
   static final String CB_NOOP = "noop";
   /** 退路模式（FX_TG_LOGIN_MODE=link）：打开网页的回调按钮 open:路径，点了现发一条 60 秒一次性链接 */
   static final String CB_OPEN = "open:";
+  /** 第 4 批 4b：没绑账户的新 TG 点「找回原账户」 */
+  static final String CB_RECOVER = "recover";
+  static final String TEXT_RECOVER_ASK = "找回原账户（人工换绑）：请发一条消息，写原账户的客户号、KYC 时的姓名和证件号后 4 位，用空格隔开，例如：\n100482 张三 1234\n\n"
+      + "只有原账户做过身份认证才能找回。原账户持有人会收到通知，48 小时内没人反对后，审核员会通过这个 Telegram 联系你做视频核对。客服不会私信向你要密码或验证码。";
+  static final String TEXT_RECOVER_FORMAT = "格式不对。请发：客户号 姓名 证件号后4位（用空格隔开），例如：100482 张三 1234。";
+  static final String TEXT_RECOVER_FREQUENT = "申请太频繁，请明天再试。";
+  /** 信息对不对都回这一句（防止拿来猜客户号、姓名、证件号） */
+  static final String TEXT_RECOVER_APPLIED = "已收到你的找回申请。信息核对无误的话，我们会通知原账户持有人；48 小时内没人反对，审核员会通过这个 Telegram 联系你做本人和资金来源核对。"
+      + "信息不对的不会有后续通知。";
+  static final String TEXT_RECOVER_BANNED = "暂不受理你的找回申请。";
+  /** 等申请人发信息的时间 */
+  static final Duration RECOVER_WAIT = Duration.ofMinutes(10);
+  private static final java.util.regex.Pattern RECOVER_INPUT = java.util.regex.Pattern.compile("^\\s*#?(\\d{1,19})\\s+(.+?)\\s+([0-9A-Za-z]{4})\\s*$");
+
   /** "刚在浏览器里登录"提醒里的「不是我，退出所有网页会话」 */
   static final String CB_LOGOUT_ALL = app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL;
 
@@ -93,9 +107,13 @@ public class UpdateHandler {
   private final TelegramProperties props;
   private final TelegramOutbox outbox;
   private final TelegramOutbox.Api api;
+  private final app.trading.account.api.RecoveryApi recovery;
+  /** 点了「找回原账户」、等着发信息的新 TG（单实例，放内存；重启后丢了就再点一次） */
+  private final java.util.concurrent.ConcurrentHashMap<Long, Long> awaitingRecover = new java.util.concurrent.ConcurrentHashMap<>();
 
   public UpdateHandler(TelegramAccountApi accounts, AccountApi account, TelegramPrefsApi prefs, SystemConfig config, RateLimiter limiter,
-      TelegramProperties props, TelegramOutbox outbox, TelegramOutbox.Api api) {
+      TelegramProperties props, TelegramOutbox outbox, TelegramOutbox.Api api, app.trading.account.api.RecoveryApi recovery) {
+    this.recovery = recovery;
     this.accounts = accounts;
     this.account = account;
     this.prefs = prefs;
@@ -148,8 +166,18 @@ public class UpdateHandler {
     }
     Optional<TgAccount> acc = accounts.byTelegramId(from.getId());
     if (acc.isEmpty()) {
-      if (!signupAllowed(from.getId())) send(chat, TEXT_NOT_OPEN, null);
-      else send(chat, TEXT_CONSENT, keyboard(List.of(row(cb("授权开户", CB_SIGNUP), cb("不同意", CB_DECLINE)))));
+      String t = text == null ? "" : text.strip();
+      if (t.equals("/start recover") || t.equals("/recover")) {
+        askRecover(chat);
+        return;
+      }
+      Long since = awaitingRecover.get(from.getId());
+      if (since != null && System.nanoTime() - since < RECOVER_WAIT.toNanos() && !t.startsWith("/")) {
+        applyRecover(from, t);
+        return;
+      }
+      if (!signupAllowed(from.getId())) send(chat, TEXT_NOT_OPEN, keyboard(List.of(row(cb("找回原账户", CB_RECOVER)))));
+      else send(chat, TEXT_CONSENT, keyboard(List.of(row(cb("授权开户", CB_SIGNUP), cb("不同意", CB_DECLINE)), row(cb("找回原账户", CB_RECOVER)))));
       return;
     }
     TgAccount a = acc.get();
@@ -173,11 +201,19 @@ public class UpdateHandler {
       switch (data) {
         case CB_SIGNUP -> signup(from, messageId);
         case CB_DECLINE -> edit(chat, messageId, TEXT_DECLINED, null);
+        case CB_RECOVER -> askRecover(chat);
         default -> send(chat, signupAllowed(from.getId()) ? "请先发 /start 授权开户。" : TEXT_NOT_OPEN, null);
       }
       return;
     }
     TgAccount a = acc.get();
+    // 第 4 批 4b：找回申请的「不是我」「不输，直接冻结提现」「撤销」——只会减少权限，冻结、要重新授权时也照样处理
+    if (data.startsWith(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_OBJECT)
+        || data.startsWith(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE)
+        || data.startsWith(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_REVOKE)) {
+      recoveryAction(chat, a, data);
+      return;
+    }
     if (UserStatus.FROZEN == status(a)) {
       send(chat, TEXT_FROZEN, null);
       return;
@@ -241,6 +277,72 @@ public class UpdateHandler {
       }
     } catch (Exception e) {
       log.warn("发一次性链接失败：{}", props.scrub(e.toString()));
+    }
+  }
+
+  // ---------- 找回（第 4 批 4b） ----------
+
+  private void askRecover(long chat) {
+    awaitingRecover.put(chat, System.nanoTime());
+    send(chat, TEXT_RECOVER_ASK, null);
+  }
+
+  /** 申请人发来"客户号 姓名 证件号后4位"：交给账户模块；信息对不对都回同一句 */
+  private void applyRecover(User from, String text) {
+    long chat = from.getId();
+    var m = RECOVER_INPUT.matcher(text);
+    if (!m.matches()) {
+      send(chat, TEXT_RECOVER_FORMAT, null);
+      return;
+    }
+    awaitingRecover.remove(chat);
+    long customerNo;
+    try {
+      customerNo = Long.parseLong(m.group(1));
+    } catch (NumberFormatException e) {
+      send(chat, TEXT_RECOVER_FORMAT, null);
+      return;
+    }
+    app.trading.account.api.RecoveryApi.ApplyResult r;
+    try {
+      r = recovery.applyRebind(from.getId(), from.getUserName(), customerNo, m.group(2), m.group(3));
+    } catch (RuntimeException e) {
+      log.warn("找回申请出错 tg={}：{}", from.getId(), e.toString());
+      send(chat, TEXT_FAILED, null);
+      return;
+    }
+    send(chat, switch (r) {
+      case ACCEPTED -> TEXT_RECOVER_APPLIED;
+      case TOO_FREQUENT -> TEXT_RECOVER_FREQUENT;
+      case BANNED -> TEXT_RECOVER_BANNED;
+    }, null);
+  }
+
+  /** 原 TG 点了找回申请通知里的按钮 */
+  private void recoveryAction(long chat, TgAccount a, String data) {
+    int i = data.indexOf(':');
+    long id;
+    try {
+      id = Long.parseLong(data.substring(i + 1));
+    } catch (NumberFormatException e) {
+      return;
+    }
+    String p = data.substring(0, i + 1);
+    try {
+      if (p.equals(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_OBJECT)) {
+        String reply = recovery.object(a.userId(), id);
+        List<InlineKeyboardRow> rows = new ArrayList<>();
+        if (props.hasWebUrl()) rows.add(row(login("输提现密码（输对不冻结）", "/me/recovery?id=" + id)));
+        rows.add(row(cb("不输，直接冻结提现", app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE + id)));
+        send(chat, reply, reply.startsWith("已记下") ? keyboard(rows) : null);
+      } else if (p.equals(app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE)) {
+        send(chat, recovery.freezeNow(a.userId(), id), null);
+      } else {
+        send(chat, recovery.revokeByOwner(a.userId(), id), null);
+      }
+    } catch (RuntimeException e) {
+      log.warn("找回申请按钮处理出错 user={} id={}：{}", a.userId(), id, e.toString());
+      send(chat, TEXT_FAILED, null);
     }
   }
 
@@ -319,6 +421,9 @@ public class UpdateHandler {
       case SecurityEvent.EMAIL_CHANGE -> "改了邮箱";
       case SecurityEvent.FREEZE -> "账户被冻结过";
       case SecurityEvent.UNFREEZE -> "账户刚解冻";
+      case SecurityEvent.REBIND -> "换绑了 Telegram";
+      case SecurityEvent.PIN_SET, SecurityEvent.PIN_CHANGE, SecurityEvent.PIN_RESET -> "提现密码有变化";
+      case SecurityEvent.KYC_FIRST -> "提交了身份认证";
       default -> "安全设置有变化";
     };
   }

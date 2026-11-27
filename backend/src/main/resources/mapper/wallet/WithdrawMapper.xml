@@ -4,7 +4,7 @@
 <mapper namespace="app.trading.wallet.withdraw.WithdrawMapper">
 
   <sql id="wlCols">id, user_id, network, address, address_key, label, active_at, created_at</sql>
-  <sql id="wdCols">id, public_no, user_id, network, address, amount, fee, status, rule_type, source, first_check, first_checked_by, cooling_ends_at, delay_ends_at, tx_hash, reject_reason, created_at, last_check_id</sql>
+  <sql id="wdCols">id, public_no, user_id, network, address, amount, fee, status, rule_type, source, first_check, first_checked_by, held_at, held_reason, send_attempts, cooling_ends_at, delay_ends_at, tx_hash, reject_reason, created_at, last_check_id</sql>
 
   <select id="whitelist" resultType="app.trading.wallet.withdraw.WhitelistRow">
     SELECT <include refid="wlCols"/> FROM wallet_whitelist WHERE user_id = #{userId} ORDER BY id
@@ -105,6 +105,25 @@
 
   <select id="withStatus" resultType="long">
     SELECT id FROM wallet_withdrawal WHERE status = #{status} ORDER BY id
+  </select>
+
+  <delete id="deleteAllWhitelist">DELETE FROM wallet_whitelist WHERE user_id = #{userId}</delete>
+
+  <!-- 第 4 批 4b（审查 🟡1）：交钱包提供方之前先认领（没暂停、还在待放款才认领，次数 +1）；暂停后不再认领 -->
+  <update id="claimSend">
+    UPDATE wallet_withdrawal SET send_attempts = send_attempts + 1 WHERE id = #{id} AND status = 'APPROVED' AND held_at IS NULL
+  </update>
+
+  <update id="hold">
+    UPDATE wallet_withdrawal SET held_at = #{now}, held_reason = #{reason} WHERE id = #{id} AND status = 'APPROVED' AND held_at IS NULL
+  </update>
+
+  <update id="release">
+    UPDATE wallet_withdrawal SET held_at = NULL, held_reason = NULL WHERE id = #{id} AND status = 'APPROVED' AND held_at IS NOT NULL
+  </update>
+
+  <select id="heldOf" resultType="app.trading.wallet.withdraw.WithdrawalRow">
+    SELECT <include refid="wdCols"/> FROM wallet_withdrawal WHERE user_id = #{userId} AND status = 'APPROVED' AND held_at IS NOT NULL ORDER BY id
   </select>
 
   <select id="idsOfUserIn" resultType="long">

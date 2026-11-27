@@ -29,7 +29,13 @@ public class AdminAuthService {
   private final Audit audit;
   private final Clock clock;
 
-  AdminAuthService(SecurityMapper mapper, SystemConfig config, AdminProperties props, Audit audit, Clock clock) {
+  /** 重新输入密码的失败计数和审计用的单独事务（调用方回滚也保留） */
+  private final org.springframework.transaction.support.TransactionTemplate reauth;
+
+  AdminAuthService(SecurityMapper mapper, SystemConfig config, AdminProperties props, Audit audit, Clock clock,
+      org.springframework.transaction.PlatformTransactionManager txm) {
+    this.reauth = new org.springframework.transaction.support.TransactionTemplate(txm);
+    this.reauth.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     this.mapper = mapper;
     this.config = config;
     this.props = props;
@@ -103,18 +109,37 @@ public class AdminAuthService {
     audit.record("admin.logout", ctx.username(), false, "SUCCESS", null, null, null);
   }
 
-  /** 改自己的密码：要原密码；新密码要够强、不能和原密码一样；其他设备上的登录退出 */
-  @Transactional
   /**
-   * 高危操作前重新输入自己的登录密码（第 4 批：人工解除提现冻结；4b 的人工换绑同一标准）。不对抛 {@code CURRENT_PASSWORD_WRONG}。
+   * 高危操作前重新输入自己的登录密码（第 4 批：人工解除提现冻结；4b：批准换绑、批准人工重设提现密码、维持争议路径上的换绑）。
+   * 输错（4b 审查 🟡2）：和登录失败共用计数（{@code login.lockThreshold}），到次数就锁这个管理员（{@code login.lockMinutes}）、退出他全部登录，
+   * 报 {@code LOGIN_LOCKED}；没到次数报 {@code CURRENT_PASSWORD_WRONG}。每次输错写审计 {@code admin.reauth}。计数和审计用单独的事务，
+   * 调用方的事务回滚也不会丢；输对清零。账号已经锁着时直接报 {@code LOGIN_LOCKED}
    */
   public void requirePassword(AdminContext ctx, String password) {
-    SecurityMapper.AdminRow a = mapper.byId(ctx.adminId());
-    if (a == null || password == null || password.isEmpty() || !Passwords.matches(password, a.passwordHash)) {
-      throw new BizException("CURRENT_PASSWORD_WRONG", "管理员密码不对，请重新输入自己的登录密码");
-    }
+    BizException e = reauth.execute(st -> {
+      SecurityMapper.AdminRow a = mapper.byId(ctx.adminId());
+      LocalDateTime now = now();
+      if (a == null) return new BizException("CURRENT_PASSWORD_WRONG", "管理员密码不对，请重新输入自己的登录密码");
+      if (a.lockedUntil != null && a.lockedUntil.isAfter(now)) {
+        audit.record("admin.reauth", a.username, true, "FAILURE", "LOGIN_LOCKED", null, null);
+        return new BizException("LOGIN_LOCKED", "失败次数过多，请稍后再试");
+      }
+      if (password != null && !password.isEmpty() && Passwords.matches(password, a.passwordHash)) {
+        if (a.failedCount != 0) mapper.loginFailed(a.id, 0, null);
+        return null;
+      }
+      int failed = a.failedCount + 1;
+      boolean lock = failed >= config.integer(ConfigKey.LOGIN_LOCK_THRESHOLD, 5);
+      mapper.loginFailed(a.id, lock ? 0 : failed, lock ? now.plus(config.minutes(ConfigKey.LOGIN_LOCK_MINUTES, Duration.ofMinutes(30))) : null);
+      if (lock) mapper.revokeAll(a.id, now);
+      audit.record("admin.reauth", a.username, true, "FAILURE", lock ? "LOGIN_LOCKED" : "CURRENT_PASSWORD_WRONG", null, null);
+      return lock ? new BizException("LOGIN_LOCKED", "管理员密码输错次数过多，已锁定并退出登录") : new BizException("CURRENT_PASSWORD_WRONG", "管理员密码不对，请重新输入自己的登录密码");
+    });
+    if (e != null) throw e;
   }
 
+  /** 改自己的密码：要原密码；新密码要够强、不能和原密码一样；其他设备上的登录退出 */
+  @Transactional
   void changePassword(AdminContext ctx, String oldPassword, String newPassword) {
     audit.run("admin.change_password", ctx.username(), false, null, () -> {
       SecurityMapper.AdminRow a = mapper.byId(ctx.adminId());

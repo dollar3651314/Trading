@@ -5,12 +5,12 @@
  * v2 E6：资料里显示最近登录 IP 和时间。
  */
 import { useCallback } from 'react';
-import { Alert, Button, Descriptions, Form, Input, Radio, Skeleton, Space } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, Radio, Select, Skeleton, Space } from 'antd';
 import { ArrowLeftOutlined, LockOutlined, UnlockOutlined, DollarOutlined, EditOutlined } from '@ant-design/icons';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { adjustBalance, getAdjustLimits, getCustomer, setCustomerFrozen, unfreezeCustomerWithdraw, updateCustomerProfile } from '../../api';
-import type { ClosedPosition, LedgerEntry, Position } from '../../api/types';
+import { adjustBalance, cancelHeldWithdrawal, getAdjustLimits, getCustomer, releaseHeldWithdrawal, setCustomerFrozen, unfreezeCustomerWithdraw, updateCustomerProfile } from '../../api';
+import { freezesOf, type ClosedPosition, type HeldWithdrawal, type LedgerEntry, type Position } from '../../api/types';
 import { closedColumns } from '../trading/closedColumns';
 import { useApi } from '../../hooks/useApi';
 import { useHighRisk } from '../../hooks/useConfirmDialogs';
@@ -55,26 +55,53 @@ export function CustomerDetailPage() {
   /** 第 4 批：人工解除提现冻结（冻结提现只能人工解冻；权限 withdraw:unfreeze，高危、重新输入管理员密码、填原因、写审计、告警邮件） */
   const askWithdrawUnfreeze = () => {
     if (!c?.withdrawSafety?.withdrawFrozen) return;
-    const src = c.withdrawSafety.frozenSource;
+    const list = freezesOf(c.withdrawSafety);
     hr.ask({
       title: t('customers.wdSafety.unfreeze'),
       description: (
         <>
           <div>{t('customers.targetLine', { name: c.name, id: c.id, email: contact(c.email, c.telegramUsername) })}</div>
-          <div>{t('customers.wdSafety.frozenLine', { source: src ? t(`customers.wdSafety.source.${src}`) : '—', time: c.withdrawSafety.frozenAt ? fullTime(c.withdrawSafety.frozenAt) : '—' })}</div>
+          {list.map((f) => (
+            <div key={f.source}>{t('customers.wdSafety.frozenLine', { source: t(`customers.wdSafety.source.${f.source}`), time: f.at ? fullTime(f.at) : '—' })}</div>
+          ))}
           <div>{t('customers.wdSafety.unfreezeImpact')}</div>
+          {list.some((f) => f.source === 'recovery' || f.source === 'dispute') ? <div className="text-danger">{t('customers.wdSafety.recoveryWarn')}</div> : null}
         </>
       ),
+      initialValues: { source: list.length === 1 ? list[0].source : undefined },
       extra: (
+        <>
+        <Form.Item name="source" label={t('customers.wdSafety.which')} rules={[{ required: true, message: t('customers.wdSafety.whichRequired') }]}>
+          <Select
+            aria-label={t('customers.wdSafety.which')}
+            options={[...list.map((f) => ({ value: f.source, label: t(`customers.wdSafety.source.${f.source}`) })), ...(list.length > 1 ? [{ value: 'all', label: t('customers.wdSafety.all') }] : [])]}
+          />
+        </Form.Item>
         <Form.Item name="password" label={t('customers.wdSafety.password')} extra={t('customers.wdSafety.passwordHint')} rules={[{ required: true, message: t('customers.wdSafety.passwordRequired') }]}>
           <Input.Password autoComplete="current-password" />
         </Form.Item>
+        </>
       ),
       confirmText: t('customers.wdSafety.confirmUnfreeze'),
-      onConfirm: (v) => unfreezeCustomerWithdraw(c.id, v.reason, String(v.password ?? '')),
+      onConfirm: (v) => unfreezeCustomerWithdraw(c.id, v.reason, String(v.password ?? ''), String(v.source ?? 'all')),
       onDone: reload,
     });
   };
+
+  /** 4b 审查 🟡1：冻结时暂停的提现，逐笔"继续放款"或"取消并退回"（高危、要原因） */
+  const askHeld = (h: HeldWithdrawal, cancel: boolean) =>
+    hr.ask({
+      title: t(cancel ? 'customers.held.cancel' : 'customers.held.release'),
+      description: (
+        <>
+          <div>{t('customers.held.target', { id: h.id, amount: formatAmount(h.amount), address: h.address })}</div>
+          <div>{t(cancel ? 'customers.held.cancelImpact' : 'customers.held.releaseImpact')}</div>
+        </>
+      ),
+      confirmText: t(cancel ? 'customers.held.confirmCancel' : 'customers.held.confirmRelease'),
+      onConfirm: (v) => (cancel ? cancelHeldWithdrawal(h.id, v.reason) : releaseHeldWithdrawal(h.id, v.reason)),
+      onDone: reload,
+    });
 
   /** 表单校验：把校验函数返回的翻译键拼成一条提示（一次显示这个字段的全部问题） */
   const rule = (problems: (v: string) => string[]) => ({
@@ -243,6 +270,28 @@ export function CustomerDetailPage() {
       ) : (
         <>
           {c.status === 'frozen' ? <Alert type="error" showIcon message={t('customers.frozenBanner')} description={c.frozenReason ? t('customers.frozenReasonLine', { reason: c.frozenReason }) : undefined} /> : null}
+          {c.heldWithdrawals?.length ? (
+            <div className="card card-pad" role="group" aria-label={t('customers.held.title')}>
+              <h2 className="card-title">{t('customers.held.title')}</h2>
+              <Alert type="warning" showIcon message={t('customers.held.note')} />
+              {c.heldWithdrawals.map((h) => (
+                <div key={h.id} className="held-row" data-testid={`held-${h.id}`}>
+                  <span>
+                    <Num>{h.id}</Num> · {t('customers.held.line', { amount: formatAmount(h.amount), chain: h.chain, time: fullTime(h.heldAt), reason: h.reason })}
+                    {h.sentBefore ? <Pill tone="warn">{t('customers.held.sentBefore')}</Pill> : null}
+                  </span>
+                  <Space>
+                    <PermButton perm="withdrawal:review" size="small" onClick={() => askHeld(h, false)}>
+                      {t('customers.held.release')}
+                    </PermButton>
+                    <PermButton perm="withdrawal:emergency_cancel" size="small" danger disabled={h.sentBefore} disabledReason={t('customers.held.sentBefore')} onClick={() => askHeld(h, true)}>
+                      {t('customers.held.cancel')}
+                    </PermButton>
+                  </Space>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <section className="detail-grid" aria-label={t('customers.account')}>
             <div className="card stat">
               <div className="k">{t('customers.balance')}</div>
@@ -278,9 +327,11 @@ export function CustomerDetailPage() {
                     {c.withdrawSafety.pinLockedUntil ? <Pill tone="warn">{t('customers.wdSafety.pinLocked', { time: fullTime(c.withdrawSafety.pinLockedUntil) })}</Pill> : null}
                     {c.withdrawSafety.withdrawFrozen ? (
                       <>
-                        <Pill tone="danger">
-                          {t('customers.wdSafety.frozen', { source: c.withdrawSafety.frozenSource ? t(`customers.wdSafety.source.${c.withdrawSafety.frozenSource}`) : '—' })}
-                        </Pill>
+                        {freezesOf(c.withdrawSafety).map((f) => (
+                          <Pill key={f.source} tone="danger">
+                            {t('customers.wdSafety.frozen', { source: t(`customers.wdSafety.source.${f.source}`) })}
+                          </Pill>
+                        ))}
                         <PermButton perm="withdraw:unfreeze" size="small" danger icon={<UnlockOutlined />} onClick={askWithdrawUnfreeze}>
                           {t('customers.wdSafety.unfreeze')}
                         </PermButton>

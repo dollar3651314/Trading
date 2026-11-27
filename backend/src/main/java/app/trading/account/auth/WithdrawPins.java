@@ -156,7 +156,7 @@ class WithdrawPins implements WithdrawPinApi {
   int forgotCode(long userId) {
     String email = auth.user(userId).email();
     if (email == null) throw new BizException("NO_EMAIL", "没有绑定邮箱：忘记提现密码要走人工找回");
-    if (mapper.withdrawFreeze(userId) != null) throw new BizException("WITHDRAW_FROZEN", "提现已冻结，不能重设提现密码");
+    if (frozen(userId)) throw new BizException("WITHDRAW_FROZEN", "提现已冻结，不能重设提现密码");
     return codes.send(email, EmailCodeService.Purpose.RESET_PIN);
   }
 
@@ -168,7 +168,7 @@ class WithdrawPins implements WithdrawPinApi {
     String c = decode(userId, confirm, "confirm");
     if (!p.equals(c)) throw invalid("confirm", "pinMismatch");
     if (tooSimple(p)) throw invalid("pin", "pinTooSimple");
-    if (mapper.withdrawFreeze(userId) != null) throw new BizException("WITHDRAW_FROZEN", "提现已冻结，不能重设提现密码");
+    if (frozen(userId)) throw new BizException("WITHDRAW_FROZEN", "提现已冻结，不能重设提现密码");
     if (!codes.verifyAndConsume(email, EmailCodeService.Purpose.RESET_PIN, code)) throw new BizException("CODE_INVALID", "验证码错误或已失效");
     tx.executeWithoutResult(st -> {
       if (mapper.pin(userId) == null) mapper.insertPin(userId, encoder.encode(p), now());
@@ -183,17 +183,39 @@ class WithdrawPins implements WithdrawPinApi {
   @Override
   public Status status(long userId) {
     AuthMapper.PinRow p = mapper.pin(userId);
-    AuthMapper.WithdrawFreezeRow f = mapper.withdrawFreeze(userId);
     LocalDateTime locked = p != null && p.lockedUntil() != null && p.lockedUntil().isAfter(now()) ? p.lockedUntil() : null;
-    return new Status(p != null, locked, f == null ? null : f.source(), f == null ? null : f.createdAt());
+    return new Status(p != null, locked,
+        mapper.withdrawFreezes(userId).stream().map(f -> new WithdrawPinApi.Freeze(f.source(), f.reason(), f.createdAt())).toList());
+  }
+
+  /** 有任何一个来源的提现冻结 */
+  private boolean frozen(long userId) {
+    return !mapper.withdrawFreezes(userId).isEmpty();
   }
 
   @Override
   public void verify(long userId, PinInput pin) {
-    if (mapper.withdrawFreeze(userId) != null) throw new BizException("WITHDRAW_FROZEN", "提现已冻结：要人工核对本人后才能解冻");
+    if (frozen(userId)) throw new BizException("WITHDRAW_FROZEN", "提现已冻结：要人工核对本人后才能解冻");
     String p = decode(userId, pin, "pin");
     BizException e = own.execute(st -> check(userId, p));
     if (e != null) throw e;
+  }
+
+  @Override
+  public void verifyIdentity(long userId, PinInput pin) {
+    String p = decode(userId, pin, "pin");
+    BizException e = own.execute(st -> check(userId, p));
+    if (e != null) throw e;
+  }
+
+  @Override
+  public void clearPin(long userId) {
+    mapper.deletePin(userId);
+  }
+
+  @Override
+  public boolean releaseFreeze(long userId, String source) {
+    return mapper.deleteWithdrawFreezeOf(userId, source) == 1;
   }
 
   /** 在自己的事务里核对、计数；返回要抛的错（不在事务里抛，免得计数被回滚） */
@@ -239,12 +261,13 @@ class WithdrawPins implements WithdrawPinApi {
   }
 
   @Override
-  public String unfreezeWithdraw(long userId) {
+  public java.util.List<String> unfreezeWithdraw(long userId, String source) {
     return tx.execute(st -> {
-      AuthMapper.WithdrawFreezeRow f = mapper.withdrawFreeze(userId);
-      if (f == null) return null;
-      mapper.deleteWithdrawFreeze(userId);
-      return f.source();
+      java.util.List<String> had = mapper.withdrawFreezes(userId).stream().map(AuthMapper.WithdrawFreezeRow::source)
+          .filter(x -> source == null || x.equals(source)).toList();
+      if (source == null) mapper.deleteWithdrawFreeze(userId);
+      else mapper.deleteWithdrawFreezeOf(userId, source);
+      return had;
     });
   }
 }

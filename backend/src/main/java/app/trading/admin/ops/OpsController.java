@@ -85,14 +85,15 @@ class OpsController {
     return customers.detail(id);
   }
 
-  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解除）。请求体 {reason, password}：原因必填、重新输入自己的登录密码 */
-  record WithdrawUnfreezeBody(String reason, String password) {}
+  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解除）。请求体 {reason, password, source}：原因必填、重新输入自己的登录密码；source 为空或 all 解除全部来源，否则只解除那一个 */
+  record WithdrawUnfreezeBody(String reason, String password, String source) {}
 
   /** 第 4 批：人工解冻提现（冻结提现只能人工解冻；权限 withdraw:unfreeze，默认只有超管；高危、原因、管理员密码、告警邮件） */
   @RequiresPermission(Permission.WITHDRAW_UNFREEZE)
   @PostMapping("/api/admin/customers/{id}/withdraw-unfreeze")
   CustomerOps.Detail unfreezeWithdraw(@PathVariable long id, @RequestBody(required = false) WithdrawUnfreezeBody body) {
-    customers.unfreezeWithdraw(AdminContext.current(), id, body == null ? null : body.reason(), body == null ? null : body.password());
+    customers.unfreezeWithdraw(AdminContext.current(), id, body == null ? null : body.reason(), body == null ? null : body.password(),
+        body == null ? null : body.source());
     return customers.detail(id);
   }
 
@@ -226,6 +227,20 @@ class OpsController {
   @PostMapping("/api/admin/withdrawals/{id}/emergency-cancel")
   FundsOps.WithdrawalView emergencyCancel(@PathVariable long id, @RequestBody ReasonBody body) {
     return funds.emergencyCancel(AdminContext.current(), id, body == null ? null : body.reason());
+  }
+
+  /** 第 4 批 4b 审查 🟡1：冻结时暂停的提现，解除冻结后逐笔处理——继续放款 */
+  @RequiresPermission(Permission.WITHDRAWAL_REVIEW)
+  @PostMapping("/api/admin/withdrawals/{id}/release-held")
+  FundsOps.WithdrawalView releaseHeld(@PathVariable long id, @RequestBody(required = false) ReasonBody body) {
+    return funds.releaseHeld(AdminContext.current(), id, body == null ? null : body.reason());
+  }
+
+  /** 同上——取消并退回（高危；交过钱包提供方的不行） */
+  @RequiresPermission(Permission.WITHDRAWAL_EMERGENCY_CANCEL)
+  @PostMapping("/api/admin/withdrawals/{id}/cancel-held")
+  FundsOps.WithdrawalView cancelHeld(@PathVariable long id, @RequestBody(required = false) ReasonBody body) {
+    return funds.cancelHeld(AdminContext.current(), id, body == null ? null : body.reason());
   }
 
   @RequiresPermission(Permission.RECON_VIEW)

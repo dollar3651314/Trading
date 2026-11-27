@@ -1,18 +1,56 @@
 /**
  * 提示页上的两个入口：「申请冻结提现」「找回 Telegram 账户」（TB-33 要求提示页保留）。
- * 完整流程（本人信息、图形验证码、人工审核、反对期等，需求文档 TG机器人-08 页）在第 4 批做；这一批先占住入口，如实说明还没开放。
+ * 第 4 批 4b：「找回 Telegram 账户」说明流程，并给出用新 Telegram 打开机器人申请的按钮（深链 ?start=recover，机器人直接进入找回）——
+ * 换绑只在机器人里申请（要知道申请人的新 TG 是谁）。「申请冻结提现」的网页表单在第 4 批 4c 做，这里先如实说明还没开放。
  */
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
+import { getAuthOptions } from '../../api/auth';
 import { AuthLayout } from '../auth/AuthLayout';
+import { botLink } from './tgLib';
+
+function Recover() {
+  const { t } = useTranslation();
+  const [bot, setBot] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    getAuthOptions().then(
+      (o) => alive && setBot(o.botUsername),
+      () => alive && setBot(null),
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const link = botLink(bot);
+  return (
+    <>
+      <p className="small" data-testid="tg-recover-steps">
+        {t('tg.recoverSteps')}
+      </p>
+      {link ? (
+        <a className="btn btn-primary btn-block" href={`${link}?start=recover`} target="_blank" rel="noreferrer">
+          {t('tg.recoverOpenBot')}
+        </a>
+      ) : bot === null ? (
+        <div className="notice info">{t('tg.recoverNoBot')}</div>
+      ) : null}
+    </>
+  );
+}
 
 export default function TgEntry({ kind }: { kind: 'freeze' | 'recover' }) {
   const { t } = useTranslation();
   return (
-    <AuthLayout title={t(kind === 'freeze' ? 'tg.freeze' : 'tg.recover')}>
-      <div className="notice info" role="status" data-testid="tg-entry-pending">
-        {t('tg.entryPending')}
-      </div>
+    <AuthLayout title={t(kind === 'freeze' ? 'tg.freeze' : 'tg.recoverTitle')}>
+      {kind === 'recover' ? (
+        <Recover />
+      ) : (
+        <div className="notice info" role="status" data-testid="tg-entry-pending">
+          {t('tg.entryPending')}
+        </div>
+      )}
       <Link to="/tg" className="btn btn-block">
         {t('tg.back')}
       </Link>

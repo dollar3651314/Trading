@@ -14,6 +14,10 @@ import {
   type CurrentAdmin,
   type CustomerDetail,
   type WithdrawSafety,
+  freezesOf,
+  type HeldWithdrawal,
+  type Recovery,
+  type RecoveryDetail,
   type CustomerProfileInput,
   type CustomerQuery,
   type CustomerSummary,
@@ -297,6 +301,7 @@ export function getCustomer(id: number): Promise<CustomerDetail> {
       positions,
       ledger: ledgerFor(c, false),
       closedPositions: db.closedPositions.filter((p) => p.customerId === id).slice(0, 20),
+      heldWithdrawals: heldWithdrawals.get(id) ?? [],
       withdrawSafety: c.telegramId ? (withdrawSafety.get(id) ?? { pinSet: false, pinLockedUntil: null, withdrawFrozen: false, frozenSource: null, frozenAt: null }) : null,
     };
   });
@@ -305,7 +310,7 @@ export function getCustomer(id: number): Promise<CustomerDetail> {
 /** 第 4 批：TG 客户的提现安全（原型里只放在内存，刷新即恢复） */
 export const withdrawSafety = new Map<number, WithdrawSafety>();
 
-export function unfreezeCustomerWithdraw(id: number, reason: string, password: string): Promise<CustomerDetail> {
+export function unfreezeCustomerWithdraw(id: number, reason: string, password: string, source = 'all'): Promise<CustomerDetail> {
   return mutate(() => {
     requirePerm('withdraw:unfreeze');
     const r = requireReason(reason);
@@ -313,9 +318,12 @@ export function unfreezeCustomerWithdraw(id: number, reason: string, password: s
     if (!password) throw new ApiError('errors.currentPasswordWrong', undefined, { status: 400, code: 'CURRENT_PASSWORD_WRONG' });
     const s = withdrawSafety.get(id);
     if (!s?.withdrawFrozen) throw new ApiError('errors.notWithdrawFrozen');
-    const was = s.frozenSource;
-    withdrawSafety.set(id, { ...s, withdrawFrozen: false, frozenSource: null, frozenAt: null });
-    audit('customer.withdraw_unfreeze', String(id), true, r, { withdrawFrozen: was }, { withdrawFrozen: 'no' });
+    // 4b 审查 🔴R2：一个来源一条，只解除选的来源（'all' 全部）
+    const all = freezesOf(s);
+    const left = source === 'all' ? [] : all.filter((f) => f.source !== source);
+    if (left.length === all.length) throw new ApiError('errors.notWithdrawFrozen');
+    withdrawSafety.set(id, { ...s, withdrawFrozen: left.length > 0, frozenSource: left[0]?.source ?? null, frozenAt: left[0]?.at ?? null, freezes: left });
+    audit('customer.withdraw_unfreeze', String(id), true, r, { withdrawFrozen: all.map((f) => f.source).join(',') }, { withdrawFrozen: left.length ? left.map((f) => f.source).join(',') : 'no' });
   }).then(() => getCustomer(id));
 }
 
@@ -621,7 +629,13 @@ export function getWithdrawal(id: string): Promise<WithdrawalDetail> {
 /** 第 4 批审查：出金详情的安全情况（原型：账户冻结看客户状态，提现冻结看 withdrawSafety；安全事件原型里没有） */
 function withdrawalSafety(c: { id: number; status: string }) {
   const s = withdrawSafety.get(c.id);
-  return { accountFrozen: c.status === 'frozen', withdrawFrozen: !!s?.withdrawFrozen, withdrawFrozenSource: s?.frozenSource ?? null, securityEvents48h: withdrawEvents.get(c.id) ?? [] };
+  return {
+    accountFrozen: c.status === 'frozen',
+    withdrawFrozen: !!s?.withdrawFrozen,
+    withdrawFrozenSource: s?.frozenSource ?? null,
+    withdrawFrozenSources: s ? freezesOf(s).map((f) => f.source) : [],
+    securityEvents48h: withdrawEvents.get(c.id) ?? [],
+  };
 }
 
 /** 原型：客户最近 48 小时的安全事件（测试里设置） */
@@ -1504,3 +1518,128 @@ export const mockGuards = {
   adminName: () => currentAdmin().displayName,
   audit,
 };
+
+// ---------- 第 4 批 4b：找回申请、冻结时暂停的提现（原型：内存里，测试里设置） ----------
+/** 原型：客户冻结时暂停的提现（按客户号） */
+export const heldWithdrawals = new Map<number, HeldWithdrawal[]>();
+/** 原型：找回申请 */
+export const recoveries: Recovery[] = [];
+const recoveryEvents = new Map<string, RecoveryDetail['events']>();
+
+function recoveryEvent(id: string, action: string, note: string | null) {
+  const list = recoveryEvents.get(id) ?? [];
+  list.push({ action, actor: `admin:${currentAdmin().id}`, note, at: nowString() });
+  recoveryEvents.set(id, list);
+}
+
+function recoveryDetail(id: string): RecoveryDetail {
+  const r = recoveries.find((x) => x.id === id);
+  if (!r) throw new ApiError('errors.notFound');
+  return { recovery: { ...r }, events: [...(recoveryEvents.get(id) ?? [])] };
+}
+
+function requireAdminPassword(password: string) {
+  // 原型登录不核对密码，这里也只要求填了（真实接口核对管理员自己的登录密码，输错计入登录失败锁定）
+  if (!password) throw new ApiError('errors.currentPasswordWrong', undefined, { status: 400, code: 'CURRENT_PASSWORD_WRONG' });
+}
+
+export function listRecoveries(status?: string): Promise<Recovery[]> {
+  return mutateRead(() => ({ items: recoveries.filter((r) => !status || r.status === status).map((r) => ({ ...r })) })).then((x) => x.items);
+}
+
+export function getRecovery(id: string): Promise<RecoveryDetail> {
+  return mutateRead(() => recoveryDetail(id));
+}
+
+export function approveRecovery(id: string, note: string, password: string): Promise<RecoveryDetail> {
+  return mutate(() => {
+    requirePerm('recovery:review');
+    if (!note.trim()) throw new ApiError('errors.proofNoteRequired');
+    requireAdminPassword(password);
+    const r = recoveries.find((x) => x.id === id);
+    if (!r) throw new ApiError('errors.notFound');
+    if (r.status === 'objection') throw new ApiError('errors.recoveryNotReady');
+    if (r.status !== 'proof') throw new ApiError('errors.recoveryNotPending');
+    if (r.revokeRequested) throw new ApiError('errors.recoveryRevokePending');
+    r.status = 'approved';
+    r.proofNote = note.trim();
+    r.approvedBy = currentAdmin().displayName;
+    r.approvedAt = nowString();
+    r.executeAt = new Date(Date.now() + (r.kind === 'rebind' ? 24 : 48) * 3_600_000).toISOString();
+    recoveryEvent(id, 'approve', note.trim());
+    audit('recovery.approve', id, true, note.trim(), { status: 'proof' }, { status: 'approved' });
+    return recoveryDetail(id);
+  });
+}
+
+function closeRecovery(id: string, reason: string, to: 'rejected' | 'cancelled', action: string, from: Recovery['status'][]) {
+  requirePerm('recovery:review');
+  const r = requireReason(reason);
+  const x = recoveries.find((y) => y.id === id);
+  if (!x) throw new ApiError('errors.notFound');
+  if (!from.includes(x.status)) throw new ApiError(to === 'rejected' ? 'errors.recoveryNotPending' : 'errors.recoveryNotOpen');
+  x.status = to;
+  x.closedBy = currentAdmin().displayName;
+  x.closeReason = r;
+  x.closedAt = nowString();
+  recoveryEvent(id, action, r);
+  audit(`recovery.${action}`, id, true, r, null, { status: to });
+  return recoveryDetail(id);
+}
+
+export function rejectRecovery(id: string, reason: string): Promise<RecoveryDetail> {
+  return mutate(() => closeRecovery(id, reason, 'rejected', 'reject', ['objection', 'proof']));
+}
+
+export function revokeRecovery(id: string, reason: string): Promise<RecoveryDetail> {
+  return mutate(() => closeRecovery(id, reason, 'cancelled', 'revoke', ['objection', 'proof', 'approved']));
+}
+
+export function keepRecovery(id: string, reason: string, password: string): Promise<RecoveryDetail> {
+  return mutate(() => {
+    requirePerm('recovery:review');
+    const r = requireReason(reason);
+    requireAdminPassword(password);
+    const x = recoveries.find((y) => y.id === id);
+    if (!x) throw new ApiError('errors.notFound');
+    if ((x.status !== 'approved' && x.status !== 'proof') || !x.revokeRequested) throw new ApiError('errors.recoveryNoRevokeRequest');
+    x.revokeRequested = false;
+    x.revokeRequestedAt = null;
+    x.keptAt = nowString();
+    recoveryEvent(id, 'keep', r);
+    audit('recovery.keep', id, true, r, { revokeRequested: true }, { revokeRequested: false });
+    return recoveryDetail(id);
+  });
+}
+
+function heldFor(id: string): [number, HeldWithdrawal] {
+  for (const [cid, list] of heldWithdrawals) {
+    const h = list.find((x) => x.id === id);
+    if (h) return [cid, h];
+  }
+  throw new ApiError('errors.withdrawNotHeld');
+}
+
+export function releaseHeldWithdrawal(id: string, reason: string): Promise<Withdrawal> {
+  return mutate(() => {
+    requirePerm('withdrawal:review');
+    const r = requireReason(reason);
+    const [cid] = heldFor(id);
+    if (withdrawSafety.get(cid)?.withdrawFrozen || db.customerById(cid)?.status === 'frozen') throw new ApiError('errors.customerWithdrawFrozen');
+    heldWithdrawals.set(cid, (heldWithdrawals.get(cid) ?? []).filter((x) => x.id !== id));
+    audit('withdrawal.release_held', id, true, r, { held: true }, { held: false });
+    return { id } as unknown as Withdrawal;
+  });
+}
+
+export function cancelHeldWithdrawal(id: string, reason: string): Promise<Withdrawal> {
+  return mutate(() => {
+    requirePerm('withdrawal:emergency_cancel');
+    const r = requireReason(reason);
+    const [cid, h] = heldFor(id);
+    if (h.sentBefore) throw new ApiError('errors.withdrawSentBefore');
+    heldWithdrawals.set(cid, (heldWithdrawals.get(cid) ?? []).filter((x) => x.id !== id));
+    audit('withdrawal.cancel_held', id, true, r, { status: 'approved' }, { status: 'cancelled' });
+    return { id } as unknown as Withdrawal;
+  });
+}

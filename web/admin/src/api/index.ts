@@ -252,3 +252,21 @@ export const saveQuoteLicense: typeof real.saveQuoteLicense = IS_MOCK ? mockQuot
 export const setQuoteGate: typeof real.setQuoteGate = IS_MOCK ? mockQuote.setQuoteGate : real.setQuoteGate;
 /** GET /api/admin/quote-service/sources */
 export const getQuoteSources: typeof real.getQuoteSources = IS_MOCK ? mockQuote.getQuoteSources : real.getQuoteSources;
+
+// ---------- 第 4 批 4b：找回申请（权限 recovery:review，默认只有超管）、冻结时暂停的提现 ----------
+/** GET /api/admin/recoveries?status= */
+export const listRecoveries: typeof real.listRecoveries = IS_MOCK ? mock.listRecoveries : real.listRecoveries;
+/** GET /api/admin/recoveries/{id} */
+export const getRecovery: typeof real.getRecovery = IS_MOCK ? mock.getRecovery : real.getRecovery;
+/** POST /api/admin/recoveries/{id}/approve（高危：核对记录 + 后台密码；告警邮件） */
+export const approveRecovery: typeof real.approveRecovery = IS_MOCK ? mock.approveRecovery : real.approveRecovery;
+/** POST /api/admin/recoveries/{id}/reject（驳回换绑会封申请人的 TG） */
+export const rejectRecovery: typeof real.rejectRecovery = IS_MOCK ? mock.rejectRecovery : real.rejectRecovery;
+/** POST /api/admin/recoveries/{id}/revoke（Amos 本人撤销，直接生效） */
+export const revokeRecovery: typeof real.revokeRecovery = IS_MOCK ? mock.revokeRecovery : real.revokeRecovery;
+/** POST /api/admin/recoveries/{id}/keep（争议路径撤销请求：维持批准，后台密码） */
+export const keepRecovery: typeof real.keepRecovery = IS_MOCK ? mock.keepRecovery : real.keepRecovery;
+/** POST /api/admin/withdrawals/{id}/release-held（继续放款） */
+export const releaseHeldWithdrawal: typeof real.releaseHeldWithdrawal = IS_MOCK ? mock.releaseHeldWithdrawal : real.releaseHeldWithdrawal;
+/** POST /api/admin/withdrawals/{id}/cancel-held（取消并退回，高危） */
+export const cancelHeldWithdrawal: typeof real.cancelHeldWithdrawal = IS_MOCK ? mock.cancelHeldWithdrawal : real.cancelHeldWithdrawal;

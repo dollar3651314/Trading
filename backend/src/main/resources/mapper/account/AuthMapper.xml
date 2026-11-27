@@ -60,8 +60,9 @@
   </select>
 
   <!-- 冻结提现（只能人工解冻） -->
-  <select id="withdrawFreeze" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
-    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId}
+  <!-- 4b 审查 🔴R2：一个来源一行，有任何一行就是冻结；最早的在前 -->
+  <select id="withdrawFreezes" resultType="app.trading.account.auth.AuthMapper$WithdrawFreezeRow">
+    SELECT user_id, source, reason, created_at FROM account_withdraw_freeze WHERE user_id = #{userId} ORDER BY created_at, source
   </select>
   <insert id="insertWithdrawFreeze">
     INSERT IGNORE INTO account_withdraw_freeze (user_id, source, reason, created_at) VALUES (#{userId}, #{source}, #{reason}, #{at})
@@ -175,5 +176,13 @@
     UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3)
     WHERE user_id = #{userId} AND revoked_at IS NULL
     <if test="exceptTokenHash != null">AND token_hash &lt;&gt; #{exceptTokenHash}</if>
+  </update>
+  <!-- 第 4 批 4b：找回和换绑 -->
+  <delete id="deleteWithdrawFreezeOf">DELETE FROM account_withdraw_freeze WHERE user_id = #{userId} AND source = #{source}</delete>
+
+  <delete id="deletePin">DELETE FROM account_withdraw_pin WHERE user_id = #{userId}</delete>
+
+  <update id="rebindTelegram">
+    UPDATE account_telegram SET telegram_id = #{telegramId}, username = #{username}, authorized_at = #{at} WHERE user_id = #{userId}
   </update>
 </mapper>

@@ -434,3 +434,19 @@ export type ServerEvent =
   | { type: 'withdraw'; status: WithdrawStatus; amount: string }
   /** 充值记录变了（发现待确认、确认数变化、到账、作废、冲正），客户端重新拉取充值记录（E2E-2） */
   | { type: 'deposit'; status: DepositStatus; network: Network; amount: string; confirmations?: number };
+
+/** 第 4 批 4b：自己账户的找回申请（GET /api/me/recoveries）。kind：rebind 人工换绑 / pin_reset 没邮箱人工重设提现密码 */
+export interface MyRecovery {
+  id: number;
+  kind: 'rebind' | 'pin_reset';
+  status: 'objection' | 'proof' | 'approved' | 'executed' | 'rejected' | 'cancelled';
+  /** 点过"不是我"（争议路径） */
+  disputed: boolean;
+  disputePinOk: boolean;
+  disputeFrozen: boolean;
+  objectionEndsAt: string | null;
+  executeAt: string | null;
+  /** 争议路径上已提出撤销、等审核员决定 */
+  revokeRequested: boolean;
+  createdAt: string;
+}

@@ -55,7 +55,8 @@ class AdminTgSafetyTest extends AdminTestSupport {
     Admin viewer = withRoles(role(Permission.CUSTOMER_VIEW));
     Admin a = withRoles(role(Permission.CUSTOMER_VIEW, Permission.WITHDRAW_UNFREEZE));
     JsonNode d = body(call(get("/api/admin/customers/" + uid), viewer.cookie(), null));
-    assertThat(d.get("withdrawSafety").toString()).isEqualTo("{\"pinSet\":true,\"pinLockedUntil\":null,\"withdrawFrozen\":true,\"frozenSource\":\"pin_locks\",\"frozenAt\":\"2026-10-14T09:00:00Z\"}");
+    assertThat(d.get("withdrawSafety").toString()).isEqualTo("{\"pinSet\":true,\"pinLockedUntil\":null,\"withdrawFrozen\":true,\"frozenSource\":\"pin_locks\",\"frozenAt\":\"2026-10-14T09:00:00Z\","
+        + "\"freezes\":[{\"source\":\"pin_locks\",\"reason\":\"30 天内提现密码被锁 2 次\",\"at\":\"2026-10-14T09:00:00Z\"}]}");
     assertThat(unfreeze(uid, viewer, "{\"reason\":\"x\",\"password\":\"" + PASSWORD + "\"}")).startsWith("403");
     assertThat(unfreeze(uid, a, "{\"password\":\"" + PASSWORD + "\"}")).as("必须填原因").startsWith("400");
     assertThat(unfreeze(uid, a, "{\"reason\":\"视频核对了本人\"}")).as("没输密码").startsWith("400").contains("CURRENT_PASSWORD_WRONG");
@@ -93,6 +94,29 @@ class AdminTgSafetyTest extends AdminTestSupport {
     String r = call(post("/api/admin/withdrawals/" + no + "/approve"), s.cookie(), "{}").getContentAsString();
     assertThat(r).contains("WITHDRAW_FROZEN").contains("客户已冻结提现，请先核对");
     assertThat(jdbc.queryForObject("SELECT status FROM wallet_withdrawal WHERE public_no = ?", String.class, no)).isEqualTo("REVIEWING");
+  }
+
+  /** 4b 审查 🔴R2：一个来源一行；后台可以只解除一个来源（别的来源照旧冻结），或者解除全部 */
+  @Test
+  void 多个来源的冻结_后台只解除选的来源_不会顺带解掉找回申请的冻结() throws Exception {
+    long uid = frozenCustomer();
+    jdbc.update("INSERT INTO account_withdraw_freeze (user_id, source, reason, created_at) VALUES (?, 'RECOVERY', '找回申请 #1 证明阶段', '2026-10-14 09:30:00')", uid);
+    Admin s = superAdmin();
+    JsonNode d = body(call(get("/api/admin/customers/" + uid), s.cookie(), null));
+    assertThat(d.get("withdrawSafety").get("freezes").toString()).contains("\"source\":\"pin_locks\"").contains("\"source\":\"recovery\"");
+    assertThat(unfreeze(uid, s, "{\"reason\":\"x\",\"password\":\"" + PASSWORD + "\",\"source\":\"nonsense\"}")).startsWith("400");
+    JsonNode one = body(call(post("/api/admin/customers/" + uid + "/withdraw-unfreeze"), s.cookie(),
+        "{\"reason\":\"视频核对了本人\",\"password\":\"" + PASSWORD + "\",\"source\":\"pin_locks\"}"));
+    assertThat(one.get("withdrawSafety").get("withdrawFrozen").asBoolean()).as("RECOVERY 还在").isTrue();
+    assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).containsExactly("RECOVERY");
+    assertThat(unfreeze(uid, s, "{\"reason\":\"再来\",\"password\":\"" + PASSWORD + "\",\"source\":\"pin_locks\"}")).contains("NOT_FROZEN");
+    JsonNode all = body(call(post("/api/admin/customers/" + uid + "/withdraw-unfreeze"), s.cookie(), "{\"reason\":\"全部解除\",\"password\":\"" + PASSWORD + "\"}"));
+    assertThat(all.get("withdrawSafety").get("withdrawFrozen").asBoolean()).isFalse();
+    // 告警邮件里写明这次解除了哪些来源：第一次只有 PIN_LOCKS，"全部"那次是剩下的 RECOVERY
+    @SuppressWarnings("unchecked")
+    org.mockito.ArgumentCaptor<Map<String, String>> p = org.mockito.ArgumentCaptor.forClass(Map.class);
+    verify(mail, org.mockito.Mockito.times(2)).send(eq("ops@example.com"), eq("OPS_WITHDRAW_UNFREEZE"), p.capture());
+    assertThat(p.getAllValues()).extracting(m -> m.get("source")).containsExactly("PIN_LOCKS", "RECOVERY");
   }
 
   @Test

@@ -200,7 +200,7 @@ class AdminSecurityTest extends AdminTestSupport {
     assertThat(nested).containsEntry("apiToken", "***").containsEntry("secretKey", "***").containsEntry("ok", 1);
     // 第 1 批：去掉资金归集的 3 个（sweep:view / operate / config，自带钱包淘汰），加钱包提供方的 2 个（provider:view / operate）
     // 第 3 批：加报价服务的 4 个（quote_service:view、quote_key:operate、quote_limit:edit、quote_license:edit）
-    // TG 机器人第 4 批：加 withdraw:unfreeze（人工解除提现冻结，默认只有超管）
-    assertThat(Set.of(Permission.values())).hasSize(56);
+    // TG 机器人第 4 批：加 withdraw:unfreeze（人工解除提现冻结，默认只有超管）；4b 加 recovery:review（找回申请，Amos 一人审核）
+    assertThat(Set.of(Permission.values())).hasSize(57);
   }
 }

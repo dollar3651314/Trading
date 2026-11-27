@@ -153,7 +153,8 @@
       "disable": "Disabled administrator",
       "enable": "Enabled administrator",
       "reset_password": "Reset administrator password",
-      "update": "Updated administrator"
+      "update": "Updated administrator",
+      "reauth": "Re-enter admin password"
     },
     "auth": {
       "login": "Signed in"
@@ -225,7 +226,9 @@
       "emergency_cancel": "Emergency-cancelled withdrawal",
       "reject": "Rejected withdrawal",
       "auto_rule_update": "Change withdrawal auto-approval rules",
-      "requery": "Re-query payout status"
+      "requery": "Re-query payout status",
+      "release_held": "Resume a held withdrawal",
+      "cancel_held": "Cancel and refund a held withdrawal"
     },
     "payment": {
       "network_on": "Open deposit network",
@@ -242,6 +245,12 @@
       "license_save": "Save quote license",
       "gate_on": "Public switch ON",
       "gate_off": "Public switch OFF"
+    },
+    "recovery": {
+      "approve": "Approve recovery",
+      "reject": "Reject recovery",
+      "revoke": "Cancel recovery",
+      "keep": "Keep recovery (disputed cancel request)"
     }
   },
   "auth": {
@@ -477,7 +486,24 @@
       "confirmUnfreeze": "Unfreeze",
       "password": "Your login password",
       "passwordHint": "Re-enter your own admin login password to lift a withdrawal freeze. An alert email is sent afterwards.",
-      "passwordRequired": "Enter your login password"
+      "passwordRequired": "Enter your login password",
+      "which": "Which source to lift",
+      "whichRequired": "Choose a source",
+      "all": "All sources",
+      "recoveryWarn": "Some freezes come from a recovery request (verification or dispute). Lifting them removes that request's protection; make sure the request is settled first."
+    },
+    "held": {
+      "title": "Withdrawals held by a freeze",
+      "note": "These approved withdrawals were held when the account was frozen. They do not resume on unfreeze; decide each one.",
+      "line": "{{amount}} USDT · {{chain}} · held at {{time}} ({{reason}})",
+      "sentBefore": "Already handed to the wallet provider; cannot refund directly",
+      "release": "Resume payout",
+      "cancel": "Cancel and refund",
+      "releaseImpact": "Removes the hold and hands it to the wallet provider (the provider's second manual review still applies).",
+      "cancelImpact": "Cancels the withdrawal and returns the amount to the customer's balance.",
+      "confirmRelease": "Resume",
+      "confirmCancel": "Cancel and refund",
+      "target": "Withdrawal {{id}}: {{amount}} USDT → {{address}}"
     }
   },
   "dashboard": {
@@ -604,7 +630,15 @@
     "signupAllLocked": "Sign-up cannot be opened to everyone (*) before the freeze and recovery flows go live. Enter specific Telegram user IDs.",
     "firstCheckRequired": "This is a first-check withdrawal. Tick \"verified\" before approving",
     "notWithdrawFrozen": "Withdrawals for this customer are not frozen",
-    "customerWithdrawFrozen": "Withdrawals for this customer are frozen. Check before approving"
+    "customerWithdrawFrozen": "Withdrawals for this customer are frozen. Check before approving",
+    "withdrawNotHeld": "This withdrawal is not on hold",
+    "withdrawSentBefore": "This withdrawal was already handed to the wallet provider (it may be paying out). Check with the provider before refunding",
+    "proofNoteRequired": "A verification note is required",
+    "recoveryNotReady": "Still in the 48-hour objection period",
+    "recoveryNotPending": "Only pending requests can be handled",
+    "recoveryNotOpen": "This request is already closed",
+    "recoveryNoRevokeRequest": "There is no pending cancellation request",
+    "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -740,7 +774,8 @@
     "quoteKeys": "Clients & keys",
     "quoteUsage": "Limits & usage",
     "quoteLicense": "Licenses & switch",
-    "quoteSources": "Quote sources"
+    "quoteSources": "Quote sources",
+    "recoveries": "Recovery requests"
   },
   "menus": {
     "group": "Group",
@@ -867,7 +902,8 @@
     "quote_key_operate": "Create clients; create, rotate or disable keys",
     "quote_limit_edit": "Edit key limits and default limits",
     "quote_license_edit": "Register quote licenses",
-    "withdraw_unfreeze": "Lift withdrawal freezes"
+    "withdraw_unfreeze": "Lift withdrawal freezes",
+    "recovery_review": "Review recovery requests (Amos only)"
   },
   "permModule": {
     "customer": "Customers",
@@ -2025,5 +2061,80 @@
     "switches24h": "Switches (24 h)",
     "deviations24h": "Deviations (24 h)",
     "srcRule": "Rules: switch to backup after 10 s without quotes, back after 30 s of recovery; opening paused when providers differ by > 0.5%. Production only trades on sources with a trading-use license."
+  },
+  "recoveries": {
+    "title": "Recovery requests",
+    "sub": "Manual Telegram rebinds and manual PIN resets for customers without email. Reviewed by Amos alone: approving needs a verification note and your admin password; rebinds run 24 hours and PIN resets 48 hours after approval.",
+    "statusFilter": "Status",
+    "empty": "No recovery requests",
+    "detail": "Recovery request details",
+    "no": "Request #{{id}}",
+    "kindCol": "Type",
+    "statusCol": "Status",
+    "customer": "Customer",
+    "currentTg": "Current Telegram",
+    "kyc": "KYC",
+    "applicant": "Applicant (new Telegram)",
+    "createdAt": "Submitted",
+    "objectionEnds": "Objection period ends",
+    "executeAt": "Runs at",
+    "kind": {
+      "rebind": "Telegram rebind",
+      "pin_reset": "Manual PIN reset"
+    },
+    "status": {
+      "objection": "Objection period",
+      "proof": "Manual review",
+      "approved": "Approved, waiting",
+      "executed": "Done",
+      "rejected": "Rejected",
+      "cancelled": "Cancelled"
+    },
+    "dispute": "Dispute",
+    "disputedTag": "Holder tapped Not me",
+    "pinOk": "PIN confirmed",
+    "disputeFrozen": "Withdrawals frozen (dispute)",
+    "disputeRule": "Disputed: the original Telegram tapped \"Not me\".",
+    "revokeRequested": "{{time}} the original Telegram asked to cancel. Cancellations of rebinds always go to you (dispute or not): approval and execution pause and the freeze stays. Verify by video, then choose Cancel or Keep",
+    "revokeRequestedTag": "Cancel requested",
+    "proofNoteLine": "Verification note: {{note}} (approved by {{by}})",
+    "closeLine": "Closed by {{by}}: {{reason}}",
+    "events": "History",
+    "action": {
+      "apply": "Submitted",
+      "object": "Holder tapped Not me",
+      "pin_ok": "PIN confirmed",
+      "pin_wrong": "Wrong PIN",
+      "dispute_freeze": "Withdrawals frozen (dispute)",
+      "proof": "Moved to verification",
+      "approve": "Approved",
+      "revoke_request": "Holder asked to cancel",
+      "keep": "Kept",
+      "cancel": "Cancelled",
+      "reject": "Rejected",
+      "execute": "Done",
+      "execute_failed": "Could not run",
+      "revoke_after_keep": "Holder cancelled again (already kept; no pause)"
+    },
+    "target": "Customer: {{name}} (#{{id}})",
+    "approve": "Approve",
+    "confirmApprove": "Approve",
+    "approveImpactRebind": "The account moves to the applicant's new Telegram 24 hours after approval: PIN and whitelist cleared, withdrawals paused 48 hours, all web sessions signed out. The original Telegram can cancel during the wait (disputed requests go to you).",
+    "approveImpactPin": "Takes effect 48 hours after approval: the old PIN stops working, the whitelist is cleared and withdrawals pause for 48 hours. The customer can cancel during the wait.",
+    "proofNote": "Verification note (source address / shared app screen / P2P, etc.)",
+    "password": "Your admin password",
+    "passwordHint": "Approving or keeping needs your own admin password. Wrong entries count with login failures and lock the account and sign you out at the limit.",
+    "passwordRequired": "Enter your admin password",
+    "reject": "Reject",
+    "confirmReject": "Reject",
+    "rejectImpact": "The applicant's Telegram account is banned (long term); later requests from it are refused.",
+    "revoke": "Cancel",
+    "confirmRevoke": "Cancel request",
+    "revokeImpact": "Your own cancellation takes effect immediately: the request closes and any freeze it caused is lifted.",
+    "keep": "Keep approval",
+    "confirmKeep": "Keep",
+    "keepImpact": "Clears the cancellation request; the rebind runs at its scheduled time. Verify the original holder by video first.",
+    "keptTitle": "Already kept",
+    "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution."
   }
 }

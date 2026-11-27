@@ -1,5 +1,5 @@
 /**
- * 后台菜单（需求说明书 5.2：10 个一级菜单；第 3 批加"报价服务"，共 11 个）。每个页面都必须在这里有入口（AC-35，由单元测试检查）。
+ * 后台菜单（需求说明书 5.2：10 个一级菜单；第 3 批加"报价服务"，TG 机器人第 4 批 4b 加"找回申请"，共 12 个）。每个页面都必须在这里有入口（AC-35，由单元测试检查）。
  * Admin menu tree: 10 top-level entries; every routed page must be reachable from here.
  */
 import type { ReactNode } from 'react';
@@ -15,6 +15,7 @@ import {
   BellOutlined,
   SettingOutlined,
   ApiOutlined,
+  UserSwitchOutlined,
 } from '@ant-design/icons';
 import type { PermissionCode } from './permissions';
 
@@ -35,6 +36,8 @@ export const MENU: MenuItemDef[] = [
   { key: 'dashboard', labelKey: 'menu.dashboard', icon: <AppstoreOutlined />, path: '/dashboard', permission: 'dashboard:view' },
   { key: 'customers', labelKey: 'menu.customers', icon: <TeamOutlined />, path: '/customers', permission: 'customer:view' },
   { key: 'kyc', labelKey: 'menu.kyc', icon: <IdcardOutlined />, path: '/kyc', permission: 'kyc:view', badge: 'kyc' },
+  // 第 4 批 4b：找回申请（人工换绑、没邮箱人工重设提现密码），默认只有超管能看
+  { key: 'recoveries', labelKey: 'menu.recoveries', icon: <UserSwitchOutlined />, path: '/recoveries', permission: 'recovery:review' },
   {
     key: 'funds',
     labelKey: 'menu.funds',

@@ -21,6 +21,11 @@ class WithdrawalRow {
   /** 没邮箱的 TG 客户的首笔：审核前要人工核实（08 页第 0 节） */
   boolean firstCheck;
   Long firstCheckedBy;
+  /** 第 4 批 4b（审查 🟡1）：冻结时暂停的时间和原因（只对已审核待放款）；暂停中不交钱包提供方，解除冻结也不自动继续 */
+  LocalDateTime heldAt;
+  String heldReason;
+  /** 交钱包提供方认领过几次（> 0 说明交过，可能已在付款，不能直接取消退回） */
+  int sendAttempts;
   LocalDateTime coolingEndsAt;
   LocalDateTime delayEndsAt;
   String txHash;

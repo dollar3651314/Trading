@@ -17,6 +17,8 @@ public enum Permission {
   CUSTOMER_ADJUST_BALANCE("customer:adjust_balance", "customer", true),
   /** 第 4 批：人工解除提现冻结（高危：重新输入管理员密码、原因必填、告警邮件）。默认只有超管有（超管自带全部权限，其他角色要单独分配） */
   WITHDRAW_UNFREEZE("withdraw:unfreeze", "customer", true),
+  /** 第 4 批 4b：找回申请（人工换绑、没邮箱忘记提现密码）的查看和审核——Amos 一人审核，默认只有超管有（批准、维持要再输管理员密码、告警邮件） */
+  RECOVERY_REVIEW("recovery:review", "customer", true),
 
   KYC_VIEW("kyc:view", "kyc", false),
   KYC_REVIEW("kyc:review", "kyc", false),

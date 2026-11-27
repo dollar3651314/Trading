@@ -587,7 +587,8 @@
     "upDownGreen": "绿涨红跌",
     "upDownRed": "红涨绿跌",
     "onboarding": "新手引导",
-    "withdrawPin": "提现密码"
+    "withdrawPin": "提现密码",
+    "recoveries": "找回申请"
   },
   "kyc": {
     "intro": "只在提现前需要身份认证；注册、充值和交易不受影响。",
@@ -733,7 +734,11 @@
     "withdrawFrozen": "提现已冻结：要人工核对本人后才能解冻，请联系客服",
     "withdrawHold": "为了安全，现在还不能提现（开户满 24 小时、安全变更后 24 小时、重设提现密码后 48 小时）",
     "tgDailyLimit": "超过今天的提现额度",
-    "noEmail": "没有绑定邮箱：忘记提现密码要走人工找回"
+    "noEmail": "没有绑定邮箱：忘记提现密码要走人工找回",
+    "recoveryOpen": "已经有一份进行中的申请，请等它处理完。",
+    "recoveryNotDisputed": "请先在机器人里点「不是我」。",
+    "hasEmail": "你绑了邮箱，请用邮箱验证码重设提现密码。",
+    "notTgAccount": "只有 Telegram 账户可以申请人工重设提现密码。"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -936,7 +941,11 @@
       "reauth": "你的账户最近有安全变更。请先回到机器人，点「重新授权」，再打开交易。",
       "disabled": "这个进入方式现在没有开放。请回到机器人重新点按钮。",
       "security": "为了安全，这个账户的网页已全部退出（刚设置或修改了提现密码、提交了身份认证等安全变更），之后一段时间内不能提现。请回到 Telegram 机器人，点「重新授权」，再点「打开交易」。"
-    }
+    },
+    "recoverTitle": "找回 Telegram 账户",
+    "recoverSteps": "找回（换绑到新的 Telegram）只在机器人里申请：用你的新 Telegram 打开机器人，点「找回原账户」，按提示发送客户号、身份认证时的姓名和证件号后 4 位。原账户持有人会收到通知，48 小时反对期后由审核员视频核对，批准后再等 24 小时执行。客服不会私信要你的密码或验证码。",
+    "recoverOpenBot": "用新 Telegram 打开机器人申请",
+    "recoverNoBot": "机器人地址暂时取不到，请在 Telegram 里搜索我们的机器人，发 /recover。"
   },
   "pin": {
     "title": "提现密码",
@@ -954,7 +963,6 @@
     "emailCode": "邮箱验证码",
     "sendCode": "发送验证码",
     "codeSent": "已发送",
-    "forgotNoEmail": "你没有绑定邮箱：忘记提现密码要走人工找回（提交本人信息、视频核对），这项功能会在后续版本开放。",
     "submit": {
       "set": "设置提现密码",
       "change": "修改提现密码",
@@ -965,6 +973,41 @@
       "forgot": "忘记了"
     },
     "withdrawLabel": "提现密码",
-    "whitelistLabel": "提现密码（加白名单要输）"
+    "whitelistLabel": "提现密码（加白名单要输）",
+    "manualApply": "申请人工重设",
+    "manualIntro": "没有绑邮箱：忘记提现密码要人工重设——审核员会通过 Telegram 联系你，视频核对本人和资金来源；批准后 48 小时生效，原提现密码作废、白名单清空，之后 48 小时内不能提现。",
+    "manualDone": "已提交（申请 #{{id}}）。可以在「找回申请」里查看或撤销。",
+    "manualView": "查看找回申请"
+  },
+  "recovery": {
+    "title": "找回申请",
+    "intro": "这里是别人申请找回（换绑）你的账户、或你申请人工重设提现密码的记录。",
+    "empty": "没有找回申请。",
+    "kind": {
+      "rebind": "换绑 Telegram",
+      "pin_reset": "人工重设提现密码"
+    },
+    "status": {
+      "objection": "反对期中",
+      "proof": "人工核对中",
+      "approved": "已批准，等待执行",
+      "executed": "已执行",
+      "rejected": "没有通过",
+      "cancelled": "已撤销"
+    },
+    "no": "申请 #{{id}}",
+    "createdAt": "提交时间 {{time}}",
+    "objectionEnds": "反对期到 {{time}}",
+    "executeAt": "{{time}} 执行",
+    "disputed": "你点过「不是我」：转人工严格核对",
+    "pinOk": "已输对提现密码，没有冻结提现",
+    "frozen": "提现已冻结，直到人工处理完",
+    "revokeRequested": "已提出撤销，等审核员核对后决定",
+    "pinLabel": "输提现密码（输对不冻结提现）",
+    "pinSubmit": "确认是我本人",
+    "pinOkDone": "已确认：不冻结提现，这份申请仍转人工严格核对。",
+    "revoke": "撤销这份申请",
+    "revokeConfirm": "确定撤销？",
+    "revokeBody": "人工重设提现密码：立即撤销。换绑申请：反对期里撤销按「不是我」处理；之后的撤销一律交审核员视频核对后决定，决定之前不会执行，提现冻结保持不变。"
   }
 }

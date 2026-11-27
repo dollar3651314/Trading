@@ -18,14 +18,30 @@ public interface WithdrawPinApi {
   /** 一次输入：键盘编号 + 按了第几个键（0～9，按键盘上的顺序），6 个 */
   record PinInput(String keypadId, List<Integer> positions) {}
 
+  /** 一个来源的提现冻结：PIN_LOCKS / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY */
+  record Freeze(String source, String reason, LocalDateTime at) {}
+
   /**
    * @param lockedUntil 锁定到期（没锁时为空）
-   * @param frozenSource 冻结提现的来源（没冻结时为空）：PIN_LOCKS / WEB_REQUEST / BOT_SELF / DISPUTE / RECOVERY
+   * @param freezes 全部来源的提现冻结（4b 审查 🔴R2：一个来源一行，有任何一个就是冻结），最早的在前
    */
-  record Status(boolean set, LocalDateTime lockedUntil, String frozenSource, LocalDateTime frozenAt) {
+  record Status(boolean set, LocalDateTime lockedUntil, List<Freeze> freezes) {
 
     public boolean withdrawFrozen() {
-      return frozenSource != null;
+      return !freezes.isEmpty();
+    }
+
+    /** 最早的冻结来源（没冻结时为空），只用来显示 */
+    public String frozenSource() {
+      return freezes.isEmpty() ? null : freezes.getFirst().source();
+    }
+
+    public LocalDateTime frozenAt() {
+      return freezes.isEmpty() ? null : freezes.getFirst().at();
+    }
+
+    public boolean frozenBy(String source) {
+      return freezes.stream().anyMatch(f -> f.source().equals(source));
     }
   }
 
@@ -37,9 +53,22 @@ public interface WithdrawPinApi {
    */
   void verify(long userId, PinInput pin);
 
+  /**
+   * 第 4 批 4b：核对本人（找回申请里原 TG 点了"不是我"之后输提现密码）：和 {@link #verify} 一样计数、锁定，但提现冻结着也照样核对
+   */
+  void verifyIdentity(long userId, PinInput pin);
+
+  /** 第 4 批 4b：换绑、人工重设提现密码执行时清掉提现密码（之后要重新设置） */
+  void clearPin(long userId);
+
+  /** 第 4 批 4b：解除指定来源的冻结（找回申请结束时解除 RECOVERY / DISPUTE），别的来源的冻结不动；返回是否解除了 */
+  boolean releaseFreeze(long userId, String source);
+
   /** 冻结提现（已经冻结的不变） */
   void freezeWithdraw(long userId, String source, String reason);
 
-  /** 人工解冻（后台，写审计由调用方做）；没冻结时什么也不做，返回原来的来源 */
-  String unfreezeWithdraw(long userId);
+  /**
+   * 人工解冻（后台，写审计由调用方做）：source 为空解除全部来源，否则只解除这个来源。返回解除了的来源（没有时为空列表）
+   */
+  List<String> unfreezeWithdraw(long userId, String source);
 }

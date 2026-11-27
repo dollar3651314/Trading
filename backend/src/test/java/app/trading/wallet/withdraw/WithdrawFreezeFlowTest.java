@@ -50,6 +50,12 @@ class WithdrawFreezeFlowTest {
   @Autowired Clock clock;
   @MockitoBean MailApi mail;
 
+  /** 每个用例开始时没有广播器（应用启动时注册的钱包提供方付款器也去掉），需要的用例自己注册假广播器 */
+  @org.junit.jupiter.api.BeforeEach
+  void noSenders() {
+    for (Chain c : Chain.values()) senders.remove(c);
+  }
+
   @AfterEach
   void reset() {
     ((MutableClock) clock).reset();
@@ -208,8 +214,9 @@ class WithdrawFreezeFlowTest {
     assertThat(s.sent).isEmpty();
   }
 
+  /** 4b 审查 🟡1：冻结时暂停的已审核待放款提现，解除冻结后不自动继续，要后台逐笔选"继续放款"或"取消并退回" */
   @Test
-  void 已审核待放款时冻结了_不交钱包提供方_解除后继续() {
+  void 已审核待放款时冻结了_暂停_解除冻结后不自动继续_后台选继续放款才交出去() {
     long uid = user();
     WithdrawalRow w = reviewing(uid, "100");
     // 没有广播器：审核通过后留在待放款
@@ -220,10 +227,55 @@ class WithdrawFreezeFlowTest {
     withdraws.advance();
     assertThat(status(w.id)).as("冻结期间不交出去").isEqualTo("APPROVED");
     assertThat(s.sent).isEmpty();
+    assertThat(withdraws.held(uid)).singleElement().satisfies(h -> {
+      assertThat(h.reason()).isEqualTo("提现已冻结");
+      assertThat(h.sentBefore()).isFalse();
+    });
+    assertThat(org.junit.jupiter.api.Assertions.assertThrows(BizException.class, () -> withdraws.releaseHeld(w.id, 9L, "核对过")).code())
+        .as("还冻结着不能继续").isEqualTo("WITHDRAW_FROZEN");
     unfreezeRow(uid);
     withdraws.advance();
+    assertThat(status(w.id)).as("解除冻结后不自动继续").isEqualTo("APPROVED");
+    assertThat(s.sent).isEmpty();
+    withdraws.releaseHeld(w.id, 9L, "视频核对本人后继续");
     assertThat(status(w.id)).isEqualTo("BROADCASTING");
     assertThat(s.sent).hasSize(1);
+    assertThat(withdraws.held(uid)).isEmpty();
+  }
+
+  @Test
+  void 暂停中从没交过钱包提供方的_可以取消并退回() {
+    long uid = user();
+    WithdrawalRow w = reviewing(uid, "100");
+    withdraws.approve(w.id, 9L); // 没有广播器：没认领过
+    pins.freezeWithdraw(uid, "WEB_REQUEST", "测试");
+    assertThat(withdraws.held(uid)).hasSize(1);
+    jdbc.update("DELETE FROM account_withdraw_freeze WHERE user_id = ?", uid);
+    withdraws.cancelHeld(w.id, 9L, "客户要求取消");
+    assertThat(status(w.id)).isEqualTo("CANCELLED");
+    assertThat(bal(uid)).isEqualByComparingTo("10000");
+    assertThat(frozen(uid)).isEqualByComparingTo("0");
+    assertThat(org.junit.jupiter.api.Assertions.assertThrows(BizException.class, () -> withdraws.cancelHeld(w.id, 9L, "再来")).code())
+        .isEqualTo("WITHDRAW_NOT_HELD");
+  }
+
+  @Test
+  void 暂停中但交过钱包提供方的_不能直接取消退回_防重复出金() {
+    long uid = user();
+    WithdrawalRow w = reviewing(uid, "100");
+    var s = sender();
+    s.next = new WithdrawSender.Wait("提供方说等一等"); // 交过一次，结果不确定，留在待放款
+    withdraws.approve(w.id, 9L);
+    assertThat(status(w.id)).isEqualTo("APPROVED");
+    assertThat(s.sent).hasSize(1);
+    pins.freezeWithdraw(uid, "WEB_REQUEST", "测试");
+    assertThat(withdraws.held(uid)).singleElement().satisfies(h -> assertThat(h.sentBefore()).isTrue());
+    assertThat(org.junit.jupiter.api.Assertions.assertThrows(BizException.class, () -> withdraws.cancelHeld(w.id, 9L, "取消")).code())
+        .isEqualTo("WITHDRAW_SENT_BEFORE");
+    assertThat(status(w.id)).isEqualTo("APPROVED");
+    assertThat(frozen(uid)).isEqualByComparingTo("100");
+    withdraws.advance();
+    assertThat(s.sent).as("暂停中不再交出去").hasSize(1);
   }
 
   // ---------- 冻结的时候处理在途的 ----------
