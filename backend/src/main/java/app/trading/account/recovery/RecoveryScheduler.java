@@ -29,6 +29,9 @@ class RecoveryScheduler {
 
   @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
   void run() {
+    // 第 6 批：服务器命令 cancel-recovery 的撤销请求先处理（执行前），过期的撤销链接令牌顺便清掉
+    each(0, service::processServerCancels);
+    each(0, service::cleanupRevokeTokens);
     LocalDateTime now = service.now();
     for (Long id : mapper.objectionDue(now)) each(id, () -> service.objectionEnded(id));
     for (Long id : mapper.disputeUnfrozen(now.minus(RecoveryService.DISPUTE_PIN_GRACE))) each(id, () -> service.disputeGraceEnded(id));

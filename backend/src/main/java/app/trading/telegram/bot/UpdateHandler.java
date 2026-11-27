@@ -74,6 +74,8 @@ public class UpdateHandler {
   static final String TEXT_RECOVER_APPLIED = "已收到你的找回申请。信息核对无误的话，我们会通知原账户持有人；48 小时内没人反对，审核员会通过这个 Telegram 联系你做本人和资金来源核对。"
       + "信息不对的不会有后续通知。";
   static final String TEXT_RECOVER_BANNED = "暂不受理你的找回申请。";
+  /** 第 6 批 TB-38：暂停受理人工申请中 */
+  static final String TEXT_RECOVER_PAUSED = "找回申请暂停受理中（审核员暂时不在）。如果担心账户被别人用，请先在网页「申请冻结提现」止损，之后再来申请找回。";
   /** 等申请人发信息的时间 */
   static final Duration RECOVER_WAIT = Duration.ofMinutes(10);
   private static final java.util.regex.Pattern RECOVER_INPUT = java.util.regex.Pattern.compile("^\\s*#?(\\d{1,19})\\s+(.+?)\\s+([0-9A-Za-z]{4})\\s*$");
@@ -341,6 +343,7 @@ public class UpdateHandler {
       case ACCEPTED -> TEXT_RECOVER_APPLIED;
       case TOO_FREQUENT -> TEXT_RECOVER_FREQUENT;
       case BANNED -> TEXT_RECOVER_BANNED;
+      case PAUSED -> TEXT_RECOVER_PAUSED;
     }, null);
   }
 

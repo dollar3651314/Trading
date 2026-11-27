@@ -23,7 +23,7 @@ class NotifyOps {
 
   /** 字段和原型 NotifyTemplate 一致（id 就是模板编号） */
   record TemplateView(String id, String code, String nameZh, String nameEn, boolean builtIn, boolean enabled, List<String> channels, String titleZh,
-      String bodyZh, String titleEn, String bodyEn, List<String> variables, String updatedAt) {}
+      String bodyZh, String titleEn, String bodyEn, List<String> variables, String updatedAt, boolean locked) {}
 
   record TemplatePatch(String titleZh, String bodyZh, String titleEn, String bodyEn, Boolean enabled) {}
 
@@ -48,7 +48,7 @@ class NotifyOps {
 
   private static TemplateView view(NotifyAdminApi.Template t) {
     return new TemplateView(t.code(), t.code(), t.nameZh(), t.nameEn(), t.builtIn(), t.enabled(), t.channels().stream().map(c -> c.name().toLowerCase()).toList(),
-        t.titleZh(), t.bodyZh(), t.titleEn(), t.bodyEn(), t.variables(), Ops.time(t.updatedAt()));
+        t.titleZh(), t.bodyZh(), t.titleEn(), t.bodyEn(), t.variables(), Ops.time(t.updatedAt()), "STAFF".equals(t.audience()));
   }
 
   List<TemplateView> templates() {

@@ -57,6 +57,7 @@ export type ApiErrorReason =
   | 'tgDailyLimit'
   | 'noEmail'
   | 'recoveryOpen'
+  | 'recoveryPaused'
   | 'recoveryNotDisputed'
   | 'hasEmail'
   | 'notTgAccount'
@@ -125,6 +126,8 @@ export const SERVER_CODES: Record<string, ApiErrorReason> = {
   NO_EMAIL: 'noEmail',
   // 找回申请（第 4 批 4b）
   RECOVERY_OPEN: 'recoveryOpen',
+  // 第 6 批 TB-38：暂停受理人工申请
+  RECOVERY_PAUSED: 'recoveryPaused',
   RECOVERY_NOT_DISPUTED: 'recoveryNotDisputed',
   HAS_EMAIL: 'hasEmail',
   NOT_TG_ACCOUNT: 'notTgAccount',

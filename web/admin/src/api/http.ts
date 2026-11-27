@@ -68,6 +68,9 @@ export const ERROR_KEYS: Record<string, string> = {
   RECOVERY_OPEN: 'errors.recoveryOpen',
   // 第 5 批：应急开关已经是这个状态
   EMERGENCY_UNCHANGED: 'errors.emergencyUnchanged',
+  // 第 6 批：暂停受理人工申请已经是这个状态；告警邮件模板不能改
+  INTAKE_UNCHANGED: 'errors.intakeUnchanged',
+  TEMPLATE_LOCKED: 'errors.templateLocked',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',

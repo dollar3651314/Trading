@@ -38,6 +38,7 @@
 #   sudo trading restore <备份文件> --confirm [--production]   真恢复（生产要多写 --production）：先备份现在的数据 → 停应用 → 导入 → 起应用；
 #                                    恢复后**暂停把提现交给 TopUP**（备份之后已交的提现会变回"已审核待放款"，再交就重复付款），人工在 TopUP 后台核对后：
 #   sudo trading start-payout --confirm   恢复提现交给 TopUP
+#   sudo trading cancel-recovery <编号> "原因"   撤销一份找回申请（后台打不开时；TB-37）：写撤销请求和审计，应用 1 分钟内按后台撤销的规则处理
 #   sudo trading backup-key <age 公钥> | off   备份另加 Amos 的公钥（私钥在 Amos 的密码管理器）；off = 去掉
 #   sudo trading watch               每 5 分钟的检查（含 24 小时内容器被内核按内存超限杀掉），状态变化时发邮件（定时器运行；trading-deploy 定时器停着时不检查）
 # 给 TopUP 用的约定（TopUP topup.sh 的 stop_other）：装在 /opt/trading/，更新定时器叫 trading-deploy.timer，/opt/trading/backup.sh before-topup 能备份
@@ -911,13 +912,18 @@ set_emergency() {
   hex=$(printf '%s' "$reason" | od -An -tx1 | tr -d ' \n')
   who="server:$(printf '%s' "${SUDO_USER:-root}" | tr -cd 'A-Za-z0-9_.-' | cut -c1-24)"
   if [ "$on" = 1 ]; then act=telegram.emergency_on; else act=telegram.emergency_off; fi
-  sql="START TRANSACTION;"
-  sql+=" INSERT INTO trading.account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) VALUES ($on, 'server', '$who', CONVERT(UNHEX('$hex') USING utf8mb4), UTC_TIMESTAMP(3));"
-  [ "$on" = 1 ] || sql+=" UPDATE trading.account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE kind = 'EMERGENCY' AND revoked_at IS NULL;"
+  # #45 复审：和后台一样，写之前在同一个事务里 SELECT … FOR UPDATE 最新一行再判断一次（两个人同时开关时只有一个算数）；只在状态真的变了时写记录、审计、作废会话
+  sql="START TRANSACTION; SET @cur = 0;"
+  sql+=" SELECT turned_on INTO @cur FROM trading.account_tg_emergency_log ORDER BY id DESC LIMIT 1 FOR UPDATE;"
+  sql+=" INSERT INTO trading.account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) SELECT $on, 'server', '$who', CONVERT(UNHEX('$hex') USING utf8mb4), UTC_TIMESTAMP(3) FROM DUAL WHERE @cur <> $on;"
+  sql+=" SET @n = ROW_COUNT();"
+  [ "$on" = 1 ] || sql+=" UPDATE trading.account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE @n = 1 AND kind = 'EMERGENCY' AND revoked_at IS NULL;"
   sql+=" INSERT INTO trading.admin_audit_log (admin_id, admin_name, ip, action, target, high_risk, result, reason, before_json, after_json, created_at)"
-  sql+=" VALUES (NULL, '$who', NULL, '$act', 'telegram.emergency', 1, 'SUCCESS', CONVERT(UNHEX('$hex') USING utf8mb4), '{\"on\":$([ "$on" = 1 ] && echo false || echo true)}', '{\"on\":$([ "$on" = 1 ] && echo true || echo false)}', UTC_TIMESTAMP(3));"
-  sql+=" COMMIT;"
-  mysql_trading "$sql" > /dev/null 2>&1 || die "写数据库失败，应急开关没有改（看 sudo trading status）"
+  sql+=" SELECT NULL, '$who', NULL, '$act', 'telegram.emergency', 1, 'SUCCESS', CONVERT(UNHEX('$hex') USING utf8mb4), '{\"on\":$([ "$on" = 1 ] && echo false || echo true)}', '{\"on\":$([ "$on" = 1 ] && echo true || echo false)}', UTC_TIMESTAMP(3) FROM DUAL WHERE @n = 1;"
+  sql+=" COMMIT; SELECT @n;"
+  local changed
+  changed=$(mysql_trading "$sql" 2> /dev/null | tr -cd '01') || die "写数据库失败，应急开关没有改（看 sudo trading status）"
+  if [ "$changed" != 1 ]; then ok "应急开关刚被别人改成了$([ "$on" = 1 ] && echo 打开 || echo 关闭)，这次没有改"; return 0; fi
   if [ "$on" = 1 ]; then
     ok "应急开关已打开：网页登录页会出现「用 Telegram 登录」（最多 5 秒后；要先填好登录机器人 FX_TG_LOGIN_BOT_USERNAME 和 set-key FX_TG_LOGIN_BOT_TOKEN）"
     log "应急开关已打开（$who）"
@@ -927,6 +933,35 @@ set_emergency() {
     log "应急开关已关闭（$who）"
     send_mail "应急开关已关闭" "$(printf 'Telegram 应急登录开关已关闭（服务器终端）：网页上的「用 Telegram 登录」消失，用它登录的会话已全部作废。\n操作人：%s\n原因：%s\n时间（UTC）：%s' "$who" "$reason" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" || true
   fi
+}
+
+# 第 6 批（TB-37 ②）：服务器上撤销找回申请（后台打不开、或怀疑后台账号被盗时）。命令只在数据库里写一条撤销请求和审计（原因只以十六进制进 SQL），
+# 应用每分钟处理一次（到执行时间的换绑也会先处理撤销请求），按后台撤销一样的规则结束申请、解除申请带来的冻结、发告警邮件。命令最多等 TR_CANCEL_WAIT_S 秒（默认 90）看结果
+cmd_cancel_recovery() {
+  need_root
+  local id=${1:-} reason=${2:-} hex who req res i wait=${TR_CANCEL_WAIT_S:-90}
+  [[ "$id" =~ ^[1-9][0-9]{0,18}$ ]] && [ $# -le 2 ] || die "用法：sudo trading cancel-recovery <找回申请编号> \"原因\"（编号在告警邮件和后台\"找回申请\"里）"
+  if [ -z "$reason" ]; then need_tty; read -r -p "原因（必填，写进审计和告警邮件）：" reason < /dev/tty || true; fi
+  reason=$(printf '%s' "$reason" | tr -d '\r\n')
+  [ -n "${reason// /}" ] || die "原因必填；什么都没有改"
+  [ "$(printf '%s' "$reason" | wc -c)" -le 1200 ] || die "原因太长（最多约 400 个汉字）；什么都没有改"
+  trading_running || die "Trading 现在停着（数据库没在跑），撤销不了；先 sudo trading on"
+  hex=$(printf '%s' "$reason" | od -An -tx1 | tr -d ' \n')
+  who="server:$(printf '%s' "${SUDO_USER:-root}" | tr -cd 'A-Za-z0-9_.-' | cut -c1-24)"
+  req=$(mysql_trading "START TRANSACTION; INSERT INTO trading.account_recovery_cancel_request (recovery_id, requested_by, reason, created_at) VALUES ($id, '$who', CONVERT(UNHEX('$hex') USING utf8mb4), UTC_TIMESTAMP(3)); SET @r = LAST_INSERT_ID(); INSERT INTO trading.admin_audit_log (admin_id, admin_name, ip, action, target, high_risk, result, reason, before_json, after_json, created_at) VALUES (NULL, '$who', NULL, 'recovery.cancel_request', '$id', 1, 'SUCCESS', CONVERT(UNHEX('$hex') USING utf8mb4), NULL, NULL, UTC_TIMESTAMP(3)); COMMIT; SELECT @r;" 2> /dev/null | tr -cd '0-9') \
+    || die "写数据库失败，没有撤销（看 sudo trading status）"
+  [ -n "$req" ] || die "写数据库失败，没有撤销（看 sudo trading status）"
+  log "找回申请 #$id 撤销请求已提交（请求 #$req，$who）"
+  for ((i = 0; i < wait; i += 3)); do
+    res=$(mysql_trading "SELECT COALESCE(result, '') FROM trading.account_recovery_cancel_request WHERE id = $req" 2> /dev/null | tr -cd 'A-Z_')
+    case "$res" in
+      CANCELLED) ok "找回申请 #$id 已撤销：申请带来的提现冻结已解除，已通知客户、发告警邮件"; return 0 ;;
+      NOT_OPEN) ok "找回申请 #$id 已经结束了（执行过、驳回或撤销过），没有改"; return 0 ;;
+      NOT_FOUND) bad "没有找回申请 #$id，请核对编号"; return 1 ;;
+    esac
+    sleep 3
+  done
+  say "撤销请求已排队（请求 #$req），应用每分钟处理一次；到执行时间也会先撤销、不执行。稍后在后台\"找回申请\"或告警邮件里确认"
 }
 
 cmd_set() {
@@ -1867,6 +1902,7 @@ main() {
     keys) cmd_keys "$@" ;;
     set) cmd_set "$@" ;;
     set-key) cmd_set_key "$@" ;;
+    cancel-recovery) cmd_cancel_recovery "$@" ;;
     status) need_root; cmd_status ;;
     mem) need_root; cmd_mem ;;
     update) cmd_update ;;

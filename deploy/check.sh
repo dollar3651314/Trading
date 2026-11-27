@@ -72,7 +72,7 @@ check "nginx -t 通过" docker run --rm -e APP_DOMAIN=app.check.invalid -e ADMIN
   -v "$tmp/le:/etc/letsencrypt:ro" "$NGINX_IMAGE" nginx -t
 check "web.Dockerfile 给了 9 个限流阈值、不让收录开关（默认 true）、官网去机器人的两个保底值（默认不去）" bash -c 'test "$1" -eq 24 && grep -q "^ENV FX_NGINX_NOINDEX=true$" deploy/web.Dockerfile && grep -q "^ENV FX_NGINX_BOT_URL=none FX_NGINX_TG_ONLY=false$" deploy/web.Dockerfile' _ "${#envs[@]}"
 check "报价子域名不转发 /internal" grep -q 'location ~\* "^/+(%2f)\*internal" { return 404; }' deploy/nginx/site.conf.template
-check "申请冻结提现（提交和验证码）单独低限额：两个模板都有每秒 2 个、突发 5 个、连接 10 个（4c 复审 🔴D1）" bash -c 'for f in deploy/nginx/site.conf.template deploy/nginx/gateway.conf.template; do grep -q "zone=tr_freeze:1m rate=2r/s;" "$f" && grep -A2 -F "location /api/public/withdraw-freeze {" "$f" | grep -q "limit_req zone=tr_freeze burst=5 nodelay;" && grep -A3 -F "location /api/public/withdraw-freeze {" "$f" | grep -q "limit_conn tr_freeze_conn 10;" || exit 1; done'
+check "申请冻结提现：提交（每秒 20、突发 40、连接 40）和验证码（每秒 10、突发 20、连接 20）各自一档，两个模板都有（4c 复审 🔴D1、#44 复审：网关地址共用时不能低到一个人就挡住所有人）" bash -c 'for f in deploy/nginx/site.conf.template deploy/nginx/gateway.conf.template; do grep -q "zone=tr_freeze:1m rate=20r/s;" "$f" && grep -q "zone=tr_captcha:1m rate=10r/s;" "$f" && grep -A2 -F "location = /api/public/withdraw-freeze {" "$f" | grep -q "limit_req zone=tr_freeze burst=40 nodelay;" && grep -A3 -F "location = /api/public/withdraw-freeze {" "$f" | grep -q "limit_conn tr_freeze_conn 40;" && grep -A2 -F "location = /api/public/withdraw-freeze/captcha {" "$f" | grep -q "limit_req zone=tr_captcha burst=20 nodelay;" && grep -A3 -F "location = /api/public/withdraw-freeze/captcha {" "$f" | grep -q "limit_conn tr_captcha_conn 20;" || exit 1; done'
 
 echo "== Nginx 路由（真的起 Nginx，报价服务用桩代替，按域名发请求）"
 # 桩：在 quote 网络别名 quote-internal:8090 上，回"quote-app:<路径>"，用来看请求到没到报价服务
@@ -139,7 +139,10 @@ case "$1" in
   events) exit "${FAKE_EVENTS_RC:-1}" ;;
   # compose exec：FAKE_SQL_LOG 时把参数记下来（应急开关的 SQL）；查应急开关状态时回 FAKE_EM_STATE（默认 0 = 关）
   compose) case " $* " in *" ps "*) echo fake-mysql-id ;; *" exec "*) [ -z "${FAKE_SQL_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_SQL_LOG"
-      case "$*" in *"SELECT COALESCE((SELECT turned_on"*) echo "${FAKE_EM_STATE:-0}" ;; *START\ TRANSACTION*) ;; *) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac ;; esac; exit 0 ;;
+      # 应急开关的写事务回 FAKE_EM_CHANGED（默认 1 = 真的改了）；cancel-recovery 的写事务回请求编号 7，查结果回 FAKE_CANCEL_RESULT（默认 CANCELLED）
+      case "$*" in *"SELECT COALESCE((SELECT turned_on"*) echo "${FAKE_EM_STATE:-0}" ;; *"START TRANSACTION; SET @cur"*) echo "${FAKE_EM_CHANGED:-1}" ;;
+        *"account_recovery_cancel_request (recovery_id"*) echo 7 ;; *"SELECT COALESCE(result"*) echo "${FAKE_CANCEL_RESULT-CANCELLED}" ;;
+        *START\ TRANSACTION*) ;; *) printf 'Uptime\t5\nmax_connections\t18\n' ;; esac ;; esac; exit 0 ;;
   # 轮流 / 独立模式的演练用：FAKE_TOPUP_RUNNING=1 时说 TopUP 的容器在跑；Trading 的容器一律"没在跑"
   ps) case " $* " in *project=topup*) [ -z "${FAKE_TOPUP_RUNNING:-}" ] || echo fake-topup-id ;; *project=trading*) [ -z "${FAKE_TRADING_RUNNING:-}" ] || echo fake-trading-id ;; esac; exit 0 ;;
   # 报价服务容器的健康状态（wait_healthy 用）：FAKE_QUOTE_HEALTHY=1 时 healthy
@@ -377,14 +380,27 @@ check "应急开关备用办法：sudo trading set TR_TG_EMERGENCY_LOGIN on|off 
   em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN maybe "x" > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
   em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on " " < /dev/null > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
   em_run bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "bot banned'"'"'); DROP TABLE x; --" > /dev/null || exit 1
-  grep -q "INSERT INTO trading.account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) VALUES (1, '"'"'server'"'"', '"'"'server:root'"'"', CONVERT(UNHEX('"'"'626f742062616e6e656427293b2044524f50205441424c4520783b202d2d'"'"') USING utf8mb4)" "$tmp/em-sql" || exit 1
+  grep -q "INSERT INTO trading.account_tg_emergency_log (turned_on, actor, actor_name, reason, created_at) SELECT 1, '"'"'server'"'"', '"'"'server:root'"'"', CONVERT(UNHEX('"'"'626f742062616e6e656427293b2044524f50205441424c4520783b202d2d'"'"') USING utf8mb4), UTC_TIMESTAMP(3) FROM DUAL WHERE @cur <> 1" "$tmp/em-sql" || exit 1
+  grep -q "SELECT turned_on INTO @cur FROM trading.account_tg_emergency_log ORDER BY id DESC LIMIT 1 FOR UPDATE" "$tmp/em-sql" || exit 1
   grep -q "DROP TABLE" "$tmp/em-sql" && exit 1; grep -q "kind = '"'"'EMERGENCY'"'"'" "$tmp/em-sql" && exit 1
   grep -q "'"'"'telegram.emergency_on'"'"'" "$tmp/em-sql" && grep -q "已发邮件：\[测试\] Trading 应急开关已打开" "$tmp/tr/logs/trading.log" || exit 1
   em_run env FAKE_EM_STATE=1 bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN off "机器人恢复了" > /dev/null || exit 1
-  grep -q "UPDATE trading.account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE kind = '"'"'EMERGENCY'"'"' AND revoked_at IS NULL" "$tmp/em-sql" && grep -q "'"'"'telegram.emergency_off'"'"'" "$tmp/em-sql" || exit 1
+  grep -q "UPDATE trading.account_session SET revoked_at = UTC_TIMESTAMP(3) WHERE @n = 1 AND kind = '"'"'EMERGENCY'"'"' AND revoked_at IS NULL" "$tmp/em-sql" && grep -q "'"'"'telegram.emergency_off'"'"'" "$tmp/em-sql" || exit 1
   grep -q "已发邮件：\[测试\] Trading 应急开关已关闭" "$tmp/tr/logs/trading.log" || exit 1
   em_run env FAKE_EM_STATE=1 bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "再开" > /dev/null || exit 1; grep -q "START TRANSACTION" "$tmp/em-sql" && exit 1
   : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "停着" > /dev/null 2>&1 && exit 1
+  [ -s "$tmp/em-sql" ] && exit 1; true'
+check "应急开关备用办法：写之前 FOR UPDATE 锁住最新一行再判断（#45 复审）；锁住后发现别人已经改了就不发告警邮件、不报成功" bash -c '
+  mail_env ""; out=$(em_run env FAKE_EM_CHANGED=0 bash deploy/kit/trading set TR_TG_EMERGENCY_LOGIN on "并发") || exit 1
+  grep -q "刚被别人改成了打开" <<< "$out" && ! grep -q "应急开关已打开" "$tmp/tr/logs/trading.log"'
+check "cancel-recovery：只认编号、原因必填；写撤销请求和审计（原因十六进制）、等应用处理的结果；Trading 停着不写" bash -c '
+  em_run bash deploy/kit/trading cancel-recovery abc "x" > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
+  em_run bash deploy/kit/trading cancel-recovery 12 " " < /dev/null > /dev/null && exit 1; [ -s "$tmp/em-sql" ] && exit 1
+  out=$(em_run env TR_CANCEL_WAIT_S=3 bash deploy/kit/trading cancel-recovery 12 "x'"'"'); DROP") || exit 1; grep -q "找回申请 #12 已撤销" <<< "$out" || exit 1
+  grep -q "INSERT INTO trading.account_recovery_cancel_request (recovery_id, requested_by, reason, created_at) VALUES (12, '"'"'server:root'"'"', CONVERT(UNHEX('"'"'7827293b2044524f50'"'"') USING utf8mb4)" "$tmp/em-sql" && grep -q "'"'"'recovery.cancel_request'"'"'" "$tmp/em-sql" && ! grep -q "DROP" "$tmp/em-sql" || exit 1
+  out=$(em_run env TR_CANCEL_WAIT_S=3 FAKE_CANCEL_RESULT=NOT_FOUND bash deploy/kit/trading cancel-recovery 13 "x") && exit 1; grep -q "没有找回申请 #13" <<< "$out" || exit 1
+  out=$(em_run env TR_CANCEL_WAIT_S=1 FAKE_CANCEL_RESULT= bash deploy/kit/trading cancel-recovery 14 "x") || exit 1; grep -q "已排队" <<< "$out" || exit 1
+  : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" bash deploy/kit/trading cancel-recovery 12 "停着" > /dev/null 2>&1 && exit 1
   [ -s "$tmp/em-sql" ] && exit 1; true'
 check "第 5 批 set：登录机器人用户名、Amos 的后台账号编号在 set 清单（编号只认正整数）；登录机器人令牌只在 set-key 清单；compose 传给 trading-app、默认空" bash -c 'grep -q "^KEY_ALLOWED=\".* FX_TG_LOGIN_BOT_TOKEN .*\"$" deploy/kit/trading && ! grep -q "^SET_ALLOWED=.*FX_TG_LOGIN_BOT_TOKEN" deploy/kit/trading && grep -q "^SET_ALLOWED=\".* FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID .*\"$" deploy/kit/trading \
   && echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env" && tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID 12 > /dev/null && grep -q "^FX_ADMIN_OWNER_ID=12$" "$tmp/tr/.env" && ! tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID amos > /dev/null \

@@ -741,7 +741,8 @@
     "hasEmail": "Your account has an email. Reset your PIN with an email code instead.",
     "notTgAccount": "Only Telegram accounts can request a manual PIN reset.",
     "captchaInvalid": "Wrong or expired captcha. Try a new one",
-    "notSelfFrozen": "No freeze you set in the bot; other freezes are lifted manually"
+    "notSelfFrozen": "No freeze you set in the bot; other freezes are lifted manually",
+    "recoveryPaused": "Manual applications are paused for now (the reviewer is away). If you are worried about your account, freeze withdrawals first and apply again later."
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",
@@ -949,14 +950,14 @@
     "recoverOpenBot": "Open the bot with your new Telegram",
     "recoverNoBot": "The bot link is unavailable. Search for our bot in Telegram and send /recover.",
     "emergency": {
-      "notice": "⚠️ Emergency mode: the Telegram bot is temporarily unavailable. You can sign in on the web with your Telegram account for now. For your safety, withdrawals are paused for 24 hours after signing in this way; viewing, trading and deposits are not affected.",
+      "notice": "⚠️ Emergency mode: the Telegram bot is temporarily unavailable. You can sign in on the web with your Telegram account for now. For your safety, withdrawals are paused for 24 hours after signing in this way; viewing, trading and deposits are not affected. Only one device stays signed in this way: signing in here signs out your other devices.",
       "button": "Sign in with Telegram",
-      "done": "You just signed in with Telegram. For your safety, withdrawals are available after {{time}} (24 hours); viewing and trading are not affected.",
+      "done": "You just signed in with Telegram. For your safety, withdrawals are available after {{time}} (24 hours); viewing and trading are not affected. Your other devices were signed out (only the latest device stays signed in this way).",
       "enter": "Start trading",
       "reason": {
         "disabled": "Emergency sign-in is not available right now. Please try later or contact support.",
         "invalid": "Sign-in failed: the Telegram authorization could not be verified. Please try again.",
-        "expired": "Sign-in failed: the Telegram authorization was not completed or has expired. Please try again.",
+        "expired": "The Telegram authorization has expired. Please re-authorize: tap \"Sign in with Telegram\" above and confirm again in the Telegram window (if needed, remove this site from your Telegram authorizations first).",
         "used": "This authorization was already used. Please try again.",
         "no_account": "This Telegram account has no Trading account yet.",
         "frozen": "The account is frozen. Please contact support.",

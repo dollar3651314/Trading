@@ -347,6 +347,8 @@ class NotifyService implements NotifyApi, NotifyAdminApi, TelegramPrefsApi {
   public NotifyAdminApi.Template updateTemplate(String code, String titleZh, String bodyZh, String titleEn, String bodyEn, Boolean enabled) {
     Rows.TemplateRow t = mapper.template(code);
     if (t == null) throw new app.trading.common.error.BizException("NOT_FOUND", "模板不存在");
+    // 第 6 批 TB-37：告警邮件模板（STAFF）不能在后台改——偷到后台账号的人不能把告警里的内容、撤销入口删掉；要改走迁移
+    if ("STAFF".equals(t.audience)) throw new app.trading.common.error.BizException("TEMPLATE_LOCKED", "告警邮件模板不能在后台修改");
     java.util.Set<String> allowed = new java.util.HashSet<>(template(t).variables());
     ValidationException.Collector c = new ValidationException.Collector();
     String tz = text(c, "titleZh", titleZh, t.titleZh, 200, allowed);

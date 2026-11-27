@@ -80,6 +80,8 @@ export function TemplatesPage() {
                 perm="notify_template:edit"
                 size="small"
                 icon={<EditOutlined />}
+                disabled={!!r.locked}
+                disabledReason={t('templates.locked')}
                 onClick={() => {
                   setEditing(r);
                   form.setFieldsValue(r);

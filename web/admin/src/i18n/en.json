@@ -254,7 +254,11 @@
       "approve": "Approve recovery",
       "reject": "Reject recovery",
       "revoke": "Cancel recovery",
-      "keep": "Keep recovery (disputed cancel request)"
+      "keep": "Keep recovery (disputed cancel request)",
+      "intake_pause": "Pause manual applications",
+      "intake_resume": "Resume manual applications",
+      "revoke_link": "Cancel recovery via alert email link",
+      "cancel_request": "Cancel recovery via server command"
     },
     "telegram": {
       "emergency_on": "Turn on emergency switch",
@@ -665,7 +669,9 @@
     "telegramTaken": "That Telegram account is linked to another customer",
     "notTgAccount": "This customer has no Telegram link",
     "recoveryOpen": "This customer already has a recovery request in progress; settle it under Recovery requests first",
-    "emergencyUnchanged": "The emergency switch is already in that state; refresh the page"
+    "emergencyUnchanged": "The emergency switch is already in that state; refresh the page",
+    "intakeUnchanged": "Already in that state; refresh the page",
+    "templateLocked": "Alert email templates cannot be edited in the admin console"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -1355,7 +1361,8 @@
     "titleZh": "Title (Chinese)",
     "type": "Type",
     "updatedAt": "Updated",
-    "variables": "Variables (filled in when sent)"
+    "variables": "Variables (filled in when sent)",
+    "locked": "Alert email templates cannot be edited in the admin console"
   },
   "theme": {
     "dark": "Dark",
@@ -2167,7 +2174,23 @@
     "keptTitle": "Already kept",
     "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution.",
     "deposits": "Recent deposits (source check)",
-    "depositsHint": "Check the paying address on the explorer. A qualified source address is older than 30 days before the request and older than the last security event, has no exchange label, is not shared (sent to more than 20 addresses in 90 days), and no new paying address appeared in the last 30 days (page 08 section 0)."
+    "depositsHint": "Check the paying address on the explorer. A qualified source address is older than 30 days before the request and older than the last security event, has no exchange label, is not shared (sent to more than 20 addresses in 90 days), and no new paying address appeared in the last 30 days (page 08 section 0).",
+    "intake": {
+      "open": "Manual applications are open",
+      "paused": "Manual applications are paused",
+      "changed": "changed {{time}} by {{who}}",
+      "hint": "Pause while you are away: new rebind and PIN-reset requests are told to freeze withdrawals first; submitted ones stay in the queue, approved ones run as scheduled, and the freeze entry keeps working.",
+      "notOwner": "Only Amos's admin account can pause or resume intake.",
+      "ownerMissing": "Amos's admin account ID (FX_ADMIN_OWNER_ID) is not configured, so nobody can pause or resume intake.",
+      "pause": "Pause",
+      "resume": "Resume",
+      "askPause": "Pause manual applications?",
+      "askResume": "Resume manual applications?",
+      "impactPause": "New rebind and PIN-reset requests will not be accepted; submitted ones stay in the queue; approved ones run as scheduled; the freeze entry keeps working. This is audited and sends an alert email.",
+      "impactResume": "Rebind and PIN-reset requests can be submitted again. This is audited and sends an alert email.",
+      "confirmPause": "Pause",
+      "confirmResume": "Resume"
+    }
   },
   "emergency": {
     "title": "Emergency switch",
@@ -2204,6 +2227,24 @@
       "who": "By",
       "action": "Action",
       "reason": "Reason"
+    }
+  },
+  "revokeLink": {
+    "title": "Cancel a recovery request",
+    "id": "Request",
+    "kind": "Type",
+    "customer": "Customer",
+    "status": "Status",
+    "executeAt": "Runs at",
+    "impact": "The request ends at once and will not run; freezes it caused are lifted and the customer and applicant are notified. This link can only cancel and works once.",
+    "confirm": "Cancel this request",
+    "invalid": "This link was already used, has expired (24 hours) or is invalid",
+    "serverHint": "To cancel anyway, run sudo trading cancel-recovery <id> \"reason\" on the server, or cancel it under Recovery requests in the admin console.",
+    "doneHint": "Recorded in the request history and an alert email was sent.",
+    "result": {
+      "cancelled": "Recovery request #{{id}} cancelled",
+      "not_open": "This request has already ended; nothing changed",
+      "invalid": "The link was used, expired or invalid; nothing was cancelled"
     }
   }
 }

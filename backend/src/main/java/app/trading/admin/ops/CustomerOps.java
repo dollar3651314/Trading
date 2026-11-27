@@ -1,6 +1,7 @@
 package app.trading.admin.ops;
 
 import app.trading.account.api.CustomerAdminApi;
+import app.trading.account.api.RecoveryApi;
 import app.trading.admin.security.AdminAuthService;
 import app.trading.admin.security.AdminContext;
 import app.trading.admin.security.AdminNames;
@@ -231,6 +232,15 @@ class CustomerOps {
   /** 告警邮件模板：后台解除 / 更换 Telegram 关联（迁移 V40） */
   static final String TG_LINK_MAIL = "OPS_TELEGRAM_LINK";
 
+  private RecoveryApi.RevokeLines revokeLines(long recoveryId) {
+    try {
+      return recovery.revokeLines(recoveryId);
+    } catch (RuntimeException e) {
+      log.error("找回申请 #{} 的撤销链接没做成，告警邮件里只放服务器命令", recoveryId, e);
+      return new RecoveryApi.RevokeLines("在服务器上运行：sudo trading cancel-recovery " + recoveryId + " \"原因\"", "On the server run: sudo trading cancel-recovery " + recoveryId);
+    }
+  }
+
   /**
    * 后台"解除关联 / 更换 Telegram 关联"（第 4 批 4c，需求文档 08 页第 5 节）：<b>只有超管</b>（不看权限点）、再输自己的后台密码、原因必填、写审计、
    * 发告警邮件。解除马上生效（安全事件、冻结提现 ADMIN）；更换（4c 审查 🟡）建一份已批准的换绑申请、冻结提现，24 小时后执行，
@@ -267,9 +277,15 @@ class CustomerOps {
     String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
     String zh = newTg == null ? "解除" : "安排更换（找回申请 #" + res[0].recoveryId() + "，" + Ops.time(res[0].executeAt()) + " 执行，等待期内可在\"找回申请\"里撤销）";
     String en = newTg == null ? "removed" : "scheduled to change (recovery #" + res[0].recoveryId() + ", runs at " + Ops.time(res[0].executeAt()) + ")";
-    Map<String, String> p = Map.of("customerId", String.valueOf(id), "actionZh", zh, "actionEn", en,
+    // 第 6 批 TB-37 ②：更换时告警邮件带撤销入口（一次性链接 + 服务器命令）；解除马上生效，没有可撤销的申请
+    RecoveryApi.RevokeLines lines = res[0].recoveryId() == null
+        ? new RecoveryApi.RevokeLines("（解除关联马上生效，没有可撤销的申请；要恢复请在后台重新安排更换关联）", "(Unlinking takes effect at once; there is nothing to cancel.)")
+        : revokeLines(res[0].recoveryId());
+    Map<String, String> p = new java.util.HashMap<>(Map.of("customerId", String.valueOf(id), "actionZh", zh, "actionEn", en,
         "oldTg", old[0] == null ? "—" : String.valueOf(old[0]), "newTg", newTg == null ? "—" : String.valueOf(newTg), "admin", who, "reason", r, "at",
-        now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString());
+        now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString()));
+    p.put("revokeLine", lines.zh());
+    p.put("revokeLineEn", lines.en());
     List<String> to = alerts.recipients();
     if (to.isEmpty()) log.warn("没有配置告警邮箱（FX_ALERT_EMAILS），客户 {} 的 Telegram 关联变更只记了日志（操作人 {}）", id, who);
     for (String email : to) {

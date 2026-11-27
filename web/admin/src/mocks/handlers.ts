@@ -7,6 +7,10 @@ import {
   type AdjustLimits,
   type EmergencyState,
   type EmergencyChange,
+  type IntakeChange,
+  type IntakeState,
+  type RevokeLinkResult,
+  type RevokePeek,
   type AdminInput,
   type AdminSession,
   type AdminUser,
@@ -1289,6 +1293,8 @@ export function updateTemplate(id: string, patch: Partial<Pick<NotifyTemplate, '
     if (!t) throw new ApiError('errors.notFound');
     // 内置模板不能禁用（禁用会导致出金结算等流程失败）
     if (t.builtIn && patch.enabled === false) throw new ApiError('errors.builtInCannotDisable');
+    // 第 6 批 TB-37：告警邮件模板不能在后台改
+    if (t.locked) throw new ApiError('errors.templateLocked');
     const before = { titleZh: t.titleZh, bodyZh: t.bodyZh, titleEn: t.titleEn, bodyEn: t.bodyEn, enabled: t.enabled };
     Object.assign(t, patch, { updatedAt: nowString() });
     audit('notify.template_update', t.code, false, null, before, { titleZh: t.titleZh, bodyZh: t.bodyZh, titleEn: t.titleEn, bodyEn: t.bodyEn, enabled: t.enabled });
@@ -1718,5 +1724,70 @@ export function setEmergency(on: boolean, reason: string, password: string): Pro
     emergencyLog.push({ id: emergencyLog.length + 1, on, actor: `admin:${MOCK_OWNER_ID}`, actorName: currentAdmin().username, reason: r, at: nowString() });
     audit(on ? 'telegram.emergency_on' : 'telegram.emergency_off', 'telegram.emergency', true, r, { on: !on }, { on });
     return emergencyState();
+  });
+}
+
+// ---------------- 第 6 批：暂停受理人工申请（TB-38）、告警邮件撤销链接（TB-37） ----------------
+export const intakeLog: IntakeChange[] = [];
+
+function intakeState(): IntakeState {
+  const last = intakeLog[intakeLog.length - 1];
+  return {
+    paused: last?.paused ?? false,
+    changedAt: last?.at ?? null,
+    changedBy: last?.actorName ?? null,
+    reason: last?.reason ?? null,
+    canOperate: currentAdmin().id === MOCK_OWNER_ID,
+    ownerConfigured: true,
+    history: [...intakeLog].reverse(),
+  };
+}
+
+export function getRecoveryIntake(): Promise<IntakeState> {
+  return mutateRead(() => {
+    requirePerm('recovery:review');
+    return intakeState();
+  });
+}
+
+export function setRecoveryIntake(paused: boolean, reason: string, password: string): Promise<IntakeState> {
+  return mutate(() => {
+    requirePerm('recovery:review');
+    if (currentAdmin().id !== MOCK_OWNER_ID) {
+      audit(paused ? 'recovery.intake_pause' : 'recovery.intake_resume', 'recovery.intake', true, 'NOT_OWNER', null, null);
+      throw new ApiError('errors.forbidden');
+    }
+    const r = requireReason(reason);
+    requireAdminPassword(password);
+    if (intakeState().paused === paused) throw new ApiError('errors.intakeUnchanged');
+    intakeLog.push({ id: intakeLog.length + 1, paused, actor: `admin:${MOCK_OWNER_ID}`, actorName: currentAdmin().username, reason: r, at: nowString() });
+    audit(paused ? 'recovery.intake_pause' : 'recovery.intake_resume', 'recovery.intake', true, r, { paused: !paused }, { paused });
+    return intakeState();
+  });
+}
+
+/** 原型：令牌 demo-revoke-token-0001（对应第一份进行中的申请）能用一次 */
+export const MOCK_REVOKE_TOKEN = 'demo-revoke-token-0001';
+const usedRevokeTokens = new Set<string>();
+
+export function peekRecoveryRevoke(token: string): Promise<RevokePeek> {
+  return respond(() => {
+    const r = recoveries.find((x) => ['objection', 'proof', 'approved'].includes(x.status));
+    if (token !== MOCK_REVOKE_TOKEN || usedRevokeTokens.has(token) || !r) return { valid: false, id: null, kind: null, customerId: null, status: null, executeAt: null };
+    return { valid: true, id: Number(r.id), kind: r.kind, customerId: r.customerId, status: r.status, executeAt: r.executeAt };
+  });
+}
+
+export function revokeRecoveryByLink(token: string): Promise<RevokeLinkResult> {
+  return mutate(() => {
+    if (token !== MOCK_REVOKE_TOKEN || usedRevokeTokens.has(token)) return 'invalid' as RevokeLinkResult;
+    usedRevokeTokens.add(token);
+    const r = recoveries.find((x) => ['objection', 'proof', 'approved'].includes(x.status));
+    if (!r) return 'not_open' as RevokeLinkResult;
+    r.status = 'cancelled';
+    r.closedBy = 'mail';
+    r.closeReason = '告警邮件里的撤销链接';
+    r.closedAt = nowString();
+    return 'cancelled' as RevokeLinkResult;
   });
 }

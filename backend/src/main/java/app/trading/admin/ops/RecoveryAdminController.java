@@ -62,4 +62,24 @@ class RecoveryAdminController {
   RecoveryOps.Detail keep(@PathVariable long id, @RequestBody(required = false) KeepBody b) {
     return ops.keep(AdminContext.current(), id, b == null ? null : b.reason(), b == null ? null : b.password());
   }
+
+  // ---------- 第 6 批 TB-38：暂停受理人工申请（看要 recovery:review；开关只限 Amos 的后台账号） ----------
+
+  /** paused：要暂停（true）还是恢复（false）；reason 必填；password 是自己的后台密码 */
+  record IntakeBody(Boolean paused, String reason, String password) {}
+
+  @RequiresPermission(Permission.RECOVERY_REVIEW)
+  @GetMapping("/api/admin/recovery-intake")
+  RecoveryOps.IntakeView intake() {
+    return ops.intake(AdminContext.current());
+  }
+
+  @RequiresPermission(Permission.RECOVERY_REVIEW)
+  @PostMapping("/api/admin/recovery-intake")
+  RecoveryOps.IntakeView setIntake(@RequestBody(required = false) IntakeBody b) {
+    if (b == null || b.paused() == null) {
+      throw new app.trading.common.error.ValidationException(List.of(new app.trading.common.error.ValidationException.Field("paused", "required")));
+    }
+    return ops.setIntake(AdminContext.current(), b.paused(), b.reason(), b.password());
+  }
 }

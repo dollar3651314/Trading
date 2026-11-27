@@ -24,7 +24,9 @@ public interface RecoveryApi {
   enum ApplyResult {
     ACCEPTED,
     TOO_FREQUENT,
-    BANNED
+    BANNED,
+    /** 第 6 批 TB-38：暂停受理人工申请中（回"暂停中，请先申请冻结提现"） */
+    PAUSED
   }
 
   ApplyResult applyRebind(long applicantTgId, String applicantUsername, long customerNo, String name, String docLast4);
@@ -98,4 +100,41 @@ public interface RecoveryApi {
 
   /** 收到原 TG 的撤销请求后，Amos 视频核对后维持（证明阶段或已批准）：清掉撤销请求，继续审核 / 到执行时间就执行 */
   void keep(long id, long adminId, String reason);
+
+  // ---------- 第 6 批：后台加固（TB-37 ②、TB-38） ----------
+
+  /**
+   * 告警邮件里的撤销入口（中文、英文各一段）：现做一个一次性撤销链接（24 小时、只能撤销这一份申请）+ 服务器命令 {@code sudo trading cancel-recovery <编号>}。
+   * 没配后台地址（{@code FX_ADMIN_URL}）时只有服务器命令
+   */
+  record RevokeLines(String zh, String en) {}
+
+  RevokeLines revokeLines(long recoveryId);
+
+  /** 撤销链接对应的申请（不用掉令牌；令牌用过、过期、不存在时为空） */
+  record RevokeTarget(long id, String kind, long userId, String status, LocalDateTime executeAt) {}
+
+  Optional<RevokeTarget> peekRevokeLink(String token);
+
+  /** 撤销链接的结果：CANCELLED 撤销了 / NOT_OPEN 申请已经结束（令牌也用掉了）/ INVALID 令牌用过、过期或不存在 */
+  enum LinkRevoke {
+    CANCELLED,
+    NOT_OPEN,
+    INVALID
+  }
+
+  /** 用告警邮件里的链接撤销（只能撤销，没有批准的入口）。撤销后发告警邮件 OPS_RECOVERY_CANCELLED */
+  LinkRevoke revokeByLink(String token);
+
+  /** 暂停受理人工申请（TB-38）：暂停时新的换绑（机器人）、没邮箱重设提现密码（网页）申请不受理；已提交的留在队列、已批准的照常执行 */
+  record Intake(boolean paused, LocalDateTime changedAt, String changedBy, String reason) {}
+
+  record IntakeChange(long id, boolean paused, String actor, String actorName, String reason, LocalDateTime at) {}
+
+  Intake intake();
+
+  List<IntakeChange> intakeHistory(int limit);
+
+  /** 和现在一样时报 {@code INTAKE_UNCHANGED}。谁能操作、后台密码、审计、告警邮件在后台模块 */
+  void setIntakePaused(boolean paused, String actor, String actorName, String reason);
 }
