@@ -229,6 +229,8 @@ trading:
     cookie-name: fx_admin_session
     # 第 5 批应急开关（TB-34）：只有这个后台账号编号能开关（写编号、不写用户名，不靠权限点）；sudo trading set FX_ADMIN_OWNER_ID <编号>。没配 = 后台谁都不能开关
     owner-id: ${FX_ADMIN_OWNER_ID:}
+    # 第 6 批（TB-37）：后台的网址（https://后台域名），告警邮件里的找回申请撤销链接用；部署工具包按 ADMIN_DOMAIN 自动给。空 = 邮件里只有服务器命令
+    public-url: ${FX_ADMIN_URL:}
     cookie-secure: ${FX_COOKIE_SECURE:true}
     # 第一个超级管理员（G1）：系统里还没有管理员时启动会用它建；密码只由 负责人 填，建好后可以删掉这两个变量
     init-username: ${FX_ADMIN_INIT_USERNAME:}

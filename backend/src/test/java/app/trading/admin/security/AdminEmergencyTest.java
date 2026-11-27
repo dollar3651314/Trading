@@ -38,10 +38,7 @@ class AdminEmergencyTest extends AdminTestSupport {
   }
 
   Admin owner() throws Exception {
-    jdbc.update("INSERT IGNORE INTO admin_user (id, username, display_name, email, password_hash, status, must_change_password, created_at) "
-        + "VALUES (?, 'amos_owner_t', 'Amos', 'amos_owner_t@example.com', ?, 'ACTIVE', 0, UTC_TIMESTAMP(3))", OWNER_ID, Passwords.hash(PASSWORD));
-    jdbc.update("INSERT IGNORE INTO admin_user_role (admin_id, role_id) SELECT ?, id FROM admin_role WHERE code = 'super_admin'", OWNER_ID);
-    return login(OWNER_ID);
+    return fixedSuperAdmin(OWNER_ID, "amos_owner_t");
   }
 
   String set(Admin a, String body) throws Exception {

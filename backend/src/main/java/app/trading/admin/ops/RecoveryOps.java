@@ -54,10 +54,14 @@ class RecoveryOps {
   private final AlertProperties alerts;
 
   private final app.trading.wallet.api.WalletAdminApi wallet;
+  private final OwnerGuard owner;
+  private final java.time.Clock clock;
 
   RecoveryOps(RecoveryApi recovery, CustomerAdminApi customers, AdminAuthService auth, AdminNames names, Audit audit, MailApi mail, AlertProperties alerts,
-      app.trading.wallet.api.WalletAdminApi wallet) {
+      app.trading.wallet.api.WalletAdminApi wallet, OwnerGuard owner, java.time.Clock clock) {
     this.wallet = wallet;
+    this.owner = owner;
+    this.clock = clock;
     this.recovery = recovery;
     this.customers = customers;
     this.auth = auth;
@@ -93,8 +97,11 @@ class RecoveryOps {
     });
     String who = names.of(List.of(actor.adminId())).getOrDefault(actor.adminId(), actor.username());
     boolean rebind = "REBIND".equals(before.kind());
+    // 第 6 批 TB-37 ②：告警邮件带撤销入口（一次性链接 + 服务器命令）
+    RecoveryApi.RevokeLines lines = revokeLines(id);
     alert(Map.of("id", String.valueOf(id), "kindZh", rebind ? "人工换绑" : "人工重设提现密码", "kindEn", rebind ? "Telegram rebind" : "manual PIN reset",
-        "customerId", String.valueOf(before.userId()), "admin", who, "note", n, "executeAt", at[0].format(TIME)));
+        "customerId", String.valueOf(before.userId()), "admin", who, "note", n, "executeAt", at[0].format(TIME), "revokeLine", lines.zh(), "revokeLineEn",
+        lines.en()));
     return detail(id);
   }
 
@@ -141,6 +148,58 @@ class RecoveryOps {
           v.approvedBy() == null ? null : admins.getOrDefault(v.approvedBy(), "#" + v.approvedBy()), Ops.time(v.approvedAt()), Ops.time(v.executeAt()),
           v.revokeRequestedBy() != null, Ops.time(v.revokeRequestedAt()), Ops.time(v.keptAt()), v.closedBy(), v.closeReason(), Ops.time(v.closedAt()), Ops.time(v.createdAt()));
     }).toList();
+  }
+
+  /** 撤销入口；做链接失败时只放服务器命令（邮件照发） */
+  RecoveryApi.RevokeLines revokeLines(long id) {
+    try {
+      return recovery.revokeLines(id);
+    } catch (RuntimeException e) {
+      log.error("找回申请 #{} 的撤销链接没做成，告警邮件里只放服务器命令", id, e);
+      return new RecoveryApi.RevokeLines("在服务器上运行：sudo trading cancel-recovery " + id + " \"原因\"", "On the server run: sudo trading cancel-recovery " + id);
+    }
+  }
+
+  // ---------- 第 6 批 TB-38：暂停受理人工申请 ----------
+
+  static final String INTAKE_MAIL = "OPS_RECOVERY_INTAKE";
+
+  record IntakeChangeView(long id, boolean paused, String actor, String actorName, String reason, String at) {}
+
+  record IntakeView(boolean paused, String changedAt, String changedBy, String reason, boolean canOperate, boolean ownerConfigured, List<IntakeChangeView> history) {}
+
+  IntakeView intake(AdminContext a) {
+    RecoveryApi.Intake s = recovery.intake();
+    return new IntakeView(s.paused(), Ops.time(s.changedAt()), s.changedBy(), s.reason(), owner.isOwner(a), owner.configured(),
+        recovery.intakeHistory(50).stream().map(c -> new IntakeChangeView(c.id(), c.paused(), c.actor(), c.actorName(), c.reason(), Ops.time(c.at()))).toList());
+  }
+
+  /** 只有 Amos 的后台账号（{@link OwnerGuard}）；原因、再输后台密码；审计 recovery.intake_pause / intake_resume；告警邮件 */
+  IntakeView setIntake(AdminContext a, boolean paused, String reason, String password) {
+    String action = paused ? "recovery.intake_pause" : "recovery.intake_resume";
+    if (!owner.isOwner(a)) {
+      audit.record(action, "recovery.intake", true, "FAILURE", "NOT_OWNER", null, null);
+      throw new BizException("FORBIDDEN", "只有 Amos 的后台账号能暂停或恢复受理人工申请");
+    }
+    String r = Audit.requireReason(reason);
+    auth.requirePassword(a, password);
+    audit.run(action, "recovery.intake", true, r, () -> {
+      recovery.setIntakePaused(paused, "admin:" + a.adminId(), a.username(), r);
+      return Audit.Change.of(null, Map.of("paused", !paused), Map.of("paused", paused));
+    });
+    Map<String, String> p = Map.of("actionZh", paused ? "暂停受理" : "恢复受理", "actionEn", paused ? "paused" : "resumed",
+        "admin", a.username() + "（后台账号 #" + a.adminId() + "）", "reason", r,
+        "at", LocalDateTime.now(clock).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(java.time.ZoneOffset.UTC).toString());
+    List<String> to = alerts.recipients();
+    if (to.isEmpty()) log.warn("没有配置告警邮箱（FX_ALERT_EMAILS），人工申请{}只记了审计和日志", paused ? "暂停受理" : "恢复受理");
+    for (String email : to) {
+      try {
+        mail.send(email, INTAKE_MAIL, p);
+      } catch (RuntimeException e) {
+        log.error("暂停受理人工申请的告警邮件写入发送任务失败", e);
+      }
+    }
+    return intake(a);
   }
 
   private void alert(Map<String, String> p) {

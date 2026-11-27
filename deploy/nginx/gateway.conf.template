@@ -48,10 +48,16 @@ limit_req_zone $binary_remote_addr zone=tr_quote:10m rate=${FX_NGINX_QUOTE_RATE}
 limit_conn_zone $binary_remote_addr zone=tr_api_conn:10m;
 limit_conn_zone $binary_remote_addr zone=tr_ws_conn:10m;
 limit_conn_zone $binary_remote_addr zone=tr_quote_conn:10m;
-# 网页"申请冻结提现"和它的验证码（不用登录，4c 复审 🔴D1）：单独一档低限额，写死不随全站额度放宽。
-# 生产真实 IP 关时所有访客共用网关地址，这一档就是全站合计（每秒 2 个、突发 5 个、同时 10 个连接）：宁可正常客户稍等，也不让它占满后端
-limit_req_zone $binary_remote_addr zone=tr_freeze:1m rate=2r/s;
+# 网页"申请冻结提现"（不用登录，4c 复审 🔴D1；#44 复审改）：提交和验证码各一档，写死、不随全站额度放宽。
+# 生产真实 IP 关时所有访客共用网关地址，一档就是全站合计，所以不能太低（太低一个人就能挡住所有人的冻结申请）：
+# 提交每秒 20 个、突发 40、同时 40 个连接（后端不占线程，另有"同时等待最多 20 个"的上限）；验证码每秒 10 个、突发 20、同时 20 个连接
+limit_req_zone $binary_remote_addr zone=tr_freeze:1m rate=20r/s;
 limit_conn_zone $binary_remote_addr zone=tr_freeze_conn:1m;
+limit_req_zone $binary_remote_addr zone=tr_captcha:1m rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=tr_captcha_conn:1m;
+# 后台不用登录的接口（第 6 批 TB-37 告警邮件撤销链接 /api/admin/public/**，#46 审查）：单独一档低限额，写死。只有 Amos 用，每秒 2 个、突发 10、连接 10 足够
+limit_req_zone $binary_remote_addr zone=tr_admin_public:1m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=tr_admin_public_conn:1m;
 limit_req_status 429;
 limit_conn_status 429;
 limit_req_log_level warn;
@@ -90,10 +96,16 @@ server {
     include /etc/nginx/snippets/proxy.inc;
     proxy_read_timeout 30s;
   }
-  # 申请冻结提现（提交和验证码）：单独的低限额 + 连接上限，后端另有"同时等待最多 20 个"的上限
-  location /api/public/withdraw-freeze {
-    limit_req zone=tr_freeze burst=5 nodelay;
-    limit_conn tr_freeze_conn 10;
+  # 申请冻结提现：提交和验证码各自一档限额 + 连接上限，后端另有"同时等待最多 20 个"的上限
+  location = /api/public/withdraw-freeze {
+    limit_req zone=tr_freeze burst=40 nodelay;
+    limit_conn tr_freeze_conn 40;
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
+  }
+  location = /api/public/withdraw-freeze/captcha {
+    limit_req zone=tr_captcha burst=20 nodelay;
+    limit_conn tr_captcha_conn 20;
     include /etc/nginx/snippets/proxy.inc;
     proxy_read_timeout 30s;
   }
@@ -132,6 +144,12 @@ server {
   if ($request_uri ~ ";") { return 400; }
   location = / {
     return 302 /admin/;
+  }
+  location /api/admin/public/ {
+    limit_req zone=tr_admin_public burst=10 nodelay;
+    limit_conn tr_admin_public_conn 10;
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
   }
   location /api/admin/ {
     limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;

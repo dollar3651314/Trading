@@ -73,9 +73,15 @@ class RecoveryService implements RecoveryApi {
   private final ApplicationEventPublisher events;
   private final Clock clock;
   private final TransactionTemplate tx;
+  /** 后台的网址（第 6 批：告警邮件里撤销链接用；{@code FX_ADMIN_URL}，部署工具包按 ADMIN_DOMAIN 给）；空 = 邮件里只有服务器命令 */
+  private final String adminUrl;
 
   RecoveryService(RecoveryMapper mapper, TelegramAccountApi telegram, WithdrawPinApi pins, AuthAccess auth, NotifyApi notify, MailApi mail,
-      AlertProperties alerts, ObjectProvider<TelegramSender> sender, ApplicationEventPublisher events, Clock clock, PlatformTransactionManager txm) {
+      AlertProperties alerts, ObjectProvider<TelegramSender> sender, ApplicationEventPublisher events, Clock clock, PlatformTransactionManager txm,
+      @org.springframework.beans.factory.annotation.Value("${trading.admin.public-url:}") String adminUrl) {
+    String u = adminUrl == null ? "" : adminUrl.strip();
+    this.adminUrl = u.matches("https?://[A-Za-z0-9.:-]+/?") ? u.replaceAll("/$", "") : "";
+    if (!u.isEmpty() && this.adminUrl.isEmpty()) log.warn("FX_ADMIN_URL 不是 https://域名 的样子，告警邮件里不放撤销链接（只有服务器命令）");
     this.mapper = mapper;
     this.telegram = telegram;
     this.pins = pins;
@@ -98,6 +104,7 @@ class RecoveryService implements RecoveryApi {
   @Override
   public ApplyResult applyRebind(long applicantTgId, String applicantUsername, long customerNo, String name, String docLast4) {
     LocalDateTime now = now();
+    if (intakePaused()) return ApplyResult.PAUSED; // 第 6 批 TB-38：暂停受理时不记次数
     if (mapper.banned("TG", String.valueOf(applicantTgId), now) > 0) return ApplyResult.BANNED;
     if (mapper.countAttemptsSince(applicantTgId, now.minusDays(1)) >= ATTEMPTS_PER_DAY) return ApplyResult.TOO_FREQUENT;
     mapper.insertAttempt(applicantTgId, now);
@@ -130,6 +137,7 @@ class RecoveryService implements RecoveryApi {
   @Override
   public long applyPinReset(long userId) {
     return tx.execute(st -> {
+      if (intakePaused()) throw new BizException("RECOVERY_PAUSED", "暂停受理人工申请中，请先申请冻结提现");
       if (telegram.byUserId(userId).isEmpty()) throw new BizException("NOT_TG_ACCOUNT", "只有 Telegram 账户可以申请人工重设提现密码");
       WithdrawPinApi.Status st0 = pins.status(userId);
       if (!st0.set()) throw new BizException("PIN_NOT_SET", "还没有设置提现密码");
@@ -257,7 +265,7 @@ class RecoveryService implements RecoveryApi {
       if (r.keptAt != null && mapper.adminInitiated(r.id) == 0) {
         // 4b 复审：Amos 已经视频核对、选过一次"维持"，之后的撤销只记经过、发告警，不再暂停批准和执行（防止占着原 TG 的人反复撤销把申请拖住）
         mapper.insertEvent(r.id, "REVOKE_AFTER_KEEP", "user:" + userId, null, now);
-        after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who",
+        after[0] = () -> alertWithRevoke("OPS_RECOVERY_REVOKE_REQ", r.id, Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who",
             "原 Telegram（你已经维持过一次，这次不再暂停）", "whoEn", "the original Telegram account (you already kept it once; this does not pause it)"));
         out[0] = "已记下你的撤销并通知审核员。审核员已经核对并维持过这份申请，这次撤销不会暂停换绑；如果你认为账户被盗，请联系客服。";
         return;
@@ -265,7 +273,7 @@ class RecoveryService implements RecoveryApi {
       if (r.revokeRequestedBy == null) {
         mapper.requestRevoke(r.id, "ORIGINAL_TG", now);
         mapper.insertEvent(r.id, "REVOKE_REQUEST", "user:" + userId, null, now);
-        after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who", "原 Telegram ",
+        after[0] = () -> alertWithRevoke("OPS_RECOVERY_REVOKE_REQ", r.id, Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who", "原 Telegram ",
             "whoEn", "the original Telegram account"));
       }
       out[0] = "已收到撤销请求。按规则换绑申请的撤销要由审核员视频核对后决定；决定之前不会批准、也不会执行换绑，提现冻结保持不变。";
@@ -436,6 +444,8 @@ class RecoveryService implements RecoveryApi {
       RecoveryMapper.Row r = mapper.lock(id);
       LocalDateTime now = now();
       if (r == null || !"APPROVED".equals(r.status) || r.revokeRequestedBy != null || now.isBefore(r.executeAt)) return;
+      // 第 6 批：服务器终端已经请求撤销、还没处理的，先不执行（定时任务先处理撤销）
+      if (mapper.pendingCancelCount(r.id) > 0) return;
       if (REBIND.equals(r.kind)) {
         if (telegram.byTelegramId(r.applicantTgId).isPresent()) {
           // 等待期里申请人的新 TG 自己开了户：不能换绑（一个 TG 只能对应一个客户号）
@@ -534,6 +544,149 @@ class RecoveryService implements RecoveryApi {
         log.error("告警邮件 {} 写入发送任务失败", template, e);
       }
     }
+  }
+
+  // ---------- 第 6 批：后台加固（TB-37 ②、TB-38） ----------
+
+  static final Duration REVOKE_LINK_TTL = Duration.ofHours(24);
+  private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
+
+  static String sha256(String s) {
+    try {
+      return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    } catch (java.security.NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Override
+  public RevokeLines revokeLines(long recoveryId) {
+    String cmd = "sudo trading cancel-recovery " + recoveryId + " \"原因\"";
+    if (adminUrl.isEmpty()) {
+      return new RevokeLines("在服务器上运行：" + cmd + "（没配后台地址 FX_ADMIN_URL，这封邮件没有撤销链接）",
+          "On the server run: " + cmd + " (FX_ADMIN_URL is not set, so this email has no cancel link)");
+    }
+    byte[] b = new byte[32];
+    RANDOM.nextBytes(b);
+    String token = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(b);
+    LocalDateTime now = now();
+    mapper.insertRevokeToken(sha256(token), recoveryId, now.plus(REVOKE_LINK_TTL), now);
+    String url = adminUrl + "/admin/recovery-revoke#t=" + token;
+    return new RevokeLines("① 24 小时内打开这个链接撤销（只能撤销、只能用一次）：" + url + "\n② 或在服务器上运行：" + cmd,
+        "1) Within 24 hours, open this link to cancel (cancel only, single use): " + url + "\n2) Or on the server run: " + cmd);
+  }
+
+  /** 带撤销入口的告警邮件：现做撤销链接，加上 revokeLine、revokeLineEn 两个参数 */
+  void alertWithRevoke(String template, long recoveryId, Map<String, String> p) {
+    Map<String, String> m = new java.util.HashMap<>(p);
+    RevokeLines l;
+    try {
+      l = revokeLines(recoveryId);
+    } catch (RuntimeException e) {
+      log.error("找回申请 #{} 的撤销链接没做成，告警邮件里只放服务器命令", recoveryId, e);
+      l = new RevokeLines("在服务器上运行：sudo trading cancel-recovery " + recoveryId + " \"原因\"", "On the server run: sudo trading cancel-recovery " + recoveryId);
+    }
+    m.put("revokeLine", l.zh());
+    m.put("revokeLineEn", l.en());
+    alert(template, m);
+  }
+
+  @Override
+  public Optional<RevokeTarget> peekRevokeLink(String token) {
+    if (!tokenShape(token)) return Optional.empty();
+    Long id = mapper.revokeTokenRecovery(sha256(token.strip()), now());
+    if (id == null) return Optional.empty();
+    RecoveryMapper.Row r = mapper.byId(id);
+    return r == null ? Optional.empty() : Optional.of(new RevokeTarget(r.id, r.kind, r.userId, r.status, r.executeAt));
+  }
+
+  private static boolean tokenShape(String token) {
+    return token != null && token.strip().matches("[A-Za-z0-9_-]{20,100}");
+  }
+
+  @Override
+  public LinkRevoke revokeByLink(String token) {
+    if (!tokenShape(token)) return LinkRevoke.INVALID;
+    String h = sha256(token.strip());
+    RecoveryMapper.Row[] done = new RecoveryMapper.Row[1];
+    LinkRevoke out = tx.execute(st -> {
+      LocalDateTime now = now();
+      Long id = mapper.revokeTokenRecovery(h, now);
+      if (id == null || mapper.useRevokeToken(h, now) != 1) return LinkRevoke.INVALID;
+      RecoveryMapper.Row r = mapper.lock(id);
+      if (r == null || !OPEN.contains(r.status)) return LinkRevoke.NOT_OPEN;
+      close(r, "CANCELLED", "mail", "告警邮件里的撤销链接");
+      if (r.applicantTgId != null) toApplicant(r.applicantTgId, "你的找回申请 #" + r.id + " 已被审核员撤销。");
+      done[0] = r;
+      return LinkRevoke.CANCELLED;
+    });
+    if (done[0] != null) cancelledAlert(done[0], "告警邮件里的撤销链接", "the cancel link in an alert email", "告警邮件里的撤销链接");
+    log.warn("找回申请撤销链接：{}", out);
+    return out;
+  }
+
+  /** 服务器命令 sudo trading cancel-recovery 写的请求：每分钟处理（定时任务先于执行），每个请求各自一个事务 */
+  void processServerCancels() {
+    for (RecoveryMapper.CancelRequest c : mapper.pendingCancels()) {
+      RecoveryMapper.Row[] done = new RecoveryMapper.Row[1];
+      try {
+        tx.executeWithoutResult(st -> {
+          RecoveryMapper.Row r = mapper.lock(c.recoveryId());
+          String result;
+          if (r == null) result = "NOT_FOUND";
+          else if (!OPEN.contains(r.status)) result = "NOT_OPEN";
+          else {
+            close(r, "CANCELLED", cut(c.requestedBy(), 32), c.reason());
+            if (r.applicantTgId != null) toApplicant(r.applicantTgId, "你的找回申请 #" + r.id + " 已被审核员撤销。");
+            done[0] = r;
+            result = "CANCELLED";
+          }
+          mapper.finishCancel(c.id(), result, now());
+        });
+      } catch (RuntimeException e) {
+        log.error("处理服务器撤销请求 #{}（找回申请 #{}）出错", c.id(), c.recoveryId(), e);
+        continue;
+      }
+      if (done[0] != null) cancelledAlert(done[0], "服务器命令 cancel-recovery（" + c.requestedBy() + "）", "the server command cancel-recovery", c.reason());
+    }
+  }
+
+  private void cancelledAlert(RecoveryMapper.Row r, String viaZh, String viaEn, String reason) {
+    alert("OPS_RECOVERY_CANCELLED", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "viaZh", viaZh, "viaEn", viaEn,
+        "reason", reason == null ? "" : reason, "at", now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toInstant(ZoneOffset.UTC).toString()));
+  }
+
+  /** 过期一天以上的撤销令牌清掉（定时任务调） */
+  void cleanupRevokeTokens() {
+    mapper.deleteRevokeTokensBefore(now().minusDays(1));
+  }
+
+  boolean intakePaused() {
+    RecoveryMapper.IntakeChange c = mapper.latestIntake();
+    return c != null && c.paused();
+  }
+
+  @Override
+  public Intake intake() {
+    RecoveryMapper.IntakeChange c = mapper.latestIntake();
+    return c == null ? new Intake(false, null, null, null) : new Intake(c.paused(), c.createdAt(), c.actorName(), c.reason());
+  }
+
+  @Override
+  public List<IntakeChange> intakeHistory(int limit) {
+    return mapper.intakeHistory(Math.max(1, Math.min(limit, 200))).stream()
+        .map(c -> new IntakeChange(c.id(), c.paused(), c.actor(), c.actorName(), c.reason(), c.createdAt())).toList();
+  }
+
+  @Override
+  public void setIntakePaused(boolean paused, String actor, String actorName, String reason) {
+    tx.executeWithoutResult(st -> {
+      RecoveryMapper.IntakeChange c = mapper.latestIntakeForUpdate();
+      boolean now0 = c != null && c.paused();
+      if (now0 == paused) throw new BizException("INTAKE_UNCHANGED", paused ? "已经是暂停受理" : "已经在正常受理");
+      mapper.insertIntake(paused, cut(actor, 32), cut(actorName, 64), cut(reason, 500), now());
+    });
+    log.warn("人工申请{}（{}）", paused ? "暂停受理" : "恢复受理", actorName);
   }
 
   static boolean lastFourMatches(String docNumber, String last4) {

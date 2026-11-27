@@ -15,7 +15,6 @@ import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -44,38 +43,27 @@ class EmergencyOps {
   private final MailApi mail;
   private final AlertProperties alerts;
   private final Clock clock;
-  private final Long ownerId;
+  private final OwnerGuard owner;
 
-  EmergencyOps(TelegramEmergencyApi emergency, AdminAuthService auth, Audit audit, MailApi mail, AlertProperties alerts, Clock clock,
-      @Value("${trading.admin.owner-id:}") String ownerId) {
+  EmergencyOps(TelegramEmergencyApi emergency, AdminAuthService auth, Audit audit, MailApi mail, AlertProperties alerts, Clock clock, OwnerGuard owner) {
     this.emergency = emergency;
     this.auth = auth;
     this.audit = audit;
     this.mail = mail;
     this.alerts = alerts;
     this.clock = clock;
-    this.ownerId = parse(ownerId);
-  }
-
-  static Long parse(String v) {
-    if (v == null || v.isBlank()) return null;
-    String s = v.strip();
-    if (!s.matches("[1-9]\\d{0,18}")) {
-      log.warn("FX_ADMIN_OWNER_ID 不是后台账号编号（正整数），按没配处理：后台不能开关应急开关");
-      return null;
-    }
-    return Long.valueOf(s);
+    this.owner = owner;
   }
 
   boolean canOperate(AdminContext a) {
-    return ownerId != null && a.superAdmin() && a.adminId() == ownerId;
+    return owner.isOwner(a);
   }
 
   View view(AdminContext a) {
     TelegramEmergencyApi.State s = emergency.state();
     List<ChangeView> h = emergency.history(50).stream()
         .map(c -> new ChangeView(c.id(), c.on(), c.actor(), c.actorName(), c.reason(), Ops.time(c.at()))).toList();
-    return new View(s.on(), Ops.time(s.changedAt()), s.changedBy(), s.reason(), canOperate(a), ownerId != null, h);
+    return new View(s.on(), Ops.time(s.changedAt()), s.changedBy(), s.reason(), canOperate(a), owner.configured(), h);
   }
 
   void set(AdminContext a, boolean on, String reason, String password) {

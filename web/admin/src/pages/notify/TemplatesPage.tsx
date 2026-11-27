@@ -80,6 +80,8 @@ export function TemplatesPage() {
                 perm="notify_template:edit"
                 size="small"
                 icon={<EditOutlined />}
+                disabled={!!r.locked}
+                disabledReason={t('templates.locked')}
                 onClick={() => {
                   setEditing(r);
                   form.setFieldsValue(r);
@@ -108,6 +110,11 @@ export function TemplatesPage() {
       >
         {editing ? (
           <Form form={form} layout="vertical" name="template-edit">
+            {editing.security ? (
+              <div data-testid="template-security">
+                <Alert type="warning" showIcon style={{ marginBottom: 12 }} message={t('templates.securityHint')} />
+              </div>
+            ) : null}
             {editing.variables.length ? (
               <Alert
                 type="info"

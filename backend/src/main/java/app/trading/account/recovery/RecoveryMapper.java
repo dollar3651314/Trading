@@ -102,4 +102,36 @@ interface RecoveryMapper {
 
   /** 到执行时间、没有待决定的撤销请求的 */
   List<Long> executeDue(@Param("now") LocalDateTime now);
+
+  // ---------- 第 6 批（TB-37、TB-38） ----------
+
+  int insertRevokeToken(@Param("hash") String hash, @Param("recoveryId") long recoveryId, @Param("expiresAt") LocalDateTime expiresAt, @Param("now") LocalDateTime now);
+
+  /** 还能用的撤销令牌对应的申请编号；用过、过期、不存在都是 null */
+  Long revokeTokenRecovery(@Param("hash") String hash, @Param("now") LocalDateTime now);
+
+  /** 用掉撤销令牌：影响 1 行才算（只能用一次） */
+  int useRevokeToken(@Param("hash") String hash, @Param("now") LocalDateTime now);
+
+  int deleteRevokeTokensBefore(@Param("before") LocalDateTime before);
+
+  record CancelRequest(long id, long recoveryId, String requestedBy, String reason) {}
+
+  List<CancelRequest> pendingCancels();
+
+  /** 某一份申请有没有还没处理的服务器撤销请求（执行前先看） */
+  int pendingCancelCount(@Param("recoveryId") long recoveryId);
+
+  int finishCancel(@Param("id") long id, @Param("result") String result, @Param("now") LocalDateTime now);
+
+  record IntakeChange(long id, boolean paused, String actor, String actorName, String reason, LocalDateTime createdAt) {}
+
+  IntakeChange latestIntake();
+
+  IntakeChange latestIntakeForUpdate();
+
+  int insertIntake(@Param("paused") boolean paused, @Param("actor") String actor, @Param("actorName") String actorName, @Param("reason") String reason,
+      @Param("now") LocalDateTime now);
+
+  List<IntakeChange> intakeHistory(@Param("limit") int limit);
 }

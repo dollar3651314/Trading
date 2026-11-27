@@ -147,6 +147,8 @@ services:
       FX_TG_LOGIN_BOT_TOKEN: ${FX_TG_LOGIN_BOT_TOKEN:-}
       FX_TG_LOGIN_BOT_USERNAME: ${FX_TG_LOGIN_BOT_USERNAME:-}
       FX_ADMIN_OWNER_ID: ${FX_ADMIN_OWNER_ID:-}
+      # 第 6 批（TB-37）：告警邮件里撤销链接用的后台网址，按 ADMIN_DOMAIN 给（不用单独设）
+      FX_ADMIN_URL: https://${ADMIN_DOMAIN:?缺少 ADMIN_DOMAIN}
       # 测试管理员（做法 07）：只存令牌的 SHA-256，trading gen-test-admin 生成、test-admin-off 删除
       TEST_ADMIN_TOKEN_SHA256: ${TEST_ADMIN_TOKEN_SHA256:-}
     volumes:

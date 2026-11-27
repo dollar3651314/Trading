@@ -278,3 +278,13 @@ export const changeCustomerTelegram: typeof real.changeCustomerTelegram = IS_MOC
 export const getEmergency: typeof real.getEmergency = IS_MOCK ? mock.getEmergency : real.getEmergency;
 /** POST /api/admin/emergency（只有 Amos 的后台账号；后台密码 + 原因；审计、告警邮件） */
 export const setEmergency: typeof real.setEmergency = IS_MOCK ? mock.setEmergency : real.setEmergency;
+
+// ---------- 第 6 批：暂停受理人工申请（TB-38）、告警邮件撤销链接（TB-37） ----------
+/** GET /api/admin/recovery-intake */
+export const getRecoveryIntake: typeof real.getRecoveryIntake = IS_MOCK ? mock.getRecoveryIntake : real.getRecoveryIntake;
+/** POST /api/admin/recovery-intake（只有 Amos 的后台账号；后台密码 + 原因；审计、告警邮件） */
+export const setRecoveryIntake: typeof real.setRecoveryIntake = IS_MOCK ? mock.setRecoveryIntake : real.setRecoveryIntake;
+/** POST /api/admin/public/recovery-revoke/peek（不用登录） */
+export const peekRecoveryRevoke: typeof real.peekRecoveryRevoke = IS_MOCK ? mock.peekRecoveryRevoke : real.peekRecoveryRevoke;
+/** POST /api/admin/public/recovery-revoke（不用登录；只能撤销） */
+export const revokeRecoveryByLink: typeof real.revokeRecoveryByLink = IS_MOCK ? mock.revokeRecoveryByLink : real.revokeRecoveryByLink;

@@ -5,10 +5,10 @@
  * - 驳回（换绑会封申请人的 TG）、撤销（本人撤销，直接生效）要原因；争议路径上收到撤销请求时选"撤销"或"维持批准"（维持要后台密码）。
  */
 import { useCallback, useState } from 'react';
-import { Form, Input, Select, Skeleton } from 'antd';
+import { Alert, Button, Form, Input, Select, Skeleton } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { approveRecovery, getRecovery, keepRecovery, listRecoveries, rejectRecovery, revokeRecovery } from '../../api';
+import { approveRecovery, getRecovery, getRecoveryIntake, keepRecovery, listRecoveries, rejectRecovery, revokeRecovery, setRecoveryIntake } from '../../api';
 import type { Recovery, RecoveryDetail, RecoveryStatus } from '../../api/types';
 import { useApi } from '../../hooks/useApi';
 import { useHighRisk } from '../../hooks/useConfirmDialogs';
@@ -229,6 +229,51 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
   );
 }
 
+/**
+ * 第 6 批 TB-38：暂停受理人工申请（Amos 不在时）。只有 Amos 的后台账号能开关（再输后台密码 + 原因、审计、告警邮件）；
+ * 暂停时新的换绑、没邮箱重设提现密码申请提示"暂停中，请先申请冻结提现"，已提交的留在队列、已批准的照常执行，冻结入口照常可用
+ */
+function IntakeCard() {
+  const { t } = useTranslation();
+  const hr = useHighRisk();
+  const fetcher = useCallback(() => getRecoveryIntake(), []);
+  const { data, error, reload } = useApi(fetcher);
+  if (error) return <ErrorState error={error} onRetry={reload} compact />;
+  if (!data) return <Skeleton active paragraph={{ rows: 1 }} />;
+  const toggle = () => {
+    const pause = !data.paused;
+    hr.ask({
+      title: t(pause ? 'recoveries.intake.askPause' : 'recoveries.intake.askResume'),
+      description: <div>{t(pause ? 'recoveries.intake.impactPause' : 'recoveries.intake.impactResume')}</div>,
+      extra: passwordField(t),
+      confirmText: t(pause ? 'recoveries.intake.confirmPause' : 'recoveries.intake.confirmResume'),
+      onConfirm: (v) => setRecoveryIntake(pause, v.reason, String(v.password ?? '')),
+      onDone: reload,
+    });
+  };
+  return (
+    <section className="card card-pad" style={{ marginBottom: 16 }} data-testid="intake-card">
+      <Alert
+        type={data.paused ? 'warning' : 'info'}
+        showIcon
+        message={
+          <span data-testid="intake-state">
+            {t(data.paused ? 'recoveries.intake.paused' : 'recoveries.intake.open')}
+            {data.changedAt ? ` · ${t('recoveries.intake.changed', { time: shortTime(data.changedAt), who: data.changedBy ?? '—' })}` : ''}
+          </span>
+        }
+        description={data.canOperate ? t('recoveries.intake.hint') : t(data.ownerConfigured ? 'recoveries.intake.notOwner' : 'recoveries.intake.ownerMissing')}
+        action={
+          <Button size="small" danger={!data.paused} disabled={!data.canOperate} onClick={toggle} data-testid="intake-toggle">
+            {t(data.paused ? 'recoveries.intake.resume' : 'recoveries.intake.pause')}
+          </Button>
+        }
+      />
+      {hr.element}
+    </section>
+  );
+}
+
 export function RecoveriesPage() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<RecoveryStatus | ''>('proof');
@@ -238,6 +283,7 @@ export function RecoveriesPage() {
   return (
     <>
       <PageHeader title={t('recoveries.title')} sub={t('recoveries.sub')} />
+      <IntakeCard />
       <section className="card card-pad">
         <Select
           aria-label={t('recoveries.statusFilter')}

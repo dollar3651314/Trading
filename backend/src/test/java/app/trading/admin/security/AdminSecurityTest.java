@@ -49,7 +49,10 @@ class AdminSecurityTest extends AdminTestSupport {
       int n = (h.hasMethodAnnotation(RequiresPermission.class) ? 1 : 0) + (h.hasMethodAnnotation(AdminLoginOnly.class) ? 1 : 0)
           + (h.hasMethodAnnotation(AdminPublic.class) ? 1 : 0);
       assertThat(n).as(e.method() + " " + e.path()).isEqualTo(1);
-      if (h.hasMethodAnnotation(AdminPublic.class)) assertThat(e.path()).isEqualTo("/api/admin/auth/login");
+      // 不用登录的只有这几个（写死名单）：登录；第 6 批 TB-37 告警邮件里的撤销链接（看、撤销，只能撤销，令牌 24 小时、一次）
+      if (h.hasMethodAnnotation(AdminPublic.class)) {
+        assertThat(e.path()).isIn("/api/admin/auth/login", "/api/admin/public/recovery-revoke/peek", "/api/admin/public/recovery-revoke");
+      }
     }
   }
 

@@ -741,7 +741,8 @@
     "hasEmail": "你绑了邮箱，请用邮箱验证码重设提现密码。",
     "notTgAccount": "只有 Telegram 账户可以申请人工重设提现密码。",
     "captchaInvalid": "验证码不对或已过期，请换一张再试",
-    "notSelfFrozen": "没有在机器人里自己冻结的提现；别的冻结要人工解冻"
+    "notSelfFrozen": "没有在机器人里自己冻结的提现；别的冻结要人工解冻",
+    "recoveryPaused": "人工申请暂停受理中（审核员暂时不在）。如果担心账户安全，请先「申请冻结提现」止损，之后再来申请。"
   },
   "validation": {
     "fixAll": "请修改以上标红的内容后再提交",
@@ -949,14 +950,14 @@
     "recoverOpenBot": "用新 Telegram 打开机器人申请",
     "recoverNoBot": "机器人地址暂时取不到，请在 Telegram 里搜索我们的机器人，发 /recover。",
     "emergency": {
-      "notice": "⚠️ 应急模式：Telegram 机器人暂时不可用，你可以先用 Telegram 账号登录网页。为了安全，这样登录后 24 小时内不能提现；查询、交易、充值不受影响。",
+      "notice": "⚠️ 应急模式：Telegram 机器人暂时不可用，你可以先用 Telegram 账号登录网页。为了安全，这样登录后 24 小时内不能提现；查询、交易、充值不受影响。这种方式同一个账户只保留最后登录的一台设备，之前登录的设备会退出。",
       "button": "用 Telegram 登录",
-      "done": "你刚用 Telegram 登录。为了安全，24 小时后（{{time}}）才能提现；查询、交易不受影响。",
+      "done": "你刚用 Telegram 登录。为了安全，24 小时后（{{time}}）才能提现；查询、交易不受影响。别的设备上的登录已经退出（这种方式只保留最后登录的一台设备）。",
       "enter": "进入交易",
       "reason": {
         "disabled": "应急登录现在没有开放，请稍后再试或联系客服。",
         "invalid": "没登录上：Telegram 授权信息校验没有通过，请再点一次。",
-        "expired": "没登录上：Telegram 授权没完成或已过期，请再点一次。",
+        "expired": "Telegram 的授权已经过期，请重新授权：点上面的「用 Telegram 登录」，在弹出的 Telegram 窗口里重新确认（必要时先在 Telegram 里退出这个网站的授权再登录）。",
         "used": "这次授权已经用过了，请再点一次。",
         "no_account": "这个 Telegram 账号还没有开户。",
         "frozen": "账户已冻结，请联系客服。",

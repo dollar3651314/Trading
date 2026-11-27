@@ -9,6 +9,7 @@ import { flattenMenu, visibleMenu } from './config/menu';
 import { LoginPage } from './pages/LoginPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RecoveryRevokePage } from './pages/RecoveryRevokePage';
 
 const LEAF = new Map(flattenMenu().map((m) => [m.key, m]));
 
@@ -43,6 +44,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* 第 6 批 TB-37：告警邮件里的撤销链接，不用登录 */}
+      <Route path="/recovery-revoke" element={<RecoveryRevokePage />} />
       <Route
         path="/change-password"
         element={

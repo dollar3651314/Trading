@@ -347,6 +347,8 @@ class NotifyService implements NotifyApi, NotifyAdminApi, TelegramPrefsApi {
   public NotifyAdminApi.Template updateTemplate(String code, String titleZh, String bodyZh, String titleEn, String bodyEn, Boolean enabled) {
     Rows.TemplateRow t = mapper.template(code);
     if (t == null) throw new app.trading.common.error.BizException("NOT_FOUND", "模板不存在");
+    // 第 6 批 TB-37：告警邮件模板（STAFF）不能在后台改——偷到后台账号的人不能把告警里的内容、撤销入口删掉；要改走迁移
+    if ("STAFF".equals(t.audience)) throw new app.trading.common.error.BizException("TEMPLATE_LOCKED", "告警邮件模板不能在后台修改");
     java.util.Set<String> allowed = new java.util.HashSet<>(template(t).variables());
     ValidationException.Collector c = new ValidationException.Collector();
     String tz = text(c, "titleZh", titleZh, t.titleZh, 200, allowed);
@@ -354,10 +356,31 @@ class NotifyService implements NotifyApi, NotifyAdminApi, TelegramPrefsApi {
     String te = text(c, "titleEn", titleEn, t.titleEn, 200, allowed);
     String be = text(c, "bodyEn", bodyEn, t.bodyEn, 1000, allowed);
     boolean en = enabled == null ? t.enabled : enabled;
+    // #46 审查：客户的安全类提醒只能改文案——不能停用（不管是不是内置），原来文案里有的变量（客户号、时间、设备、IP……）一个都不能少
+    boolean security = NotifyAdminApi.securityTemplate(code);
+    if (NotifyAdminApi.cannotDisable(code) && !en) throw new app.trading.common.error.BizException("SECURITY_TEMPLATE_CANNOT_DISABLE", "安全提醒模板不能停用");
     if (t.builtIn && !en) throw new app.trading.common.error.BizException("BUILT_IN_CANNOT_DISABLE", "内置模板不能停用");
+    if (security) {
+      keepVars(c, "titleZh", t.titleZh, tz);
+      keepVars(c, "bodyZh", t.bodyZh, bz);
+      keepVars(c, "titleEn", t.titleEn, te);
+      keepVars(c, "bodyEn", t.bodyEn, be);
+    }
     c.throwIfAny();
     mapper.updateTemplate(code, tz, bz, te, be, en);
     return template(mapper.template(code));
+  }
+
+  /** 安全类模板：新文案要保留旧文案里出现过的全部变量 */
+  private static void keepVars(ValidationException.Collector c, String field, String oldText, String newText) {
+    if (oldText == null || newText == null || newText.equals(oldText)) return;
+    java.util.regex.Matcher m = VAR.matcher(oldText);
+    while (m.find()) {
+      if (!newText.contains("{" + m.group(1) + "}")) {
+        c.add(field, "missingVariable");
+        return;
+      }
+    }
   }
 
   /** 为空不改；不能为空白、不能超长、只能用模板列出的变量 */

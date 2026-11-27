@@ -108,4 +108,39 @@
   <select id="executeDue" resultType="long">
     SELECT id FROM account_recovery WHERE status = 'APPROVED' AND execute_at &lt;= #{now} AND revoke_requested_by IS NULL ORDER BY id
   </select>
+
+  <!-- 第 6 批（TB-37、TB-38） -->
+  <insert id="insertRevokeToken">
+    INSERT INTO account_recovery_revoke_token (token_hash, recovery_id, expires_at, created_at) VALUES (#{hash}, #{recoveryId}, #{expiresAt}, #{now})
+  </insert>
+  <select id="revokeTokenRecovery" resultType="java.lang.Long">
+    SELECT recovery_id FROM account_recovery_revoke_token WHERE token_hash = #{hash} AND used_at IS NULL AND expires_at &gt; #{now}
+  </select>
+  <update id="useRevokeToken">
+    UPDATE account_recovery_revoke_token SET used_at = #{now} WHERE token_hash = #{hash} AND used_at IS NULL AND expires_at &gt; #{now}
+  </update>
+  <delete id="deleteRevokeTokensBefore">DELETE FROM account_recovery_revoke_token WHERE expires_at &lt; #{before}</delete>
+
+  <select id="pendingCancels" resultType="app.trading.account.recovery.RecoveryMapper$CancelRequest">
+    SELECT id, recovery_id, requested_by, reason FROM account_recovery_cancel_request WHERE processed_at IS NULL ORDER BY id LIMIT 100
+  </select>
+  <select id="pendingCancelCount" resultType="int">
+    SELECT COUNT(*) FROM account_recovery_cancel_request WHERE recovery_id = #{recoveryId} AND processed_at IS NULL
+  </select>
+  <update id="finishCancel">
+    UPDATE account_recovery_cancel_request SET processed_at = #{now}, result = #{result} WHERE id = #{id} AND processed_at IS NULL
+  </update>
+
+  <select id="latestIntake" resultType="app.trading.account.recovery.RecoveryMapper$IntakeChange">
+    SELECT id, paused, actor, actor_name, reason, created_at FROM account_recovery_intake_log ORDER BY id DESC LIMIT 1
+  </select>
+  <select id="latestIntakeForUpdate" resultType="app.trading.account.recovery.RecoveryMapper$IntakeChange">
+    SELECT id, paused, actor, actor_name, reason, created_at FROM account_recovery_intake_log ORDER BY id DESC LIMIT 1 FOR UPDATE
+  </select>
+  <insert id="insertIntake">
+    INSERT INTO account_recovery_intake_log (paused, actor, actor_name, reason, created_at) VALUES (#{paused}, #{actor}, #{actorName}, #{reason}, #{now})
+  </insert>
+  <select id="intakeHistory" resultType="app.trading.account.recovery.RecoveryMapper$IntakeChange">
+    SELECT id, paused, actor, actor_name, reason, created_at FROM account_recovery_intake_log ORDER BY id DESC LIMIT #{limit}
+  </select>
 </mapper>

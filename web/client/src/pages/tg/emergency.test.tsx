@@ -51,6 +51,7 @@ describe('应急开关：用 Telegram 登录', () => {
     hint();
     const box = await screen.findByTestId('tg-emergency');
     expect(box).toHaveTextContent('24 小时内不能提现');
+    expect(box).toHaveTextContent('只保留最后登录的一台设备');
     const s = box.querySelector('script');
     expect(s).not.toBeNull();
     expect(s!.getAttribute('src')).toBe(WIDGET_SRC);
@@ -72,6 +73,7 @@ describe('应急开关：用 Telegram 登录', () => {
     const done = await screen.findByTestId('tg-emergency-done');
     expect(done).toHaveTextContent('你刚用 Telegram 登录');
     expect(done).toHaveTextContent('24 小时后');
+    expect(done).toHaveTextContent('别的设备上的登录已经退出');
     expect(restoreSession).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('tg-emergency-enter'));
     expect(await screen.findByText('交易首页')).toBeInTheDocument();
@@ -85,7 +87,7 @@ describe('应急开关：用 Telegram 登录', () => {
     await act(async () => callback()!({ id: 1, hash: 'x' }));
     expect(await screen.findByTestId('tg-emergency-error')).toHaveTextContent('账户已冻结，请联系客服。');
     await act(async () => callback()!({ id: 1, hash: 'x' }));
-    await waitFor(() => expect(screen.getByTestId('tg-emergency-error')).toHaveTextContent('授权没完成或已过期'));
+    await waitFor(() => expect(screen.getByTestId('tg-emergency-error')).toHaveTextContent('授权已经过期，请重新授权'));
     await act(async () => callback()!({ id: 1, hash: 'x' }));
     await waitFor(() => expect(screen.getByTestId('tg-emergency-error')).toHaveTextContent('校验没有通过'));
   });

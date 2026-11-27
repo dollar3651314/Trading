@@ -864,6 +864,10 @@ export interface NotifyTemplate {
   bodyEn: string;
   variables: string[];
   updatedAt: string;
+  /** 第 6 批 TB-37：告警邮件模板（发给 FX_ALERT_EMAILS）不能在后台改 */
+  locked?: boolean;
+  /** #46 审查：客户安全提醒模板只能改文案（不能停用、原来的变量不能删），每次改都发告警邮件 */
+  security?: boolean;
 }
 
 export interface NotifyRecord {
@@ -1190,3 +1194,36 @@ export interface EmergencyState {
   ownerConfigured: boolean;
   history: EmergencyChange[];
 }
+
+// ---------- 第 6 批：后台加固（TB-37、TB-38） ----------
+export interface IntakeChange {
+  id: number;
+  paused: boolean;
+  actor: string;
+  actorName: string;
+  reason: string;
+  at: string;
+}
+
+/** GET /api/admin/recovery-intake：暂停受理人工申请（只有 Amos 的后台账号能开关） */
+export interface IntakeState {
+  paused: boolean;
+  changedAt: string | null;
+  changedBy: string | null;
+  reason: string | null;
+  canOperate: boolean;
+  ownerConfigured: boolean;
+  history: IntakeChange[];
+}
+
+/** 告警邮件撤销链接：先看是哪一份申请（不用掉令牌） */
+export interface RevokePeek {
+  valid: boolean;
+  id: number | null;
+  kind: 'rebind' | 'pin_reset' | null;
+  customerId: number | null;
+  status: string | null;
+  executeAt: string | null;
+}
+
+export type RevokeLinkResult = 'cancelled' | 'not_open' | 'invalid';

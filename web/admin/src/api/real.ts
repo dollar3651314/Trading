@@ -8,6 +8,9 @@
 import { API_BASE, request, withQuery } from './http';
 import type {
   EmergencyState,
+  IntakeState,
+  RevokeLinkResult,
+  RevokePeek,
   Recovery,
   RecoveryDetail,
   AdjustLimits,
@@ -598,4 +601,17 @@ export const getEmergency = (): Promise<EmergencyState> => request('/emergency')
 /** 打开 / 关闭：原因必填、再输自己的后台密码 */
 export function setEmergency(on: boolean, reason: string, password: string): Promise<EmergencyState> {
   return request('/emergency', { method: 'POST', body: { on, reason, password } });
+}
+
+// ---------- 第 6 批：暂停受理人工申请（TB-38）、告警邮件撤销链接（TB-37，不用登录） ----------
+export const getRecoveryIntake = (): Promise<IntakeState> => request('/recovery-intake');
+export function setRecoveryIntake(paused: boolean, reason: string, password: string): Promise<IntakeState> {
+  return request('/recovery-intake', { method: 'POST', body: { paused, reason, password } });
+}
+export function peekRecoveryRevoke(token: string): Promise<RevokePeek> {
+  return request('/public/recovery-revoke/peek', { method: 'POST', body: { token } });
+}
+export async function revokeRecoveryByLink(token: string): Promise<RevokeLinkResult> {
+  const r = await request<{ result: RevokeLinkResult }>('/public/recovery-revoke', { method: 'POST', body: { token } });
+  return r.result;
 }

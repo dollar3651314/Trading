@@ -9,6 +9,22 @@ import java.util.Set;
 public interface NotifyAdminApi {
 
   /**
+   * 客户的安全类提醒模板（第 6 批 #46 审查）：冻结、提现和提现密码、白名单、找回和换绑、Telegram 关联、应急登录、新设备登录、重设提现密码、验证码。
+   * 后台<b>只能改文案</b>：不能停用，改的时候原来文案里有的变量一个都不能少；每次改都给告警邮箱发邮件。机器人按钮（「不是我」「撤销」等）按模板编号在代码里加，
+   * 后台改不了
+   */
+  static boolean securityTemplate(String code) {
+    if (code == null) return false;
+    return code.startsWith("WITHDRAW_") || code.startsWith("WHITELIST_") || code.startsWith("RECOVERY_") || code.startsWith("PIN_RESET_")
+        || java.util.Set.of("ACCOUNT_FROZEN", "TELEGRAM_LINK_CHANGED", "TG_EMERGENCY_LOGIN", "LOGIN_NEW_DEVICE", "EMAIL_CODE").contains(code);
+  }
+
+  /** 后台不能停用的客户提醒（#46 复审）：上面的安全提醒，加上追保（MARGIN_CALL）、强平（LIQUIDATED）——这两个只锁停用，文案里的变量可以改 */
+  static boolean cannotDisable(String code) {
+    return securityTemplate(code) || "MARGIN_CALL".equals(code) || "LIQUIDATED".equals(code);
+  }
+
+  /**
    * 手动发送给单个客户（原型"手动发送"，不支持群发）。标题和正文原样发送，不按模板翻译。
    * 推送和邮件同样遵守客户的通知偏好，关闭的渠道记为已跳过。
    */
