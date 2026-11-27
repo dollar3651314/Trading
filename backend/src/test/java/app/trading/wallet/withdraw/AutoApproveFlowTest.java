@@ -266,14 +266,17 @@ class AutoApproveFlowTest {
     assertThat(rule(next.id, "R2").values()).as("自动通过后被紧急取消的也算（AA-3）").containsEntry("used", "3000").containsEntry("total", "3100");
   }
 
+  /**
+   * 冷静期内出了安全事件 → 复判触发 R6 转人工。第 4 批审查 🔴4a-1 以后账户冻结会直接取消在途提现（见下一个用例），
+   * 所以这里的安全事件不再用"冻结再解冻"，改成直接记一条解冻事件（R6 只看事件，不看是怎么来的）。
+   */
   @Test
-  void 冷静期内解冻_复判触发R6转人工_详情里有和复判不同的预判() {
+  void 冷静期内出安全事件_复判触发R6转人工_详情里有和复判不同的预判() {
     long[] c = customer("1000");
     WithdrawalRow w = submit(c, "100");
     assertThat(checks(w.id)).containsExactly("PRECHECK AUTO_APPROVED");
     time().advance(Duration.ofHours(1));
-    accounts.freeze(c[0]);
-    accounts.unfreeze(c[0]);
+    jdbc.update("INSERT INTO account_security_event (user_id, type, created_at) VALUES (?, 'UNFREEZE', ?)", c[0], LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));
     time().advance(Duration.ofHours(1).plusSeconds(1));
     withdraws.advance();
     assertThat(status(w.id)).isEqualTo("REVIEWING");
@@ -287,6 +290,21 @@ class AutoApproveFlowTest {
     assertThat(d.precheck().failed()).isEmpty();
     withdraws.reject(w.id, 9L, "核对后驳回");
     assertThat(row(w.id).get("review_mode")).as("驳回也记 MANUAL").isEqualTo("MANUAL");
+  }
+
+  @Test
+  void 冷静期内账户冻结_在途提现取消退回_解冻后不恢复_不做复判() {
+    long[] c = customer("1000");
+    WithdrawalRow w = submit(c, "100");
+    time().advance(Duration.ofHours(1));
+    accounts.freeze(c[0]);
+    assertThat(status(w.id)).isEqualTo("CANCELLED");
+    accounts.unfreeze(c[0]);
+    time().advance(Duration.ofHours(1).plusSeconds(1));
+    withdraws.advance();
+    assertThat(status(w.id)).isEqualTo("CANCELLED");
+    assertThat(checks(w.id)).containsExactly("PRECHECK AUTO_APPROVED");
+    assertThat(events(w.id)).containsExactly("-→COOLING user:" + c[0], "COOLING→CANCELLED system");
   }
 
   @Test

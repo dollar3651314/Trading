@@ -15,6 +15,8 @@ public enum Permission {
   CUSTOMER_EDIT("customer:edit", "customer", true),
   CUSTOMER_FREEZE("customer:freeze", "customer", true),
   CUSTOMER_ADJUST_BALANCE("customer:adjust_balance", "customer", true),
+  /** 第 4 批：人工解除提现冻结（高危：重新输入管理员密码、原因必填、告警邮件）。默认只有超管有（超管自带全部权限，其他角色要单独分配） */
+  WITHDRAW_UNFREEZE("withdraw:unfreeze", "customer", true),
 
   KYC_VIEW("kyc:view", "kyc", false),
   KYC_REVIEW("kyc:review", "kyc", false),

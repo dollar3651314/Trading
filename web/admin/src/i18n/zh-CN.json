@@ -165,7 +165,8 @@
       "adjust_balance": "调整客户余额",
       "edit": "编辑客户资料",
       "freeze": "冻结客户",
-      "unfreeze": "解冻客户"
+      "unfreeze": "解冻客户",
+      "withdraw_unfreeze": "解除提现冻结"
     },
     "holiday": {
       "create": "新增假期",
@@ -473,7 +474,10 @@
       "unfreeze": "解除提现冻结",
       "frozenLine": "冻结来源：{{source}}；冻结时间：{{time}}",
       "unfreezeImpact": "解除后客户可以重新加白名单、提现（仍按 TG 规则一律人工审核）。请先人工核实本人后再解除。",
-      "confirmUnfreeze": "确认解除"
+      "confirmUnfreeze": "确认解除",
+      "password": "你的登录密码",
+      "passwordHint": "解除提现冻结要重新输入你自己的后台登录密码；解除后会给告警邮箱发邮件。",
+      "passwordRequired": "请输入你的登录密码"
     }
   },
   "dashboard": {
@@ -599,7 +603,8 @@
     "quoteGateAmos": "没勾\"Amos 已同意打开\"，不能打开。",
     "signupAllLocked": "冻结和找回流程上线前不能对所有人开放开户（不能填 *），请填具体的 Telegram 用户编号。",
     "firstCheckRequired": "这笔是首笔核实单，请先勾选\"已人工核实\"再通过",
-    "notWithdrawFrozen": "这个客户的提现没有被冻结"
+    "notWithdrawFrozen": "这个客户的提现没有被冻结",
+    "customerWithdrawFrozen": "客户已冻结提现，请先核对"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -861,7 +866,8 @@
     "quote_service_view": "查看报价服务（客户和 Key、用量、授权登记、报价源状态）",
     "quote_key_operate": "建外部客户、建 / 轮换 / 停用 Key",
     "quote_limit_edit": "改 Key 的限额、改默认限额",
-    "quote_license_edit": "报价源授权登记"
+    "quote_license_edit": "报价源授权登记",
+    "withdraw_unfreeze": "解除提现冻结"
   },
   "permModule": {
     "customer": "客户",
@@ -1454,6 +1460,25 @@
       "firstCheckNote": "这是没绑邮箱的 TG 客户的第一笔提现：通过前要人工核实本人和资金来源。",
       "firstCheckedDone": "首笔已人工核实。",
       "firstCheckBox": "我已人工核实本人和资金来源（首笔）"
+    },
+    "safety": {
+      "title": "客户安全情况",
+      "accountFrozen": "账户已冻结",
+      "withdrawFrozen": "提现已冻结（{{source}}）",
+      "blocked": "客户已冻结提现，请先核对；冻结期间不能通过，冻结时在途的提现已取消退回（已审核待放款的暂停交出去）。",
+      "events": "最近 48 小时的安全事件",
+      "noEvents": "最近 48 小时没有安全事件",
+      "type": {
+        "password_change": "改了登录密码",
+        "password_reset": "重置了登录密码",
+        "email_change": "改了邮箱",
+        "freeze": "账户冻结",
+        "unfreeze": "账户解冻",
+        "pin_set": "设置了提现密码",
+        "pin_change": "改了提现密码",
+        "pin_reset": "重设了提现密码",
+        "kyc_first": "第一次提交 KYC"
+      }
     }
   },
   "hotWallet": {

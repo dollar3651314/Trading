@@ -323,6 +323,8 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
 
   const large = compareAmounts(w.amount, '3000') >= 0;
   const needCheck = !!w.firstCheck && !w.firstChecked;
+  // 第 4 批审查 🔴4a-1：客户账户冻结或提现冻结时不能通过（后端也拒绝 WITHDRAW_FROZEN）
+  const frozen = !!w.safety && (w.safety.accountFrozen || w.safety.withdrawFrozen);
   const approve = () =>
     modal.confirm({
       title: t('withdrawals.approveConfirm'),
@@ -429,6 +431,30 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
           {w.firstCheck ? <div>{w.firstChecked ? t('withdrawals.tg.firstCheckedDone') : <b>{t('withdrawals.tg.firstCheckNote')}</b>}</div> : null}
         </div>
       ) : null}
+      {w.safety ? (
+        <div className={`addr-box${frozen || w.safety.securityEvents48h.length ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.safety.title')}>
+          <b>{t('withdrawals.safety.title')}</b>{' '}
+          {w.safety.accountFrozen ? <Pill tone="danger">{t('withdrawals.safety.accountFrozen')}</Pill> : null}{' '}
+          {w.safety.withdrawFrozen ? (
+            <Pill tone="danger">{t('withdrawals.safety.withdrawFrozen', { source: w.safety.withdrawFrozenSource ? t(`customers.wdSafety.source.${w.safety.withdrawFrozenSource}`) : '—' })}</Pill>
+          ) : null}
+          {frozen ? <div className="text-danger">{t('withdrawals.safety.blocked')}</div> : null}
+          <div>
+            {w.safety.securityEvents48h.length ? (
+              <>
+                {t('withdrawals.safety.events')}：
+                {w.safety.securityEvents48h.map((e, i) => (
+                  <div key={i}>
+                    <span className="num">{shortTime(e.at)}</span> · {t(`withdrawals.safety.type.${e.type}`, { defaultValue: e.type })}
+                  </div>
+                ))}
+              </>
+            ) : (
+              t('withdrawals.safety.noEvents')
+            )}
+          </div>
+        </div>
+      ) : null}
       <AutoReviewCard detail={w.autoReviewDetail} />
       {w.payoutNo ? (
         <div className={`addr-box${w.payoutStatus === 'unknown' ? '' : ' ok'}`} role="group" aria-label={t('withdrawals.payoutTitle')}>
@@ -505,7 +531,7 @@ function WithdrawalDetailPanel({ id, onChanged }: { id: string | null; onChanged
             </Checkbox>
           ) : null}
           <div className="acts">
-            <PermButton perm="withdrawal:review" type="primary" onClick={approve} disabled={needCheck && !checked} disabledReason={t('withdrawals.tg.firstCheckNote')}>
+            <PermButton perm="withdrawal:review" type="primary" onClick={approve} disabled={frozen || (needCheck && !checked)} disabledReason={frozen ? t('errors.customerWithdrawFrozen') : t('withdrawals.tg.firstCheckNote')}>
               {t('withdrawals.approve')}
             </PermButton>
             <PermButton perm="withdrawal:review" className="btn-reject" loading={busy} onClick={() => void reject()}>

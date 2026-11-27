@@ -16,7 +16,8 @@ export interface AuthOptions {
 }
 
 /** 从机器人进入网页没有成功的原因（后端 TelegramWebLogin.Outcome，提示页 /tg?r=… 按它显示文案） */
-export type TgLoginReason = 'refused' | 'invalid' | 'expired' | 'used' | 'no_account' | 'frozen' | 'reauth' | 'disabled';
+/** security（第 4 批）：刚出了安全事件（设置 / 修改提现密码、第一次提交 KYC 等），网页会话已全部作废 */
+export type TgLoginReason = 'refused' | 'invalid' | 'expired' | 'used' | 'no_account' | 'frozen' | 'reauth' | 'disabled' | 'security';
 
 export interface Session {
   /** 只有原型（mock 模式）有；真实环境的令牌在 HttpOnly Cookie 里，前端拿不到 */
@@ -66,6 +67,8 @@ export interface KycInfo {
   reviewedAt?: string;
   /** 被驳回时的原因（后台审核员填写，中英文由后端按语言返回） */
   rejectReason?: string;
+  /** 第 4 批：这次提交是安全事件（TG 客户第一次提交），网页会话已全部作废，要回机器人重新授权 */
+  relogin?: boolean;
 }
 
 export interface KycSubmit {

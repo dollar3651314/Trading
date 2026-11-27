@@ -68,5 +68,13 @@ INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, t
   '提现地址 {network} {address} 已生效，现在可以提到这个地址。如果不是你本人加的，请立即申请冻结提现。',
   'The withdrawal address {network} {address} is now active. If you did not add it, freeze withdrawals now.', 'network,address', 'INBOX,PUSH,EMAIL,TELEGRAM');
 
+-- ⑧ 后台人工解除提现冻结时发给告警邮箱（FX_ALERT_EMAILS）的邮件（第 4 批审查 🟡：权限 withdraw:unfreeze、管理员密码、告警邮件），防止有人悄悄解冻
+INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, title_en, body_zh, body_en, variables, channels) VALUES
+('OPS_WITHDRAW_UNFREEZE', 'STAFF', NULL, '人工解除提现冻结', 'Withdrawal freeze lifted manually',
+  '客户 {customerId} 的提现冻结已被人工解除', 'Withdrawal freeze lifted for customer {customerId}',
+  '客户 {customerId} 的提现冻结（来源 {source}）已被人工解除。\n操作人：{admin}\n原因：{reason}\n时间（UTC）：{at}\n如果不是你们安排的操作，请立即在后台重新冻结这个客户并查看审计日志。',
+  'The withdrawal freeze on customer {customerId} (source {source}) was lifted manually.\nBy: {admin}\nReason: {reason}\nAt (UTC): {at}\nIf this was not planned, freeze the customer again in the admin console and check the audit log.',
+  'customerId,source,admin,reason,at', 'EMAIL');
+
 -- ⑦ 新的安全事件类型（只增不改，类型最多 16 个字符）：PIN_SET 第一次设提现密码 / PIN_CHANGE 改提现密码 / PIN_RESET 忘记后重设 / KYC_FIRST 第一次提交 KYC（TG 客户）
 ALTER TABLE account_security_event MODIFY type VARCHAR(16) NOT NULL COMMENT 'PASSWORD_CHANGE / PASSWORD_RESET / EMAIL_CHANGE / FREEZE / UNFREEZE / PIN_SET / PIN_CHANGE / PIN_RESET / KYC_FIRST';

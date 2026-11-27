@@ -105,6 +105,16 @@ public class AdminAuthService {
 
   /** 改自己的密码：要原密码；新密码要够强、不能和原密码一样；其他设备上的登录退出 */
   @Transactional
+  /**
+   * 高危操作前重新输入自己的登录密码（第 4 批：人工解除提现冻结；4b 的人工换绑同一标准）。不对抛 {@code CURRENT_PASSWORD_WRONG}。
+   */
+  public void requirePassword(AdminContext ctx, String password) {
+    SecurityMapper.AdminRow a = mapper.byId(ctx.adminId());
+    if (a == null || password == null || password.isEmpty() || !Passwords.matches(password, a.passwordHash)) {
+      throw new BizException("CURRENT_PASSWORD_WRONG", "管理员密码不对，请重新输入自己的登录密码");
+    }
+  }
+
   void changePassword(AdminContext ctx, String oldPassword, String newPassword) {
     audit.run("admin.change_password", ctx.username(), false, null, () -> {
       SecurityMapper.AdminRow a = mapper.byId(ctx.adminId());

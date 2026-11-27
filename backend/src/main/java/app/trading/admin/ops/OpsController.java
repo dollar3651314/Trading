@@ -85,11 +85,14 @@ class OpsController {
     return customers.detail(id);
   }
 
-  /** 第 4 批：人工解冻提现（冻结提现只能人工解冻；高危、必须填原因） */
-  @RequiresPermission(Permission.CUSTOMER_FREEZE)
+  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解除）。请求体 {reason, password}：原因必填、重新输入自己的登录密码 */
+  record WithdrawUnfreezeBody(String reason, String password) {}
+
+  /** 第 4 批：人工解冻提现（冻结提现只能人工解冻；权限 withdraw:unfreeze，默认只有超管；高危、原因、管理员密码、告警邮件） */
+  @RequiresPermission(Permission.WITHDRAW_UNFREEZE)
   @PostMapping("/api/admin/customers/{id}/withdraw-unfreeze")
-  CustomerOps.Detail unfreezeWithdraw(@PathVariable long id, @RequestBody FreezeBody body) {
-    customers.unfreezeWithdraw(id, body == null ? null : body.reason());
+  CustomerOps.Detail unfreezeWithdraw(@PathVariable long id, @RequestBody(required = false) WithdrawUnfreezeBody body) {
+    customers.unfreezeWithdraw(AdminContext.current(), id, body == null ? null : body.reason(), body == null ? null : body.password());
     return customers.detail(id);
   }
 

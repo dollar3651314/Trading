@@ -165,7 +165,8 @@
       "adjust_balance": "Adjusted balance",
       "edit": "Edit customer profile",
       "freeze": "Froze customer",
-      "unfreeze": "Unfroze customer"
+      "unfreeze": "Unfroze customer",
+      "withdraw_unfreeze": "Lift withdrawal freeze"
     },
     "holiday": {
       "create": "Added holiday",
@@ -473,7 +474,10 @@
       "unfreeze": "Unfreeze withdrawals",
       "frozenLine": "Source: {{source}}; frozen at: {{time}}",
       "unfreezeImpact": "After unfreezing the customer can add addresses and withdraw again (still reviewed manually under TG rules). Verify the customer first.",
-      "confirmUnfreeze": "Unfreeze"
+      "confirmUnfreeze": "Unfreeze",
+      "password": "Your login password",
+      "passwordHint": "Re-enter your own admin login password to lift a withdrawal freeze. An alert email is sent afterwards.",
+      "passwordRequired": "Enter your login password"
     }
   },
   "dashboard": {
@@ -599,7 +603,8 @@
     "quoteGateAmos": "Tick \"Amos has approved\" to turn it on.",
     "signupAllLocked": "Sign-up cannot be opened to everyone (*) before the freeze and recovery flows go live. Enter specific Telegram user IDs.",
     "firstCheckRequired": "This is a first-check withdrawal. Tick \"verified\" before approving",
-    "notWithdrawFrozen": "Withdrawals for this customer are not frozen"
+    "notWithdrawFrozen": "Withdrawals for this customer are not frozen",
+    "customerWithdrawFrozen": "Withdrawals for this customer are frozen. Check before approving"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -861,7 +866,8 @@
     "quote_service_view": "View quote service (clients, keys, usage, licenses, sources)",
     "quote_key_operate": "Create clients; create, rotate or disable keys",
     "quote_limit_edit": "Edit key limits and default limits",
-    "quote_license_edit": "Register quote licenses"
+    "quote_license_edit": "Register quote licenses",
+    "withdraw_unfreeze": "Lift withdrawal freezes"
   },
   "permModule": {
     "customer": "Customers",
@@ -1454,6 +1460,25 @@
       "firstCheckNote": "First withdrawal of a TG customer without email: verify identity and source of funds before approving.",
       "firstCheckedDone": "First withdrawal verified.",
       "firstCheckBox": "I have verified identity and source of funds (first withdrawal)"
+    },
+    "safety": {
+      "title": "Customer safety",
+      "accountFrozen": "Account frozen",
+      "withdrawFrozen": "Withdrawals frozen ({{source}})",
+      "blocked": "Withdrawals for this customer are frozen. It cannot be approved while frozen; in-flight withdrawals were cancelled and refunded when the freeze happened (approved ones not yet sent are paused).",
+      "events": "Security events in the last 48 hours",
+      "noEvents": "No security events in the last 48 hours",
+      "type": {
+        "password_change": "Password changed",
+        "password_reset": "Password reset",
+        "email_change": "Email changed",
+        "freeze": "Account frozen",
+        "unfreeze": "Account unfrozen",
+        "pin_set": "Withdrawal PIN set",
+        "pin_change": "Withdrawal PIN changed",
+        "pin_reset": "Withdrawal PIN reset",
+        "kyc_first": "First KYC submission"
+      }
     }
   },
   "hotWallet": {

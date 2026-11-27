@@ -52,7 +52,7 @@ export function CustomerDetailPage() {
     });
   };
 
-  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解冻；高危、填原因、写审计） */
+  /** 第 4 批：人工解除提现冻结（冻结提现只能人工解冻；权限 withdraw:unfreeze，高危、重新输入管理员密码、填原因、写审计、告警邮件） */
   const askWithdrawUnfreeze = () => {
     if (!c?.withdrawSafety?.withdrawFrozen) return;
     const src = c.withdrawSafety.frozenSource;
@@ -65,8 +65,13 @@ export function CustomerDetailPage() {
           <div>{t('customers.wdSafety.unfreezeImpact')}</div>
         </>
       ),
+      extra: (
+        <Form.Item name="password" label={t('customers.wdSafety.password')} extra={t('customers.wdSafety.passwordHint')} rules={[{ required: true, message: t('customers.wdSafety.passwordRequired') }]}>
+          <Input.Password autoComplete="current-password" />
+        </Form.Item>
+      ),
       confirmText: t('customers.wdSafety.confirmUnfreeze'),
-      onConfirm: (v) => unfreezeCustomerWithdraw(c.id, v.reason),
+      onConfirm: (v) => unfreezeCustomerWithdraw(c.id, v.reason, String(v.password ?? '')),
       onDone: reload,
     });
   };
@@ -276,7 +281,7 @@ export function CustomerDetailPage() {
                         <Pill tone="danger">
                           {t('customers.wdSafety.frozen', { source: c.withdrawSafety.frozenSource ? t(`customers.wdSafety.source.${c.withdrawSafety.frozenSource}`) : '—' })}
                         </Pill>
-                        <PermButton perm="customer:freeze" size="small" danger icon={<UnlockOutlined />} onClick={askWithdrawUnfreeze}>
+                        <PermButton perm="withdraw:unfreeze" size="small" danger icon={<UnlockOutlined />} onClick={askWithdrawUnfreeze}>
                           {t('customers.wdSafety.unfreeze')}
                         </PermButton>
                       </>

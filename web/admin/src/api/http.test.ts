@@ -50,7 +50,7 @@ describe('错误码映射', () => {
       // v2 提现自动审批规则
       'CONFIG_CHANGED', 'NO_CHANGE',
       // TG 机器人第 4 批：首笔核实、解除提现冻结
-      'FIRST_CHECK_REQUIRED', 'NOT_FROZEN',
+      'FIRST_CHECK_REQUIRED', 'NOT_FROZEN', 'WITHDRAW_FROZEN',
     ];
     expect(backend.filter((c) => !ERROR_KEYS[c])).toEqual([]);
   });

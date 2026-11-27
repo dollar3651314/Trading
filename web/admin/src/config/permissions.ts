@@ -11,6 +11,8 @@ export const PERMISSIONS = [
   { code: 'customer:edit', module: 'customer', highRisk: true },
   { code: 'customer:freeze', module: 'customer', highRisk: true },
   { code: 'customer:adjust_balance', module: 'customer', highRisk: true },
+  // 第 4 批：人工解除提现冻结（重新输入管理员密码、告警邮件），默认只有超管
+  { code: 'withdraw:unfreeze', module: 'customer', highRisk: true },
 
   { code: 'kyc:view', module: 'kyc', highRisk: false },
   { code: 'kyc:review', module: 'kyc', highRisk: false },

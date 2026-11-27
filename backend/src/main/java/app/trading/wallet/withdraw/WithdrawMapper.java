@@ -68,6 +68,9 @@ interface WithdrawMapper {
 
   List<Long> withStatus(@Param("status") String status);
 
+  /** 第 4 批审查 🔴4a-1：这个客户在这些状态里的提现（冻结时处理在途的） */
+  List<Long> idsOfUserIn(@Param("userId") long userId, @Param("statuses") List<String> statuses);
+
   /** 一笔提现的一次状态变化（客户端资金记录里每一步的时间） */
   record EventRow(long withdrawalId, String toStatus, LocalDateTime at) {}
 

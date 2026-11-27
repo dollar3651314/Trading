@@ -60,8 +60,9 @@ class KycService {
     return null;
   }
 
+  /** @return 是否因为安全事件作废了这个客户的全部网页会话（页面要提示回机器人重新授权、打开交易） */
   @Transactional
-  void submit(long userId, String docTypeRaw, String docNumberRaw, List<Image> images) {
+  boolean submit(long userId, String docTypeRaw, String docNumberRaw, List<Image> images) {
     // 所有字段的问题一次报出（C56）
     List<String> errors = new ArrayList<>();
     DocType docType = parseDocType(docTypeRaw);
@@ -93,7 +94,11 @@ class KycService {
     }
     mapper.updateKeys(row.id, keys.get("front"), keys.get("back"), keys.get("selfie"));
     // TG 客户第一次提交 KYC 是安全事件（03 页场景 H：盗号的人用盗来的证件做 KYC）：24 小时不能提现、作废全部网页会话
-    if (last == null && telegram.byUserId(userId).isPresent()) auth.securityEvent(userId, app.trading.account.api.SecurityEvent.KYC_FIRST);
+    if (last == null && telegram.byUserId(userId).isPresent()) {
+      auth.securityEvent(userId, app.trading.account.api.SecurityEvent.KYC_FIRST);
+      return true;
+    }
+    return false;
   }
 
   @Transactional

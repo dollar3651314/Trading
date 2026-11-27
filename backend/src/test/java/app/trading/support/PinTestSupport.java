@@ -36,6 +36,12 @@ public final class PinTestSupport {
         + "ON DUPLICATE KEY UPDATE pin_hash = VALUES(pin_hash), failed_count = 0, locked_until = NULL", userId, new BCryptPasswordEncoder(4).encode(pin));
   }
 
+  /** 库里的提现密码是不是这个 */
+  public static boolean matches(JdbcTemplate jdbc, long userId, String pin) {
+    String hash = jdbc.queryForObject("SELECT pin_hash FROM account_withdraw_pin WHERE user_id = ?", String.class, userId);
+    return new BCryptPasswordEncoder().matches(pin, hash);
+  }
+
   /** 把一个客户变成 TG 客户（有 TG 账户） */
   public static void makeTg(JdbcTemplate jdbc, long userId) {
     jdbc.update("INSERT INTO account_telegram (user_id, telegram_id, username, source, authorized_at, created_at) VALUES (?, ?, NULL, 'SIGNUP', '2026-01-01', '2026-01-01')",

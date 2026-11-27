@@ -10,6 +10,8 @@ import { validateWithdraw } from '../../lib/validators';
 import WithdrawPin from '../me/WithdrawPin';
 import Whitelist from './Whitelist';
 import Withdraw from './Withdraw';
+import TgHint from '../tg/TgHint';
+import { Route, Routes } from 'react-router-dom';
 
 const LAYOUT = ['7', '3', '0', '9', '1', '5', '8', '2', '6', '4'];
 const submitWithdraw = vi.fn();
@@ -138,9 +140,15 @@ describe('TG 客户加白名单', () => {
 });
 
 describe('提现密码页', () => {
-  it('第一次设置：两次输入一致后提交，成功后提示网页已全部退出、24 小时内不能提现', async () => {
+  it('第一次设置：两次输入一致后提交，成功后去提示页：网页已全部退出，回机器人重新授权、打开交易', async () => {
     setPin.mockResolvedValue(undefined);
-    renderPage(<WithdrawPin />, '/me/withdraw-pin');
+    renderPage(
+      <Routes>
+        <Route path="/me/withdraw-pin" element={<WithdrawPin />} />
+        <Route path="/tg" element={<TgHint />} />
+      </Routes>,
+      '/me/withdraw-pin',
+    );
     const groups = await screen.findAllByRole('group');
     expect(groups).toHaveLength(2);
     for (const g of groups) {
@@ -149,7 +157,8 @@ describe('提现密码页', () => {
     }
     fireEvent.click(screen.getByRole('button', { name: '设置提现密码' }));
     await waitFor(() => expect(setPin).toHaveBeenCalled());
-    expect(await screen.findByText(/网页已全部退出，24 小时内不能提现/)).toBeInTheDocument();
+    expect(await screen.findByTestId('tg-reason')).toHaveTextContent('这个账户的网页已全部退出');
+    expect(screen.getByTestId('tg-reason')).toHaveTextContent('点「重新授权」，再点「打开交易」');
   });
 });
 

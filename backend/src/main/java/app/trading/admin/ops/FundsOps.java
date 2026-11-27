@@ -1,6 +1,8 @@
 package app.trading.admin.ops;
 
 import app.trading.account.api.AccountApi;
+import app.trading.account.api.UserStatus;
+import app.trading.account.api.WithdrawPinApi;
 import app.trading.account.api.CustomerAdminApi;
 import app.trading.admin.security.AdminContext;
 import app.trading.admin.security.AdminNames;
@@ -55,7 +57,18 @@ class FundsOps {
 
   /** 字段和原型 WithdrawalDetail 一致；autoReviewDetail 是完整的自动审批判定记录（v2），没有时为空 */
   record WithdrawalDetail(WithdrawalView withdrawal, String kycStatus, long registeredDays, String totalDeposit, String balance, int openPositions,
-      List<Recent> recentDeposits, List<Recent> recentWithdrawals, AutoApproveOps.ReviewDetailView autoReviewDetail) {}
+      List<Recent> recentDeposits, List<Recent> recentWithdrawals, AutoApproveOps.ReviewDetailView autoReviewDetail, Safety safety) {}
+
+  /**
+   * 审核时要看的安全情况（第 4 批审查 🔴4a-1）：账户是否冻结、提现是否冻结（来源小写）、最近 48 小时的安全事件（类型小写、时间，最新的在前）。
+   * 冻结时后端也拒绝通过（WITHDRAW_FROZEN），这里是让审核员先看到
+   */
+  record Safety(boolean accountFrozen, boolean withdrawFrozen, String withdrawFrozenSource, List<SafetyEvent> securityEvents48h) {}
+
+  record SafetyEvent(String type, String at) {}
+
+  /** 最近多长时间的安全事件给审核员看 */
+  static final Duration SAFETY_WINDOW = Duration.ofHours(48);
 
   record Bucket(long count, String amount) {}
 
@@ -97,9 +110,12 @@ class FundsOps {
   private final AutoApproveOps autoApprove;
   private final Clock clock;
   private final PaymentApi payments;
+  private final WithdrawPinApi pins;
 
   FundsOps(WalletAdminApi wallet, WithdrawAdminApi withdraws, WalletReconApi recon, HotWalletApi hot, CustomerAdminApi customers, AccountApi accounts,
-      TradingAdminApi trading, TaskService tasks, AdminNames names, Audit audit, AutoApproveOps autoApprove, Clock clock, PaymentApi payments) {
+      TradingAdminApi trading, TaskService tasks, AdminNames names, Audit audit, AutoApproveOps autoApprove, Clock clock, PaymentApi payments,
+      WithdrawPinApi pins) {
+    this.pins = pins;
     this.payments = payments;
     this.wallet = wallet;
     this.withdraws = withdraws;
@@ -274,7 +290,15 @@ class FundsOps {
         trading.openPositionCounts(List.of(w.userId())).getOrDefault(w.userId(), 0),
         f.recentDeposits().stream().map(d -> new Recent(Ops.time(d.creditedAt() == null ? d.detectedAt() : d.creditedAt()), d.chain(), Ops.money(d.amount()))).toList(),
         f.recentWithdrawals().stream().map(x -> new Recent(Ops.time(x.submittedAt()), x.chain(), Ops.money(x.amount()))).toList(),
-        autoApprove.detail(w.id()));
+        autoApprove.detail(w.id()), safety(w.userId()));
+  }
+
+  private Safety safety(long userId) {
+    var pin = pins.status(userId);
+    boolean accountFrozen = accounts.status(userId) == UserStatus.FROZEN;
+    var events = accounts.securityEventsSince(userId, now().minus(SAFETY_WINDOW)).stream()
+        .map(e -> new SafetyEvent(e.type().toLowerCase(), Ops.time(e.at()))).toList();
+    return new Safety(accountFrozen, pin.withdrawFrozen(), pin.frozenSource() == null ? null : pin.frozenSource().toLowerCase(), events);
   }
 
   WithdrawalView approve(AdminContext actor, long no) {

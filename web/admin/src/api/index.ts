@@ -45,7 +45,7 @@ export const listCustomers: typeof real.listCustomers = IS_MOCK ? mock.listCusto
 export const getCustomer: typeof real.getCustomer = IS_MOCK ? mock.getCustomer : real.getCustomer;
 /** POST /api/admin/customers/{id}/freeze（高危） */
 export const setCustomerFrozen: typeof real.setCustomerFrozen = IS_MOCK ? mock.setCustomerFrozen : real.setCustomerFrozen;
-/** POST /api/admin/customers/{id}/withdraw-unfreeze（高危，第 4 批：人工解除提现冻结） */
+/** POST /api/admin/customers/{id}/withdraw-unfreeze（高危，withdraw:unfreeze，第 4 批：人工解除提现冻结，要管理员密码） */
 export const unfreezeCustomerWithdraw: typeof real.unfreezeCustomerWithdraw = IS_MOCK ? mock.unfreezeCustomerWithdraw : real.unfreezeCustomerWithdraw;
 /** PUT /api/admin/customers/{id}/profile（高危，v2 E1：姓名、出生日期、国籍） */
 export const updateCustomerProfile: typeof real.updateCustomerProfile = IS_MOCK ? mock.updateCustomerProfile : real.updateCustomerProfile;

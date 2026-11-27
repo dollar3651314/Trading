@@ -12,7 +12,7 @@ import { QrCode } from '../../components/QrCode';
 import { AuthLayout } from '../auth/AuthLayout';
 import { botLink } from './tgLib';
 
-const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled'];
+const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security'];
 
 export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason | null }) {
   const { t } = useTranslation();

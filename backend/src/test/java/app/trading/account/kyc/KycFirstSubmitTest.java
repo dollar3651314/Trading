@@ -33,10 +33,10 @@ class KycFirstSubmitTest {
   @Test
   void TG客户第一次提交是安全事件_驳回后再交不算() {
     long uid = telegram.openAccount(3_000_000_000L + ThreadLocalRandom.current().nextLong(1_000_000_000L), null).userId();
-    kyc.submit(uid, "PASSPORT", "K" + uid, images());
+    assertThat(kyc.submit(uid, "PASSPORT", "K" + uid, images())).as("返回 true：接口带 relogin，页面提示回机器人").isTrue();
     assertThat(events(uid)).containsExactly("KYC_FIRST");
     jdbc.update("UPDATE account_kyc_application SET status = 'REJECTED' WHERE user_id = ?", uid);
-    kyc.submit(uid, "PASSPORT", "K" + uid, images());
+    assertThat(kyc.submit(uid, "PASSPORT", "K" + uid, images())).isFalse();
     assertThat(events(uid)).containsExactly("KYC_FIRST");
   }
 
@@ -44,7 +44,7 @@ class KycFirstSubmitTest {
   void 网页客户提交不算() {
     long uid = jdbc.queryForObject("SELECT COALESCE(MAX(id), 0) + 1 + FLOOR(RAND() * 1000) FROM account_user", Long.class);
     jdbc.update("INSERT INTO account_user (id, email, status) VALUES (?, ?, 'ACTIVE')", uid, "k" + uid + "@example.com");
-    kyc.submit(uid, "PASSPORT", "W" + uid, images());
+    assertThat(kyc.submit(uid, "PASSPORT", "W" + uid, images())).isFalse();
     assertThat(events(uid)).isEmpty();
   }
 }

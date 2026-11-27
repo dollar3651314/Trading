@@ -460,6 +460,16 @@ export interface WithdrawalDetail extends Withdrawal {
   openPositions: number;
   recentDeposits: { time: string; chain: Chain; amount: string }[];
   recentWithdrawals: { time: string; chain: Chain; amount: string }[];
+  /** 第 4 批审查：账户冻结、提现冻结（冻结时后端拒绝通过）、最近 48 小时的安全事件 */
+  safety?: WithdrawalSafety | null;
+}
+
+export interface WithdrawalSafety {
+  accountFrozen: boolean;
+  withdrawFrozen: boolean;
+  withdrawFrozenSource: WithdrawFreezeSource | null;
+  /** 类型小写（password_change、pin_set、kyc_first、freeze 等），最新的在前 */
+  securityEvents48h: { type: string; at: string }[];
 }
 
 /** 筛选：open = 待处理（全部：冷静期 + 待审核 + 延迟期） */

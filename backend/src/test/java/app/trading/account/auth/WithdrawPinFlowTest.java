@@ -122,6 +122,66 @@ class WithdrawPinFlowTest {
     assertThat(kp.get("keypadId").asString()).isNotBlank();
   }
 
+  /** 用接口要一副键盘，按数字算出位置 */
+  String body(Cookie c, String... pins) throws Exception {
+    StringBuilder b = new StringBuilder("{");
+    String[] names = pins.length == 3 ? new String[] {"old", "pin", "confirm"} : new String[] {"pin", "confirm"};
+    for (int i = 0; i < pins.length; i++) {
+      JsonNode kp = json.readTree(mvc.perform(post("/api/me/withdraw-pin/keypad").cookie(c)).andReturn().getResponse().getContentAsString());
+      List<Integer> digits = new java.util.ArrayList<>();
+      kp.get("digits").forEach(d -> digits.add(d.asInt()));
+      String pos = pins[i].chars().mapToObj(ch -> String.valueOf(digits.indexOf(ch - '0'))).collect(java.util.stream.Collectors.joining(","));
+      if (i > 0) b.append(',');
+      b.append('"').append(names[i]).append("\":{\"keypadId\":\"").append(kp.get("keypadId").asString()).append("\",\"positions\":[").append(pos).append("]}");
+    }
+    return b.append('}').toString();
+  }
+
+  MockHttpServletResponse postJson(String url, Cookie c, String body) throws Exception {
+    return mvc.perform(post(url).cookie(c).contentType(MediaType.APPLICATION_JSON).content(body)).andReturn().getResponse();
+  }
+
+  @Test
+  void 键盘重放_同一副键盘第二次提交无效_不算输错() throws Exception {
+    long uid = tgUser();
+    PinTestSupport.setPin(jdbc, uid, "246813");
+    // 服务层：校验用过的键盘再交一次
+    PinInput once = in(uid, "246813");
+    pins.verify(uid, once);
+    assertThat(code(() -> pins.verify(uid, once))).isEqualTo("PIN_KEYPAD_EXPIRED");
+    PinInput wrong = in(uid, "999999");
+    assertThat(code(() -> pins.verify(uid, wrong))).isEqualTo("PIN_WRONG");
+    assertThat(code(() -> pins.verify(uid, wrong))).as("输错的请求原样重放：键盘已失效，不再计数").isEqualTo("PIN_KEYPAD_EXPIRED");
+    assertThat(jdbc.queryForObject("SELECT failed_count FROM account_withdraw_pin WHERE user_id = ?", Integer.class, uid)).isEqualTo(1);
+
+    // 接口：修改提现密码的请求原样再发一次
+    Cookie c = new Cookie("fx_session", sessions.create(uid, "203.0.113.9", "t"));
+    String req = body(c, "246813", "582047", "582047");
+    MockHttpServletResponse first = postJson("/api/me/withdraw-pin/change", c, req);
+    assertThat(first.getStatus()).as(first.getContentAsString()).isLessThan(300);
+    Cookie c2 = new Cookie("fx_session", sessions.create(uid, "203.0.113.9", "t"));
+    MockHttpServletResponse replay = postJson("/api/me/withdraw-pin/change", c2, req);
+    assertThat(replay.getContentAsString()).contains("PIN_KEYPAD_EXPIRED");
+    assertThat(PinTestSupport.matches(jdbc, uid, "582047")).as("密码还是第一次改的").isTrue();
+  }
+
+  @Test
+  void 别人的键盘_接口里用不了() throws Exception {
+    long a = tgUser();
+    long b = tgUser();
+    Cookie ca = new Cookie("fx_session", sessions.create(a, "203.0.113.9", "t"));
+    Cookie cb = new Cookie("fx_session", sessions.create(b, "203.0.113.9", "t"));
+    // A 要的键盘，B 拿来设置自己的提现密码
+    String aBody = body(ca, "582047", "582047");
+    MockHttpServletResponse r = postJson("/api/me/withdraw-pin", cb, aBody);
+    assertThat(r.getContentAsString()).contains("PIN_KEYPAD_EXPIRED");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_withdraw_pin WHERE user_id IN (?, ?)", Integer.class, a, b)).isZero();
+    // 服务层：别人的键盘校验也不认，不算输错
+    PinTestSupport.setPin(jdbc, b, "246813");
+    assertThat(code(() -> pins.verify(b, in(a, "246813")))).isEqualTo("PIN_KEYPAD_EXPIRED");
+    assertThat(jdbc.queryForObject("SELECT failed_count FROM account_withdraw_pin WHERE user_id = ?", Integer.class, b)).isZero();
+  }
+
   @Test
   void 第一次设置_两次一致_不能太简单_是安全事件_作废全部网页会话_只能设一次() {
     long uid = tgUser();

@@ -934,7 +934,8 @@
       "no_account": "You do not have an account yet. Send /start to the bot and tap \"Sign up\".",
       "frozen": "Your account is frozen. Please contact support.",
       "reauth": "There was a recent security change on your account. Go back to the bot, tap \"Re-authorize\", then open trading.",
-      "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again."
+      "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again.",
+      "security": "For security, all web sessions of this account have been signed out (you just set or changed your withdrawal PIN, submitted identity verification or made another security change), and withdrawals pause for a while. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\"."
     }
   },
   "pin": {
@@ -963,8 +964,6 @@
       "change": "Change",
       "forgot": "Forgot"
     },
-    "doneTitle": "Saved",
-    "doneBody": "For security, all web sessions of this account are signed out and withdrawals pause for {{h}} hours. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\".",
     "withdrawLabel": "Withdrawal PIN",
     "whitelistLabel": "Withdrawal PIN (needed to add an address)"
   }

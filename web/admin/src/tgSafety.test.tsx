@@ -6,7 +6,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 import { approveWithdrawal, getCustomer, listWithdrawals } from './api';
 import * as db from './mocks/data/db';
-import { withdrawSafety } from './mocks/handlers';
+import { withdrawEvents, withdrawSafety } from './mocks/handlers';
 import { renderAs } from './test/render';
 import { CustomerDetailPage } from './pages/customers/CustomerDetailPage';
 import { WithdrawalsPage } from './pages/funds/WithdrawalsPage';
@@ -58,6 +58,27 @@ describe('首笔核实', () => {
   }, 30_000);
 });
 
+describe('冻结的客户不能通过出金（审查 🔴4a-1）', () => {
+  it('提现冻结：详情写明"提现已冻结"和最近 48 小时的安全事件，"通过"按钮不可点，接口也拒绝', async () => {
+    const w = await tgPending();
+    withdrawSafety.set(w.customerId, { pinSet: true, pinLockedUntil: null, withdrawFrozen: true, frozenSource: 'bot_self', frozenAt: '2026-11-27T08:00:00Z' });
+    withdrawEvents.set(w.customerId, [{ type: 'pin_change', at: '2026-11-27 07:00:00' }]);
+    try {
+      await expect(approveWithdrawal(w.id, true)).rejects.toMatchObject({ reasonKey: 'errors.customerWithdrawFrozen' });
+      renderAs(<WithdrawalsPage />);
+      fireEvent.click((await screen.findAllByText(w.customerName))[0]);
+      const box = await screen.findByRole('group', { name: '客户安全情况' });
+      expect(box).toHaveTextContent('提现已冻结（客户在机器人里自己冻结）');
+      expect(box).toHaveTextContent('改了提现密码');
+      expect(screen.getByRole('button', { name: '通过' })).toBeDisabled();
+    } finally {
+      withdrawSafety.delete(w.customerId);
+      withdrawEvents.delete(w.customerId);
+      Object.assign(w, { ruleType: undefined, source: undefined, firstCheck: undefined, firstChecked: undefined });
+    }
+  }, 30_000);
+});
+
 describe('客户详情：提现安全', () => {
   it('显示冻结来源，人工解除要填原因，解除后不再显示冻结', async () => {
     const c = db.customers[0];
@@ -78,6 +99,8 @@ describe('客户详情：提现安全', () => {
       expect(dialog).toHaveTextContent('冻结来源：网页申请冻结');
       fireEvent.click(within(dialog).getByRole('button', { name: '确认解除' }));
       expect(await within(dialog).findByText('请填写操作原因', undefined, { timeout: 5000 })).toBeInTheDocument();
+      expect(within(dialog).getByText('请输入你的登录密码')).toBeInTheDocument();
+      fireEvent.change(within(dialog).getByLabelText('你的登录密码'), { target: { value: 'my-own-password' } });
       confirmHighRisk(dialog, '视频核实本人，客户确认是自己申请的冻结', '确认解除');
       await waitFor(() => expect(screen.queryByText('提现已冻结（网页申请冻结）')).not.toBeInTheDocument(), { timeout: 5000 });
       expect((await getCustomer(c.id)).withdrawSafety?.withdrawFrozen).toBe(false);
@@ -86,6 +109,25 @@ describe('客户详情：提现安全', () => {
       withdrawSafety.delete(c.id);
     }
   }, 30_000);
+
+  it('解除提现冻结要单独的权限 withdraw:unfreeze：运营角色没有（默认只有超管）', async () => {
+    const c = db.customers[1];
+    const before = c.telegramId;
+    c.telegramId = '700000002';
+    withdrawSafety.set(c.id, { pinSet: true, pinLockedUntil: null, withdrawFrozen: true, frozenSource: 'pin_locks', frozenAt: '2026-11-20T08:00:00Z' });
+    try {
+      renderAs(
+        <Routes>
+          <Route path="/customers/:id" element={<CustomerDetailPage />} />
+        </Routes>,
+        { path: `/customers/${c.id}`, adminId: 2 },
+      );
+      expect(await screen.findByRole('button', { name: /解除提现冻结/ })).toBeDisabled();
+    } finally {
+      c.telegramId = before;
+      withdrawSafety.delete(c.id);
+    }
+  });
 
   it('不是 TG 客户：没有提现安全这一项', async () => {
     const c = db.customers.find((x) => !x.telegramId)!;

@@ -107,6 +107,12 @@
     SELECT id FROM wallet_withdrawal WHERE status = #{status} ORDER BY id
   </select>
 
+  <select id="idsOfUserIn" resultType="long">
+    SELECT id FROM wallet_withdrawal WHERE user_id = #{userId} AND status IN
+    <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
+    ORDER BY id
+  </select>
+
   <resultMap id="event" type="app.trading.wallet.withdraw.WithdrawMapper$EventRow">
     <constructor>
       <arg column="withdrawal_id" javaType="_long"/>

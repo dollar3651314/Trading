@@ -8,6 +8,7 @@ import { errorKey } from '../../api/errors';
 import { getKyc, submitKyc } from '../../api/user';
 import type { KycDocType, KycInfo } from '../../api/types';
 import { useToast } from '../../app/contexts';
+import { useSecurityRelogin } from '../../app/useSecurityRelogin';
 import { AsyncView } from '../../components/AsyncView';
 import { FieldErrors, Segmented, TextField } from '../../components/Form';
 import { Icon } from '../../components/Icon';
@@ -47,6 +48,7 @@ function Upload({ slot, file, onFile, errors }: { slot: Slot; file: File | null;
 }
 
 function KycForm({ onSubmitted }: { onSubmitted: (k: KycInfo) => void }) {
+  const relogin = useSecurityRelogin();
   const { t } = useTranslation();
   const toast = useToast();
   const [docType, setDocType] = useState<KycDocType>('idCard');
@@ -67,6 +69,8 @@ function KycForm({ onSubmitted }: { onSubmitted: (k: KycInfo) => void }) {
     try {
       const k = await submitKyc({ docType, docNumber: docNumber.trim(), front: files.front!, back: files.back!, selfie: files.selfie! });
       toast.show({ tone: 'success', title: t('kyc.submitted') });
+      // 第 4 批：TG 客户第一次提交是安全事件，网页已全部退出 → 提示回机器人重新授权、打开交易
+      if (k.relogin) return relogin();
       onSubmitted(k);
     } catch (e) {
       setErr(t(errorKey(e)));

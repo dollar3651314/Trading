@@ -305,10 +305,12 @@ export function getCustomer(id: number): Promise<CustomerDetail> {
 /** 第 4 批：TG 客户的提现安全（原型里只放在内存，刷新即恢复） */
 export const withdrawSafety = new Map<number, WithdrawSafety>();
 
-export function unfreezeCustomerWithdraw(id: number, reason: string): Promise<CustomerDetail> {
+export function unfreezeCustomerWithdraw(id: number, reason: string, password: string): Promise<CustomerDetail> {
   return mutate(() => {
-    requirePerm('customer:freeze');
+    requirePerm('withdraw:unfreeze');
     const r = requireReason(reason);
+    // 原型登录不核对密码，这里也只要求填了（真实接口核对管理员自己的登录密码，不对 CURRENT_PASSWORD_WRONG）
+    if (!password) throw new ApiError('errors.currentPasswordWrong', undefined, { status: 400, code: 'CURRENT_PASSWORD_WRONG' });
     const s = withdrawSafety.get(id);
     if (!s?.withdrawFrozen) throw new ApiError('errors.notWithdrawFrozen');
     const was = s.frozenSource;
@@ -611,9 +613,19 @@ export function getWithdrawal(id: string): Promise<WithdrawalDetail> {
             ]
           : deps.map((d) => ({ time: d.creditedAt ?? d.detectedAt, chain: d.chain, amount: d.amount })),
       recentWithdrawals: prevWd.map((x) => ({ time: x.submittedAt, chain: x.chain, amount: x.amount })),
+      safety: withdrawalSafety(c),
     };
   });
 }
+
+/** 第 4 批审查：出金详情的安全情况（原型：账户冻结看客户状态，提现冻结看 withdrawSafety；安全事件原型里没有） */
+function withdrawalSafety(c: { id: number; status: string }) {
+  const s = withdrawSafety.get(c.id);
+  return { accountFrozen: c.status === 'frozen', withdrawFrozen: !!s?.withdrawFrozen, withdrawFrozenSource: s?.frozenSource ?? null, securityEvents48h: withdrawEvents.get(c.id) ?? [] };
+}
+
+/** 原型：客户最近 48 小时的安全事件（测试里设置） */
+export const withdrawEvents = new Map<number, { type: string; at: string }[]>();
 
 export function approveWithdrawal(id: string, firstChecked = false): Promise<Withdrawal> {
   return mutate(() => {
@@ -621,6 +633,9 @@ export function approveWithdrawal(id: string, firstChecked = false): Promise<Wit
     const w = db.withdrawals.find((x) => x.id === id);
     if (!w) throw new ApiError('errors.notFound');
     if (w.status !== 'pending') throw new ApiError('errors.stateChanged');
+    // 第 4 批审查 🔴4a-1：客户账户冻结或提现冻结时不能通过（和后端 WITHDRAW_FROZEN 一致）
+    const sf = withdrawalSafety(db.customerById(w.customerId)!);
+    if (sf.accountFrozen || sf.withdrawFrozen) throw new ApiError('errors.customerWithdrawFrozen', undefined, { status: 403, code: 'WITHDRAW_FROZEN' });
     // 第 4 批：首笔核实单没勾"已核实"不能通过（和后端 FIRST_CHECK_REQUIRED 一致）
     if (w.firstCheck && !w.firstChecked && !firstChecked) throw new ApiError('errors.firstCheckRequired');
     if (w.firstCheck && firstChecked) w.firstChecked = true;

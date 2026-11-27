@@ -1,5 +1,7 @@
 package app.trading.account.auth;
 
+import app.trading.account.api.WithdrawBlocked;
+import org.springframework.context.ApplicationEventPublisher;
 import app.trading.account.api.SecurityEvent;
 import app.trading.account.api.WithdrawPinApi;
 import app.trading.common.error.BizException;
@@ -41,6 +43,8 @@ class WithdrawPins implements WithdrawPinApi {
   record Keypad(String id, List<Integer> digits) {}
 
   private final AuthMapper mapper;
+  /** 冻结提现时通知钱包处理在途提现（{@link WithdrawBlocked}） */
+  private final ApplicationEventPublisher events;
   private final AuthService auth;
   private final EmailCodeService codes;
   private final NotifyApi notify;
@@ -52,7 +56,8 @@ class WithdrawPins implements WithdrawPinApi {
   private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(10);
 
   WithdrawPins(AuthMapper mapper, AuthService auth, EmailCodeService codes, NotifyApi notify, StringRedisTemplate redis, Clock clock,
-      PlatformTransactionManager txm) {
+      PlatformTransactionManager txm, ApplicationEventPublisher events) {
+    this.events = events;
     this.mapper = mapper;
     this.auth = auth;
     this.codes = codes;
@@ -228,6 +233,8 @@ class WithdrawPins implements WithdrawPinApi {
   private void freeze(long userId, String source, String reason, LocalDateTime now) {
     if (mapper.insertWithdrawFreeze(userId, source, reason, now) == 1) {
       notify.toUser(userId, "WITHDRAW_FROZEN", Map.of("reason", reason == null ? "" : reason));
+      // 第 4 批审查 🔴4a-1：在途的提现一起挡住（钱包在这个事务提交以后处理）
+      events.publishEvent(new WithdrawBlocked(userId, "提现已冻结：" + (reason == null ? source : reason)));
     }
   }
 
