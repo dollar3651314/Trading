@@ -158,6 +158,11 @@ function Detail({ id, onChanged }: { id: string; onChanged: () => void }) {
           <span className="text-danger">{t('recoveries.revokeRequested', { time: shortTime(r.revokeRequestedAt ?? '') })}</span>
         </div>
       ) : null}
+      {r.keptAt && !r.revokeRequested && (r.status === 'proof' || r.status === 'approved') ? (
+        <div className="addr-box" role="status" aria-label={t('recoveries.keptTitle')}>
+          {t('recoveries.kept', { time: shortTime(r.keptAt) })}
+        </div>
+      ) : null}
       {r.proofNote ? <div className="addr-box ok">{t('recoveries.proofNoteLine', { note: r.proofNote, by: r.approvedBy ?? '—' })}</div> : null}
       {r.closeReason ? <div className="addr-box">{t('recoveries.closeLine', { by: r.closedBy ?? '—', reason: r.closeReason })}</div> : null}
       {open ? (

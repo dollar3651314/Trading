@@ -1153,6 +1153,8 @@ export interface Recovery {
   executeAt: string | null;
   revokeRequested: boolean;
   revokeRequestedAt: string | null;
+  /** Amos 选过"维持"的时间：之后原 TG 再撤销只记经过、发告警，不再暂停 */
+  keptAt?: string | null;
   closedBy: string | null;
   closeReason: string | null;
   closedAt: string | null;

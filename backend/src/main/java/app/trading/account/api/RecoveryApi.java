@@ -50,7 +50,7 @@ public interface RecoveryApi {
 
   record View(long id, String kind, long userId, Long applicantTgId, String applicantTgUsername, String status, boolean disputed, boolean disputePinOk,
       boolean disputeFrozen, LocalDateTime objectionEndsAt, String proofNote, Long approvedBy, LocalDateTime approvedAt, LocalDateTime executeAt,
-      String revokeRequestedBy, LocalDateTime revokeRequestedAt, String closedBy, String closeReason, LocalDateTime closedAt, LocalDateTime createdAt) {}
+      String revokeRequestedBy, LocalDateTime revokeRequestedAt, LocalDateTime keptAt, String closedBy, String closeReason, LocalDateTime closedAt, LocalDateTime createdAt) {}
 
   record Detail(View recovery, List<Event> events) {}
 

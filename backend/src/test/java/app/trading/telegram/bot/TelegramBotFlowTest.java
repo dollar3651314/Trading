@@ -339,6 +339,9 @@ class TelegramBotFlowTest {
     assertThat(jdbc.queryForObject("SELECT disputed FROM account_recovery WHERE id = ?", Boolean.class, id)).isTrue();
     tg.push(tg.callback(orig, "orig", orig, "private", app.trading.notification.api.TelegramSender.ACTION_RECOVERY_FREEZE + id));
     assertThat(text(replies(orig, before + 2).get(before + 1))).startsWith("已冻结提现");
-    assertThat(jdbc.queryForObject("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).isEqualTo("DISPUTE");
+    // 冻结表一个来源一行（4b 审查 🔴R2）：这里只该有争议这一条
+    assertThat(jdbc.queryForList("SELECT source FROM account_withdraw_freeze WHERE user_id = ?", String.class, uid)).containsExactly("DISPUTE");
+    assertThat(jdbc.queryForList("SELECT reason FROM account_withdraw_freeze WHERE user_id = ? AND source = 'DISPUTE'", String.class, uid))
+        .singleElement().asString().contains("找回申请 #" + id).contains("客户选了直接冻结");
   }
 }

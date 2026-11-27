@@ -2113,7 +2113,8 @@
       "cancel": "撤销",
       "reject": "驳回",
       "execute": "已执行",
-      "execute_failed": "没能执行"
+      "execute_failed": "没能执行",
+      "revoke_after_keep": "原 TG 再次撤销（已维持过，不暂停）"
     },
     "target": "客户：{{name}}（#{{id}}）",
     "approve": "批准",
@@ -2132,6 +2133,8 @@
     "revokeImpact": "你本人撤销直接生效：申请结束，这份申请带来的提现冻结解除。",
     "keep": "维持批准",
     "confirmKeep": "确认维持",
-    "keepImpact": "维持后清掉撤销请求，到执行时间就换绑。请先视频核对原主。"
+    "keepImpact": "维持后清掉撤销请求，到执行时间就换绑。请先视频核对原主。",
+    "keptTitle": "已维持过",
+    "kept": "{{time}} 你已经维持过一次：之后原 TG 再撤销只记入经过并发告警邮件，不再暂停批准和执行。"
   }
 }

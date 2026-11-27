@@ -34,7 +34,7 @@ class RecoveryOps {
   /** 列表和详情：申请 + 被找回的客户（姓名、TG、KYC 状态） */
   record View(String id, String kind, long customerId, String customerName, String customerTelegram, String kycStatus, String applicantTgId,
       String applicantTgUsername, String status, boolean disputed, boolean disputePinOk, boolean disputeFrozen, String objectionEndsAt, String proofNote,
-      String approvedBy, String approvedAt, String executeAt, boolean revokeRequested, String revokeRequestedAt, String closedBy, String closeReason,
+      String approvedBy, String approvedAt, String executeAt, boolean revokeRequested, String revokeRequestedAt, String keptAt, String closedBy, String closeReason,
       String closedAt, String createdAt) {}
 
   record EventView(String action, String actor, String note, String at) {}
@@ -128,7 +128,7 @@ class RecoveryOps {
           c == null || c.kycStatus() == null ? null : c.kycStatus().toLowerCase(), v.applicantTgId() == null ? null : String.valueOf(v.applicantTgId()),
           v.applicantTgUsername(), v.status().toLowerCase(), v.disputed(), v.disputePinOk(), v.disputeFrozen(), Ops.time(v.objectionEndsAt()), v.proofNote(),
           v.approvedBy() == null ? null : admins.getOrDefault(v.approvedBy(), "#" + v.approvedBy()), Ops.time(v.approvedAt()), Ops.time(v.executeAt()),
-          v.revokeRequestedBy() != null, Ops.time(v.revokeRequestedAt()), v.closedBy(), v.closeReason(), Ops.time(v.closedAt()), Ops.time(v.createdAt()));
+          v.revokeRequestedBy() != null, Ops.time(v.revokeRequestedAt()), Ops.time(v.keptAt()), v.closedBy(), v.closeReason(), Ops.time(v.closedAt()), Ops.time(v.createdAt()));
     }).toList();
   }
 

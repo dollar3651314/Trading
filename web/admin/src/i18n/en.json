@@ -2113,7 +2113,8 @@
       "cancel": "Cancelled",
       "reject": "Rejected",
       "execute": "Done",
-      "execute_failed": "Could not run"
+      "execute_failed": "Could not run",
+      "revoke_after_keep": "Holder cancelled again (already kept; no pause)"
     },
     "target": "Customer: {{name}} (#{{id}})",
     "approve": "Approve",
@@ -2132,6 +2133,8 @@
     "revokeImpact": "Your own cancellation takes effect immediately: the request closes and any freeze it caused is lifted.",
     "keep": "Keep approval",
     "confirmKeep": "Keep",
-    "keepImpact": "Clears the cancellation request; the rebind runs at its scheduled time. Verify the original holder by video first."
+    "keepImpact": "Clears the cancellation request; the rebind runs at its scheduled time. Verify the original holder by video first.",
+    "keptTitle": "Already kept",
+    "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution."
   }
 }

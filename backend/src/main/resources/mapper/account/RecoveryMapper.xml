@@ -4,7 +4,7 @@
 <mapper namespace="app.trading.account.recovery.RecoveryMapper">
 
   <sql id="cols">id, kind, user_id, applicant_tg_id, applicant_tg_username, status, disputed, disputed_at, dispute_pin_ok, dispute_frozen,
-    objection_ends_at, proof_note, approved_by, approved_at, execute_at, revoke_requested_by, revoke_requested_at, closed_by, close_reason,
+    objection_ends_at, proof_note, approved_by, approved_at, execute_at, revoke_requested_by, revoke_requested_at, kept_at, closed_by, close_reason,
     closed_at, created_at</sql>
 
   <select id="identity" resultType="app.trading.account.recovery.RecoveryMapper$Identity">
@@ -84,7 +84,9 @@
     UPDATE account_recovery SET revoke_requested_by = #{by}, revoke_requested_at = #{at} WHERE id = #{id} AND status IN ('PROOF', 'APPROVED')
   </update>
 
-  <update id="clearRevoke">UPDATE account_recovery SET revoke_requested_by = NULL, revoke_requested_at = NULL WHERE id = #{id} AND status IN ('PROOF', 'APPROVED')</update>
+  <update id="clearRevoke">
+    UPDATE account_recovery SET revoke_requested_by = NULL, revoke_requested_at = NULL, kept_at = #{at} WHERE id = #{id} AND status IN ('PROOF', 'APPROVED')
+  </update>
 
   <update id="close">
     UPDATE account_recovery SET status = #{to}, closed_by = #{by}, close_reason = #{reason}, closed_at = #{at} WHERE id = #{id} AND status = #{from}

@@ -228,7 +228,8 @@ class RecoveryService implements RecoveryApi {
    *   <li>换绑（REBIND）在反对期：按"不是我"处理（转争议、加严人工），不关申请——反对期只能走"不是我"。</li>
    *   <li>换绑在证明阶段或已批准：<b>不管有没有争议，撤销都转 Amos 决定</b>，记撤销请求、暂停批准和执行，证明阶段的 RECOVERY 冻结保留，
    *       发告警邮件。防止占着原 TG 的人在反对期里不出声、等批准后一撤销就把真原主永远挡在外面、顺带解冻提现。
-   *       需求文档 08 页"正常路径原 TG 或邮箱可直接撤销"这里<b>故意更严</b>，等 Amos 确认。</li>
+   *       需求文档 08 页"正常路径原 TG 或邮箱可直接撤销"这里<b>故意更严</b>，等 Amos 确认。
+   *       Amos 选过一次"维持"以后，再撤销只记经过（REVOKE_AFTER_KEEP）、发告警，不再暂停。</li>
    * </ul>
    */
   @Override
@@ -249,6 +250,14 @@ class RecoveryService implements RecoveryApi {
       }
       if ("OBJECTION".equals(r.status)) {
         out[0] = null; // 反对期：按"不是我"处理
+        return;
+      }
+      if (r.keptAt != null) {
+        // 4b 复审：Amos 已经视频核对、选过一次"维持"，之后的撤销只记经过、发告警，不再暂停批准和执行（防止占着原 TG 的人反复撤销把申请拖住）
+        mapper.insertEvent(r.id, "REVOKE_AFTER_KEEP", "user:" + userId, null, now);
+        after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who",
+            "原 Telegram（你已经维持过一次，这次不再暂停）", "whoEn", "the original Telegram account (you already kept it once; this does not pause it)"));
+        out[0] = "已记下你的撤销并通知审核员。审核员已经核对并维持过这份申请，这次撤销不会暂停换绑；如果你认为账户被盗，请联系客服。";
         return;
       }
       if (r.revokeRequestedBy == null) {
@@ -333,7 +342,7 @@ class RecoveryService implements RecoveryApi {
       if (!("APPROVED".equals(r.status) || "PROOF".equals(r.status)) || r.revokeRequestedBy == null) {
         throw new BizException("RECOVERY_NO_REVOKE_REQUEST", "这份申请没有待决定的撤销请求");
       }
-      mapper.clearRevoke(r.id);
+      mapper.clearRevoke(r.id, now());
       mapper.insertEvent(r.id, "KEEP", "admin:" + adminId, reason, now());
     });
   }
@@ -496,7 +505,7 @@ class RecoveryService implements RecoveryApi {
 
   static View view(RecoveryMapper.Row r) {
     return new View(r.id, r.kind, r.userId, r.applicantTgId, r.applicantTgUsername, r.status, r.disputed, r.disputePinOk, r.disputeFrozen,
-        r.objectionEndsAt, r.proofNote, r.approvedBy, r.approvedAt, r.executeAt, r.revokeRequestedBy, r.revokeRequestedAt, r.closedBy, r.closeReason,
+        r.objectionEndsAt, r.proofNote, r.approvedBy, r.approvedAt, r.executeAt, r.revokeRequestedBy, r.revokeRequestedAt, r.keptAt, r.closedBy, r.closeReason,
         r.closedAt, r.createdAt);
   }
 }

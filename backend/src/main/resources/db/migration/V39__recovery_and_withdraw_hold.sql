@@ -20,6 +20,7 @@ CREATE TABLE account_recovery (
   execute_at            DATETIME(3)  NULL COMMENT '执行时间：REBIND 批准后 24 小时，PIN_RESET 48 小时',
   revoke_requested_by   VARCHAR(16)  NULL COMMENT '争议路径上原 TG 提出的撤销（转 Amos 决定，没决定前不执行）：ORIGINAL_TG',
   revoke_requested_at   DATETIME(3)  NULL,
+  kept_at               DATETIME(3)  NULL COMMENT 'Amos 选过"维持"的时间：之后原 TG 再撤销只记经过、发告警，不再暂停（防止反复撤销拖住申请）',
   closed_by             VARCHAR(32)  NULL COMMENT '结束人：admin:<编号> / ORIGINAL_TG / system',
   close_reason          VARCHAR(500) NULL,
   closed_at             DATETIME(3)  NULL,
@@ -33,7 +34,7 @@ CREATE TABLE account_recovery (
 CREATE TABLE account_recovery_event (
   id          BIGINT       NOT NULL AUTO_INCREMENT,
   recovery_id BIGINT       NOT NULL,
-  action      VARCHAR(24)  NOT NULL COMMENT 'APPLY / OBJECT / PIN_OK / PIN_WRONG / DISPUTE_FREEZE / PROOF / APPROVE / REVOKE_REQUEST / KEEP / CANCEL / REJECT / EXECUTE / EXECUTE_FAILED',
+  action      VARCHAR(24)  NOT NULL COMMENT 'APPLY / OBJECT / PIN_OK / PIN_WRONG / DISPUTE_FREEZE / PROOF / APPROVE / REVOKE_REQUEST / REVOKE_AFTER_KEEP / KEEP / CANCEL / REJECT / EXECUTE / EXECUTE_FAILED',
   actor       VARCHAR(32)  NOT NULL COMMENT 'tg:<编号> / user:<客户号> / admin:<编号> / system',
   note        VARCHAR(500) NULL,
   created_at  DATETIME(3)  NOT NULL,

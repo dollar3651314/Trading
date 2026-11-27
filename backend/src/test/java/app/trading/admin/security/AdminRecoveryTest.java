@@ -99,6 +99,7 @@ class AdminRecoveryTest extends AdminTestSupport {
     assertThat(noPw.getContentAsString()).contains("CURRENT_PASSWORD_WRONG");
     JsonNode k = body(call(post("/api/admin/recoveries/" + id2 + "/keep"), amos.cookie(), "{\"reason\":\"视频核对后维持\",\"password\":\"" + PASSWORD + "\"}"));
     assertThat(k.get("recovery").get("revokeRequested").asBoolean()).isFalse();
+    assertThat(k.get("recovery").get("keptAt").asString()).as("记下维持过，之后的撤销不再暂停").isNotBlank();
   }
 
   @Test

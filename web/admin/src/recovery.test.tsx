@@ -110,6 +110,19 @@ describe('找回申请', () => {
   }, 30_000);
 });
 
+describe('找回申请：维持过一次', () => {
+  it('显示"已维持过一次，之后的撤销不再暂停"，经过里有再次撤销', async () => {
+    recoveries.push(base({ status: 'approved', executeAt: '2026-10-15T09:00:00Z', keptAt: '2026-10-14 10:00:00' }));
+    renderAs(<RecoveriesPage />);
+    fireEvent.mouseDown(await screen.findByRole('combobox', { name: '状态' }));
+    fireEvent.click(await screen.findByTitle('已批准等执行'));
+    fireEvent.click(await screen.findByText('31'));
+    const det = await screen.findByRole('region', { name: '找回申请详情' });
+    expect(within(det).getByRole('status', { name: '已维持过' })).toHaveTextContent('不再暂停批准和执行');
+    expect(within(det).queryByRole('button', { name: '维持批准' })).not.toBeInTheDocument();
+  }, 30_000);
+});
+
 describe('客户详情：冻结时暂停的提现', () => {
   it('列出暂停的提现；交过钱包提供方的不能取消退回；继续放款要原因', async () => {
     const c = db.customers[0];

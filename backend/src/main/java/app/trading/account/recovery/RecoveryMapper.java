@@ -28,6 +28,8 @@ interface RecoveryMapper {
     LocalDateTime executeAt;
     String revokeRequestedBy;
     LocalDateTime revokeRequestedAt;
+    /** Amos 选过"维持"的时间（之后的撤销不再暂停） */
+    LocalDateTime keptAt;
     String closedBy;
     String closeReason;
     LocalDateTime closedAt;
@@ -83,7 +85,8 @@ interface RecoveryMapper {
 
   int requestRevoke(@Param("id") long id, @Param("by") String by, @Param("at") LocalDateTime at);
 
-  int clearRevoke(@Param("id") long id);
+  /** 维持：清掉撤销请求，记下维持时间 */
+  int clearRevoke(@Param("id") long id, @Param("at") LocalDateTime at);
 
   int close(@Param("id") long id, @Param("from") String from, @Param("to") String to, @Param("by") String by, @Param("reason") String reason,
       @Param("at") LocalDateTime at);

@@ -1605,6 +1605,7 @@ export function keepRecovery(id: string, reason: string, password: string): Prom
     if ((x.status !== 'approved' && x.status !== 'proof') || !x.revokeRequested) throw new ApiError('errors.recoveryNoRevokeRequest');
     x.revokeRequested = false;
     x.revokeRequestedAt = null;
+    x.keptAt = nowString();
     recoveryEvent(id, 'keep', r);
     audit('recovery.keep', id, true, r, { revokeRequested: true }, { revokeRequested: false });
     return recoveryDetail(id);

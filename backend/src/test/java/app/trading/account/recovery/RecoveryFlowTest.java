@@ -272,6 +272,29 @@ class RecoveryFlowTest {
     assertThat(freeze(uid2)).isNull();
   }
 
+  /** 4b 复审：Amos 维持过一次以后，原 TG 再撤销只记经过、发告警，不再暂停执行（防止反复撤销拖住申请） */
+  @Test
+  void Amos维持过一次后_原TG再撤销不再暂停_记经过_发告警_照常执行() {
+    long uid = customer(null);
+    long newTg = newTg();
+    long id = toProof(uid, newTg);
+    recovery.approve(id, 1L, "视频");
+    recovery.revokeByOwner(uid, id);
+    recovery.keep(id, 1L, "视频核对后维持");
+    assertThat(row(id).keptAt).isNotNull();
+    org.mockito.Mockito.clearInvocations(mail);
+    assertThat(recovery.revokeByOwner(uid, id)).contains("不会暂停换绑");
+    assertThat(row(id).revokeRequestedBy).as("不再记撤销请求").isNull();
+    assertThat(actions(id)).endsWith("KEEP", "REVOKE_AFTER_KEEP");
+    verify(mail).send(eq("ops@example.com"), eq("OPS_RECOVERY_REVOKE_REQ"), org.mockito.ArgumentMatchers.argThat(m -> m.get("who").contains("维持过一次")));
+    assertThat(freeze(uid)).isEqualTo("RECOVERY");
+    time().advance(Duration.ofHours(25));
+    assertThat(mapper.executeDue(now())).contains(id);
+    recovery.execute(id);
+    assertThat(row(id).status).isEqualTo("EXECUTED");
+    assertThat(tgOf(uid)).isEqualTo(newTg);
+  }
+
   @Test
   void 证明阶段原TG撤销_转Amos_冻结保留_不能批准直到Amos维持() {
     long uid = customer(null);
