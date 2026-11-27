@@ -32,7 +32,9 @@ class SessionFilter extends OncePerRequestFilter {
       // TG 机器人第 2 批：从机器人一键登录（login_url 落地页、一次性链接换会话）、登录方式（第一阶段只走 Telegram）
       "/api/tg/login", "/api/tg/link", "/api/auth/options",
       // TG 机器人第 4 批 4c：网页"申请冻结提现"（TG 丢了的人也要能用，不登录；要图形验证码）
-      "/api/public/withdraw-freeze/captcha", "/api/public/withdraw-freeze");
+      "/api/public/withdraw-freeze/captcha", "/api/public/withdraw-freeze",
+      // TG 机器人第 5 批：应急开关下用 Telegram 登录（开关关着时接口回 TG_EMERGENCY_DISABLED）
+      "/api/tg/emergency-login");
 
   private final SessionService sessions;
   private final AuthProperties props;

@@ -85,7 +85,9 @@ public enum Permission {
   PERMISSION_VIEW("permission:view", "system", false),
   AUDIT_VIEW("audit:view", "system", false),
   CONFIG_VIEW("config:view", "system", false),
-  CONFIG_EDIT("config:edit", "system", true);
+  CONFIG_EDIT("config:edit", "system", true),
+  /** 第 5 批：看"应急开关"页（TB-34）。默认只有超管有；能开、关的只有 Amos 的后台账号（配置 FX_ADMIN_OWNER_ID 写死他的账号编号），不靠这个权限点 */
+  EMERGENCY_VIEW("emergency:view", "system", true);
 
   public final String code;
   public final String module;

@@ -2,6 +2,7 @@
  * "请在 Telegram 打开"提示页（TG 机器人第 2 批，技术方案 11 页第 2b 节，TB-33）：
  * 第一阶段只走 Telegram——没有会话时、点了注册 / 登录 / 忘记密码时、从机器人进来没成功时（/tg?r=原因）都显示这一页。
  * 机器人按钮 + 二维码；**保留「申请冻结提现」「找回 Telegram 账户」两个入口**（TG 被别人占着时是原主唯一的止损手段）。
+ * 第 5 批：应急开关开着时上方多一块「用 Telegram 登录」（{@link EmergencyLogin}）。
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +11,7 @@ import { getAuthOptions } from '../../api/auth';
 import type { AuthOptions, TgLoginReason } from '../../api/types';
 import { QrCode } from '../../components/QrCode';
 import { AuthLayout } from '../auth/AuthLayout';
+import { EmergencyLogin } from './EmergencyLogin';
 import { botLink } from './tgLib';
 
 const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security'];
@@ -34,6 +36,7 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
   const link = botLink(bot);
   return (
     <AuthLayout title={t('tg.title')} subtitle={bot ? t('tg.subtitle', { bot }) : t('tg.subtitleNoBot')}>
+      <EmergencyLogin />
       {reason && (
         <div className={`notice ${reason === 'refused' ? 'info' : 'error'}`} role="alert" data-testid="tg-reason">
           {t(`tg.reason.${reason}`)}

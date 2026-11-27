@@ -56,6 +56,8 @@ describe('错误码映射', () => {
       'RECOVERY_NO_REVOKE_REQUEST', 'RECOVERY_REVOKE_PENDING',
       // 第 4 批 4c：Telegram 关联
       'TELEGRAM_TAKEN', 'NOT_TG_ACCOUNT', 'RECOVERY_OPEN',
+      // 第 5 批：应急开关
+      'EMERGENCY_UNCHANGED',
     ];
     expect(backend.filter((c) => !ERROR_KEYS[c])).toEqual([]);
   });

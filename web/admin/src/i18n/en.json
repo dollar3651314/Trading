@@ -255,6 +255,10 @@
       "reject": "Reject recovery",
       "revoke": "Cancel recovery",
       "keep": "Keep recovery (disputed cancel request)"
+    },
+    "telegram": {
+      "emergency_on": "Turn on emergency switch",
+      "emergency_off": "Turn off emergency switch"
     }
   },
   "auth": {
@@ -660,7 +664,8 @@
     "recoveryRevokePending": "The original Telegram asked to cancel. Verify by video, then choose Keep or Cancel",
     "telegramTaken": "That Telegram account is linked to another customer",
     "notTgAccount": "This customer has no Telegram link",
-    "recoveryOpen": "This customer already has a recovery request in progress; settle it under Recovery requests first"
+    "recoveryOpen": "This customer already has a recovery request in progress; settle it under Recovery requests first",
+    "emergencyUnchanged": "The emergency switch is already in that state; refresh the page"
   },
   "exposureStatus": {
     "auto_blocked": "Auto-blocked",
@@ -797,7 +802,8 @@
     "quoteUsage": "Limits & usage",
     "quoteLicense": "Licenses & switch",
     "quoteSources": "Quote sources",
-    "recoveries": "Recovery requests"
+    "recoveries": "Recovery requests",
+    "emergency": "Emergency switch"
   },
   "menus": {
     "group": "Group",
@@ -925,7 +931,8 @@
     "quote_limit_edit": "Edit key limits and default limits",
     "quote_license_edit": "Register quote licenses",
     "withdraw_unfreeze": "Lift withdrawal freezes",
-    "recovery_review": "Review recovery requests (Amos only)"
+    "recovery_review": "Review recovery requests (Amos only)",
+    "emergency_view": "View the emergency switch (only Amos's account can operate it)"
   },
   "permModule": {
     "customer": "Customers",
@@ -2161,5 +2168,42 @@
     "kept": "{{time}} you already kept this once: further cancellations by the original Telegram are only logged and alerted; they no longer pause approval or execution.",
     "deposits": "Recent deposits (source check)",
     "depositsHint": "Check the paying address on the explorer. A qualified source address is older than 30 days before the request and older than the last security event, has no exchange label, is not shared (sent to more than 20 addresses in 90 days), and no new paying address appeared in the last 30 days (page 08 section 0)."
+  },
+  "emergency": {
+    "title": "Emergency switch",
+    "sub": "Turn on only when the bot is banned and customers cannot get in (TB-34). Off by default.",
+    "state": "Now",
+    "on": "On · the web shows \"Sign in with Telegram\"",
+    "off": "Off · customers can only enter through the bot",
+    "changedLine": "(changed {{time}} by {{who}})",
+    "who": "Who can operate",
+    "whoText": "Only Amos's admin account (its account ID is fixed in the server config — not a username, not a permission)",
+    "fallback": "Fallback",
+    "fallbackText": "If the admin console is unreachable, Amos runs on the server",
+    "ownerMissing": "Amos's admin account ID (FX_ADMIN_OWNER_ID) is not configured on the server, so nobody can operate the switch here; only the server fallback works.",
+    "notOwner": "You cannot operate this: only Amos's admin account can turn the emergency switch on or off.",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "askOn": "Turn on the emergency switch?",
+    "askOff": "Turn off the emergency switch?",
+    "impactOn": "The web sign-in page will show \"Sign in with Telegram\" and anyone with a Telegram account can sign in on the web (a security event with a 24-hour withdrawal hold). Turn it on only when the bot is banned. This is audited and sends an alert email.",
+    "impactOff": "\"Sign in with Telegram\" disappears from the web and all sessions signed in that way are ended. This is audited and sends an alert email.",
+    "password": "Re-enter your admin password",
+    "passwordRequired": "Enter your admin password",
+    "confirmOn": "Turn on",
+    "confirmOff": "Turn off",
+    "doneOn": "Emergency switch is on; audited and alert email sent",
+    "doneOff": "Emergency switch is off; audited and alert email sent",
+    "history": "Switch history (audit)",
+    "noHistory": "No records yet.",
+    "serverTerminal": "server terminal",
+    "actOn": "On",
+    "actOff": "Off",
+    "col": {
+      "time": "Time",
+      "who": "By",
+      "action": "Action",
+      "reason": "Reason"
+    }
   }
 }

@@ -104,6 +104,7 @@ export const MENU: MenuItemDef[] = [
       { key: 'permissions', labelKey: 'menu.permissions', path: '/system/permissions', permission: 'permission:view' },
       { key: 'audit', labelKey: 'menu.audit', path: '/system/audit', permission: 'audit:view' },
       { key: 'config', labelKey: 'menu.config', path: '/system/config', permission: 'config:view' },
+      { key: 'emergency', labelKey: 'menu.emergency', path: '/system/emergency', permission: 'emergency:view' },
     ],
   },
 ];

@@ -5,6 +5,8 @@
 import {
   ApiError,
   type AdjustLimits,
+  type EmergencyState,
+  type EmergencyChange,
   type AdminInput,
   type AdminSession,
   type AdminUser,
@@ -1673,4 +1675,48 @@ export function changeCustomerTelegram(id: number, telegramId: string | null, us
     withdrawSafety.set(id, { ...s, withdrawFrozen: true, frozenSource: list[0].source, frozenAt: list[0].at, freezes: list });
     audit(telegramId ? 'customer.telegram_relink' : 'customer.telegram_unlink', String(id), true, r, { telegramId: old }, { telegramId });
   }).then(() => getCustomer(id));
+}
+
+// ---------------- 第 5 批：应急开关（TB-34） ----------------
+/** 原型里"Amos 的后台账号"就是 1 号（负责人）；真实环境由后端配置 FX_ADMIN_OWNER_ID 写死编号 */
+const MOCK_OWNER_ID = 1;
+const emergencyLog: EmergencyChange[] = [
+  { id: 1, on: true, actor: 'admin:1', actorName: 'owner', reason: '演练：机器人被封时打开', at: '2026-11-20 10:00:00' },
+  { id: 2, on: false, actor: 'server', actorName: 'server:root', reason: '演练结束（服务器终端关）', at: '2026-11-20 10:30:00' },
+];
+
+function emergencyState(): EmergencyState {
+  const last = emergencyLog[emergencyLog.length - 1];
+  return {
+    on: last?.on ?? false,
+    changedAt: last?.at ?? null,
+    changedBy: last?.actorName ?? null,
+    reason: last?.reason ?? null,
+    canOperate: currentAdmin().id === MOCK_OWNER_ID,
+    ownerConfigured: true,
+    history: [...emergencyLog].reverse(),
+  };
+}
+
+export function getEmergency(): Promise<EmergencyState> {
+  return mutateRead(() => {
+    requirePerm('emergency:view');
+    return emergencyState();
+  });
+}
+
+export function setEmergency(on: boolean, reason: string, password: string): Promise<EmergencyState> {
+  return mutate(() => {
+    requirePerm('emergency:view');
+    if (currentAdmin().id !== MOCK_OWNER_ID) {
+      audit(on ? 'telegram.emergency_on' : 'telegram.emergency_off', 'telegram.emergency', true, 'NOT_OWNER', null, null);
+      throw new ApiError('errors.forbidden');
+    }
+    const r = requireReason(reason);
+    requireAdminPassword(password);
+    if (emergencyState().on === on) throw new ApiError('errors.emergencyUnchanged');
+    emergencyLog.push({ id: emergencyLog.length + 1, on, actor: `admin:${MOCK_OWNER_ID}`, actorName: currentAdmin().username, reason: r, at: nowString() });
+    audit(on ? 'telegram.emergency_on' : 'telegram.emergency_off', 'telegram.emergency', true, r, { on: !on }, { on });
+    return emergencyState();
+  });
 }

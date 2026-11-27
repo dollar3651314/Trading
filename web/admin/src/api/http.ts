@@ -66,6 +66,8 @@ export const ERROR_KEYS: Record<string, string> = {
   TELEGRAM_TAKEN: 'errors.telegramTaken',
   NOT_TG_ACCOUNT: 'errors.notTgAccount',
   RECOVERY_OPEN: 'errors.recoveryOpen',
+  // 第 5 批：应急开关已经是这个状态
+  EMERGENCY_UNCHANGED: 'errors.emergencyUnchanged',
   // v2 提现自动审批规则（admin/ops/AutoApproveOps）：版本冲突 409、没有变化
   CONFIG_CHANGED: 'errors.configChanged',
   NO_CHANGE: 'errors.autoApproveNoChange',

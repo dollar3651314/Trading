@@ -1168,3 +1168,25 @@ export interface RecoveryDetail {
   /** 第 4 批 4c：最近 10 笔充值（交易哈希、区块浏览器链接），按 08 页第 0 节判断"合格来源地址" */
   deposits?: { time: string; chain: Chain; amount: string; txHash?: string | null; explorerUrl?: string | null }[];
 }
+
+// ---------- 第 5 批：应急开关（TB-34） ----------
+/** 一条开关记录：actor 是 admin:编号 或 server（服务器终端 sudo trading set TR_TG_EMERGENCY_LOGIN） */
+export interface EmergencyChange {
+  id: number;
+  on: boolean;
+  actor: string;
+  actorName: string;
+  reason: string;
+  at: string;
+}
+
+/** GET /api/admin/emergency：现在的状态、我能不能开关（只有 Amos 的后台账号）、开关记录（新的在前） */
+export interface EmergencyState {
+  on: boolean;
+  changedAt: string | null;
+  changedBy: string | null;
+  reason: string | null;
+  canOperate: boolean;
+  ownerConfigured: boolean;
+  history: EmergencyChange[];
+}

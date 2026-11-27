@@ -271,7 +271,7 @@ class TelegramWebLoginTest {
       assertThat(r.getContentAsString()).as(path).contains("TELEGRAM_ONLY");
     }
     assertThat(mvc.perform(get("/api/auth/options")).andReturn().getResponse().getContentAsString())
-        .isEqualTo("{\"telegramOnly\":true,\"botUsername\":\"TradingAssistTestBot\",\"loginMode\":\"login-url\"}");
+        .isEqualTo("{\"telegramOnly\":true,\"botUsername\":\"TradingAssistTestBot\",\"loginMode\":\"login-url\",\"emergencyLogin\":false,\"loginBotUsername\":null}");
     // 一次性链接只在退路模式开
     assertThat(mvc.perform(post("/api/tg/link").contentType(MediaType.APPLICATION_JSON).content("{\"token\":\"x\"}")).andReturn().getResponse()
         .getContentAsString()).contains("TG_LOGIN_DISABLED");

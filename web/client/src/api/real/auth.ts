@@ -87,3 +87,21 @@ export async function tgLink(token: string): Promise<{ next: string } | { reason
   const r = (body.code ?? '').replace(/^TG_LOGIN_/, '').toLowerCase() as TgLoginReason;
   return { reason: TG_REASONS.includes(r) ? r : 'invalid' };
 }
+
+/** 应急开关下用 Telegram 登录（第 5 批）：成功返回什么时候能提现（UTC ISO）；失败返回后端错误码去掉 TG_EMERGENCY_ 前缀（小写），网络错误抛出 */
+export async function tgEmergencyLogin(user: Record<string, string | number>): Promise<{ withdrawAt: string } | { reason: string }> {
+  const res = await fetch('/api/tg/emergency-login', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(user),
+  });
+  let body: { withdrawAt?: string; code?: string } = {};
+  try {
+    body = JSON.parse(await res.text()) as typeof body;
+  } catch {
+    /* 不是 JSON：按失败处理 */
+  }
+  if (res.ok && typeof body.withdrawAt === 'string') return { withdrawAt: body.withdrawAt };
+  return { reason: (body.code ?? '').replace(/^TG_EMERGENCY_/, '').toLowerCase() || 'invalid' };
+}

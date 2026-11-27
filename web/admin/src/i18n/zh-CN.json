@@ -255,6 +255,10 @@
       "reject": "驳回找回申请",
       "revoke": "撤销找回申请",
       "keep": "维持找回申请（争议撤销请求）"
+    },
+    "telegram": {
+      "emergency_on": "打开应急开关",
+      "emergency_off": "关闭应急开关"
     }
   },
   "auth": {
@@ -660,7 +664,8 @@
     "recoveryRevokePending": "原 TG 请求了撤销：请先视频核对，选维持或撤销",
     "telegramTaken": "这个 Telegram 已经关联了别的客户",
     "notTgAccount": "这个客户没有 Telegram 关联",
-    "recoveryOpen": "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完"
+    "recoveryOpen": "这个客户已经有一份进行中的找回申请，请先在\"找回申请\"里处理完",
+    "emergencyUnchanged": "应急开关已经是这个状态了，刷新看看"
   },
   "exposureStatus": {
     "auto_blocked": "自动禁开",
@@ -797,7 +802,8 @@
     "quoteUsage": "限额和用量",
     "quoteLicense": "授权登记和总开关",
     "quoteSources": "报价源状态",
-    "recoveries": "找回申请"
+    "recoveries": "找回申请",
+    "emergency": "应急开关"
   },
   "menus": {
     "group": "分组",
@@ -925,7 +931,8 @@
     "quote_limit_edit": "改 Key 的限额、改默认限额",
     "quote_license_edit": "报价源授权登记",
     "withdraw_unfreeze": "解除提现冻结",
-    "recovery_review": "找回申请审核（Amos 一人审核）"
+    "recovery_review": "找回申请审核（Amos 一人审核）",
+    "emergency_view": "查看应急开关（开关只限 Amos 的后台账号）"
   },
   "permModule": {
     "customer": "客户",
@@ -2161,5 +2168,42 @@
     "kept": "{{time}} 你已经维持过一次：之后原 TG 再撤销只记入经过并发告警邮件，不再暂停批准和执行。",
     "deposits": "最近的充值（核对来源）",
     "depositsHint": "在区块浏览器里查付款地址：早于申请 30 天以上并早于最近一次安全事件、没有交易所标签、不是多人共用（近 90 天给超过 20 个地址转过账）、最近 30 天没有新的付款地址，才算合格来源地址（08 页第 0 节）。"
+  },
+  "emergency": {
+    "title": "应急开关",
+    "sub": "机器人被封、客户进不来时才打开（TB-34）。平时关。",
+    "state": "现在",
+    "on": "已打开 · 网页显示「用 Telegram 登录」",
+    "off": "关闭 · 客户只能从机器人进入",
+    "changedLine": "（{{time}} 由 {{who}} 改）",
+    "who": "谁能操作",
+    "whoText": "只有 Amos 的后台账号（配置里写死他的账号编号，不写用户名，不靠权限点）",
+    "fallback": "备用办法",
+    "fallbackText": "后台打不开时，Amos 在服务器终端运行",
+    "ownerMissing": "服务器还没配 Amos 的后台账号编号（FX_ADMIN_OWNER_ID），后台谁都不能开关；只能用服务器终端的备用办法。",
+    "notOwner": "你没有权限操作：只有 Amos 的后台账号能开关应急开关。",
+    "turnOn": "打开应急开关",
+    "turnOff": "关闭应急开关",
+    "askOn": "打开应急开关？",
+    "askOff": "关闭应急开关？",
+    "impactOn": "打开后网页登录页出现「用 Telegram 登录」，任何持有 Telegram 账号的客户都能从网页进入（算安全事件，24 小时不能提现）。只在机器人被封时打开。会写审计、发告警邮件。",
+    "impactOff": "关闭后网页上的「用 Telegram 登录」消失，用它登录的会话全部退出。会写审计、发告警邮件。",
+    "password": "再输一次你的后台密码",
+    "passwordRequired": "请输入后台密码",
+    "confirmOn": "确认打开",
+    "confirmOff": "确认关闭",
+    "doneOn": "已打开应急开关，已写审计、已发告警邮件",
+    "doneOff": "已关闭应急开关，已写审计、已发告警邮件",
+    "history": "开关记录（审计）",
+    "noHistory": "还没有记录。",
+    "serverTerminal": "服务器终端",
+    "actOn": "打开",
+    "actOff": "关闭",
+    "col": {
+      "time": "时间",
+      "who": "谁",
+      "action": "操作",
+      "reason": "原因"
+    }
   }
 }
