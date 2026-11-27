@@ -54,6 +54,9 @@ interface RecoveryMapper {
   /** 这个客户进行中的申请数（没结束的） */
   int openCount(@Param("userId") long userId);
 
+  /** 后台发起的申请（第一条 APPLY 的操作人是 admin:…，4c 后台更换 Telegram 关联）：大于 0 就是 */
+  int adminInitiated(@Param("id") long id);
+
   /** 这个客户从 since 起提交过的申请数（同一种） */
   int countSince(@Param("userId") long userId, @Param("kind") String kind, @Param("since") LocalDateTime since);
 

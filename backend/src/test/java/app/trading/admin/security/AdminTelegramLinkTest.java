@@ -28,6 +28,8 @@ class AdminTelegramLinkTest extends AdminTestSupport {
 
   @Autowired ObjectMapper json;
   @Autowired TelegramAccountApi telegram;
+  @Autowired app.trading.account.api.RecoveryApi recoveries;
+  @Autowired java.time.Clock clock;
   @MockitoBean MailApi mail;
 
   static long newTg() {
@@ -82,8 +84,20 @@ class AdminTelegramLinkTest extends AdminTestSupport {
     verify(mail).send(eq("ops@example.com"), eq("OPS_TELEGRAM_LINK"),
         argThat(p -> p.get("oldTg").equals(String.valueOf(oldTg)) && p.get("newTg").equals(String.valueOf(newTg)) && p.get("actionZh").contains("找回申请 #" + rec.get("id"))));
     assertThat(link(uid, s, "{\"telegramId\":\"" + newTg() + "\",\"reason\":\"再换\",\"password\":\"" + PASSWORD + "\"}")).as("已经有进行中的申请").contains("RECOVERY_OPEN");
-    // 换绑执行的部分在 RecoveryFlowTest 里测（定时任务调执行）；这里撤销掉，接着测解除
-    jdbc.update("UPDATE account_recovery SET status = 'CANCELLED' WHERE user_id = ?", uid);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_withdraw_pin WHERE user_id = ?", Integer.class, uid)).as("执行前还有提现密码").isOne();
+    // 4c 复审 🟡：24 小时后执行，换成新 TG，清空提现密码和白名单（执行由定时任务调，这里直接调执行方法）
+    ((app.trading.support.MutableClock) clock).advance(java.time.Duration.ofHours(24).plusSeconds(1));
+    try {
+      org.springframework.test.util.ReflectionTestUtils.invokeMethod(recoveries, "execute", ((Number) rec.get("id")).longValue());
+    } finally {
+      ((app.trading.support.MutableClock) clock).reset();
+    }
+    assertThat(jdbc.queryForObject("SELECT status FROM account_recovery WHERE id = ?", String.class, rec.get("id"))).isEqualTo("EXECUTED");
+    assertThat(telegram.byUserId(uid).orElseThrow().telegramId()).isEqualTo(newTg);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_withdraw_pin WHERE user_id = ? AND pin_hash IS NOT NULL", Integer.class, uid)).as("提现密码清空").isZero();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM wallet_whitelist WHERE user_id = ?", Integer.class, uid)).as("白名单清空").isZero();
+    assertThat(jdbc.queryForObject("SELECT revoked_at IS NOT NULL FROM account_session WHERE id = ?", Boolean.class, sess)).as("执行时的安全事件作废全部会话").isTrue();
+    sess = session(uid);
 
     // 解除：马上生效（不给任何人新的访问权），安全事件作废全部会话、冻结提现
     JsonNode u = body(call(post("/api/admin/customers/" + uid + "/telegram"), s.cookie(), "{\"reason\":\"客户要求解除\",\"password\":\"" + PASSWORD + "\"}"));

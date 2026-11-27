@@ -41,6 +41,10 @@
     SELECT COUNT(*) FROM account_recovery WHERE user_id = #{userId} AND status IN ('OBJECTION', 'PROOF', 'APPROVED')
   </select>
 
+  <select id="adminInitiated" resultType="int">
+    SELECT COUNT(*) FROM account_recovery_event WHERE recovery_id = #{id} AND action = 'APPLY' AND actor LIKE 'admin:%'
+  </select>
+
   <select id="countSince" resultType="int">
     SELECT COUNT(*) FROM account_recovery WHERE user_id = #{userId} AND kind = #{kind} AND created_at &gt;= #{since}
   </select>

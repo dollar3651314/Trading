@@ -43,6 +43,10 @@ limit_req_zone $binary_remote_addr zone=tr_quote:10m rate=${FX_NGINX_QUOTE_RATE}
 limit_conn_zone $binary_remote_addr zone=tr_api_conn:10m;
 limit_conn_zone $binary_remote_addr zone=tr_ws_conn:10m;
 limit_conn_zone $binary_remote_addr zone=tr_quote_conn:10m;
+# 网页"申请冻结提现"和它的验证码（不用登录，4c 复审 🔴D1）：单独一档低限额，写死不随全站额度放宽。
+# 生产真实 IP 关时所有访客共用网关地址，这一档就是全站合计（每秒 2 个、突发 5 个、同时 10 个连接）：宁可正常客户稍等，也不让它占满后端
+limit_req_zone $binary_remote_addr zone=tr_freeze:1m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=tr_freeze_conn:1m;
 limit_req_status 429;
 limit_conn_status 429;
 limit_req_log_level warn;
@@ -99,6 +103,13 @@ server {
     error_log /var/log/nginx/error.log emerg;
     limit_req zone=tr_api burst=${FX_NGINX_API_BURST} nodelay;
     limit_conn tr_api_conn ${FX_NGINX_API_CONN};
+    include /etc/nginx/snippets/proxy.inc;
+    proxy_read_timeout 30s;
+  }
+  # 申请冻结提现（提交和验证码）：单独的低限额 + 连接上限，后端另有"同时等待最多 20 个"的上限
+  location /api/public/withdraw-freeze {
+    limit_req zone=tr_freeze burst=5 nodelay;
+    limit_conn tr_freeze_conn 10;
     include /etc/nginx/snippets/proxy.inc;
     proxy_read_timeout 30s;
   }

@@ -229,7 +229,9 @@ class RecoveryService implements RecoveryApi {
    *   <li>换绑在证明阶段或已批准：<b>不管有没有争议，撤销都转 Amos 决定</b>，记撤销请求、暂停批准和执行，证明阶段的 RECOVERY 冻结保留，
    *       发告警邮件。防止占着原 TG 的人在反对期里不出声、等批准后一撤销就把真原主永远挡在外面、顺带解冻提现。
    *       需求文档 08 页"正常路径原 TG 或邮箱可直接撤销"这里<b>故意更严</b>，等 Amos 确认。
-   *       Amos 选过一次"维持"以后，再撤销只记经过（REVOKE_AFTER_KEEP）、发告警，不再暂停。</li>
+   *       Amos 选过一次"维持"以后，再撤销只记经过（REVOKE_AFTER_KEEP）、发告警，不再暂停。
+   *       <b>后台发起的更换 Telegram 关联</b>（4c 复审 🟡）不受这个"维持一次"的限制：原 TG 每次撤销都暂停、转 Amos 决定——
+   *       否则偷到后台密码的人可以自己"维持"一次就让自己发起的换绑走完。</li>
    * </ul>
    */
   @Override
@@ -252,7 +254,7 @@ class RecoveryService implements RecoveryApi {
         out[0] = null; // 反对期：按"不是我"处理
         return;
       }
-      if (r.keptAt != null) {
+      if (r.keptAt != null && mapper.adminInitiated(r.id) == 0) {
         // 4b 复审：Amos 已经视频核对、选过一次"维持"，之后的撤销只记经过、发告警，不再暂停批准和执行（防止占着原 TG 的人反复撤销把申请拖住）
         mapper.insertEvent(r.id, "REVOKE_AFTER_KEEP", "user:" + userId, null, now);
         after[0] = () -> alert("OPS_RECOVERY_REVOKE_REQ", Map.of("id", String.valueOf(r.id), "customerId", String.valueOf(r.userId), "who",

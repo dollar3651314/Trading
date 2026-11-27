@@ -511,7 +511,7 @@ class RecoveryFlowTest {
   // ---------- 4c 审查 🟡：后台更换 Telegram 关联 = 已批准的换绑申请，24 小时后执行 ----------
 
   @Test
-  void 后台更换Telegram关联_建已批准的申请_冻结ADMIN_原TG撤销转Amos_维持一次后不再暂停_24小时后执行() {
+  void 后台更换Telegram关联_建已批准的申请_冻结ADMIN_原TG每次撤销都转Amos_没有维持一次的上限_24小时后执行_清空提现密码和白名单() {
     long uid = customer(null);
     long oldTg = tgOf(uid);
     long newTg = newTg();
@@ -525,16 +525,23 @@ class RecoveryFlowTest {
     assertThat(tgOf(uid)).as("还没换").isEqualTo(oldTg);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'RECOVERY_APPROVED'", Integer.class, uid)).isPositive();
     assertThat(code(() -> recovery.adminChangeTelegram(uid, newTg(), null, 1L, "再换"))).as("已经有进行中的申请").isEqualTo("RECOVERY_OPEN");
-    // 原 TG 撤销：按 4b 规则转 Amos、暂停；维持一次以后再撤销不再暂停
+    // 原 TG 撤销：按 4b 规则转 Amos、暂停。4c 复审 🟡：后台发起的申请没有"维持一次"的上限——维持以后再撤销照样暂停、再转 Amos
     assertThat(recovery.revokeByOwner(uid, id)).contains("由审核员视频核对后决定");
     time().advance(Duration.ofHours(25));
     recovery.execute(id);
     assertThat(row(id).status).isEqualTo("APPROVED");
     recovery.keep(id, 1L, "视频核对后维持");
-    assertThat(recovery.revokeByOwner(uid, id)).contains("不会暂停换绑");
+    assertThat(recovery.revokeByOwner(uid, id)).as("后台发起的：维持过也照样暂停").contains("由审核员视频核对后决定");
+    assertThat(row(id).revokeRequestedBy).isEqualTo("ORIGINAL_TG");
+    recovery.execute(id);
+    assertThat(row(id).status).as("又暂停了，等 Amos 再决定").isEqualTo("APPROVED");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_recovery_event WHERE recovery_id = ? AND action = 'REVOKE_AFTER_KEEP'", Integer.class, id)).isZero();
+    recovery.keep(id, 1L, "再次视频核对后维持");
     recovery.execute(id);
     assertThat(row(id).status).isEqualTo("EXECUTED");
     assertThat(tgOf(uid)).isEqualTo(newTg);
+    assertThat(pins.status(uid).set()).as("执行后提现密码清空").isFalse();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM wallet_whitelist WHERE user_id = ?", Integer.class, uid)).as("执行后白名单清空").isZero();
     assertThat(sources(uid)).as("ADMIN 冻结要人工核对后解冻").containsExactly("ADMIN");
     assertThat(jdbc.queryForList("SELECT type FROM account_security_event WHERE user_id = ?", String.class, uid)).contains("REBIND");
   }
