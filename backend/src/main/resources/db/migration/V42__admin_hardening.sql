@@ -53,6 +53,11 @@ UPDATE notify_template SET
   variables = 'customerId,actionZh,actionEn,oldTg,newTg,admin,reason,at,revokeLine,revokeLineEn'
 WHERE code = 'OPS_TELEGRAM_LINK';
 
+-- ⑤' 客户安全提醒、追保、强平的模板一律启用（#46 审查：这些后台不能停用；上线前万一被停用过，这里打开）
+UPDATE notify_template SET enabled = 1
+WHERE code LIKE 'WITHDRAW\_%' OR code LIKE 'WHITELIST\_%' OR code LIKE 'RECOVERY\_%' OR code LIKE 'PIN\_RESET\_%'
+   OR code IN ('ACCOUNT_FROZEN', 'TELEGRAM_LINK_CHANGED', 'TG_EMERGENCY_LOGIN', 'LOGIN_NEW_DEVICE', 'EMAIL_CODE', 'MARGIN_CALL', 'LIQUIDATED');
+
 -- ⑤ 告警邮件：找回申请被撤销链接或服务器命令撤销了；暂停 / 恢复受理人工申请
 INSERT INTO notify_template (code, audience, kind, name_zh, name_en, title_zh, title_en, body_zh, body_en, variables, channels) VALUES
 ('OPS_RECOVERY_CANCELLED', 'STAFF', NULL, '找回申请已在后台以外撤销', 'Recovery cancelled outside the admin console',

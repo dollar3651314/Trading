@@ -124,6 +124,7 @@ class RecoveryHardeningTest {
     time().advance(Duration.ofHours(25));
     recovery.execute(id);
     assertThat(mapper.byId(id).status).as("有没处理的撤销请求，不执行").isEqualTo("APPROVED");
+    jdbc.update("DELETE FROM account_recovery_cancel_request WHERE recovery_id = 999999999999"); // 上一次运行留下的（同一个库重复跑）
     jdbc.update("INSERT INTO account_recovery_cancel_request (recovery_id, requested_by, reason, created_at) VALUES (999999999999, 'server:root', 'x', UTC_TIMESTAMP(3))");
     recovery.processServerCancels();
     RecoveryMapper.Row r = mapper.byId(id);

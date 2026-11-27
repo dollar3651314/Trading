@@ -358,7 +358,7 @@ class NotifyService implements NotifyApi, NotifyAdminApi, TelegramPrefsApi {
     boolean en = enabled == null ? t.enabled : enabled;
     // #46 审查：客户的安全类提醒只能改文案——不能停用（不管是不是内置），原来文案里有的变量（客户号、时间、设备、IP……）一个都不能少
     boolean security = NotifyAdminApi.securityTemplate(code);
-    if (security && !en) throw new app.trading.common.error.BizException("SECURITY_TEMPLATE_CANNOT_DISABLE", "安全提醒模板不能停用");
+    if (NotifyAdminApi.cannotDisable(code) && !en) throw new app.trading.common.error.BizException("SECURITY_TEMPLATE_CANNOT_DISABLE", "安全提醒模板不能停用");
     if (t.builtIn && !en) throw new app.trading.common.error.BizException("BUILT_IN_CANNOT_DISABLE", "内置模板不能停用");
     if (security) {
       keepVars(c, "titleZh", t.titleZh, tz);

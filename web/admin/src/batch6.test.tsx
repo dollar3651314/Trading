@@ -150,6 +150,11 @@ describe('客户安全提醒模板（#46 审查）', () => {
       await expect(updateTemplate(tpl.id, { bodyZh: '状态变了' })).rejects.toMatchObject({ reasonKey: 'errors.validationFailed' });
       await updateTemplate(tpl.id, { bodyZh: `${tpl.bodyZh}（请留意）` });
       expect(tpl.bodyZh).toContain('（请留意）');
+      // #46 复审：追保、强平也不能停用
+      for (const code of ['margin_call', 'liquidated']) {
+        const x = db.templates.find((y) => y.code === code);
+        if (x) await expect(updateTemplate(x.id, { enabled: false })).rejects.toMatchObject({ reasonKey: 'errors.securityTemplateCannotDisable' });
+      }
       renderAs(<TemplatesPage />, { path: '/notify/templates' });
       await waitFor(() => expect(screen.getAllByRole('button', { name: /编辑/ }).some((b) => !(b as HTMLButtonElement).disabled)).toBe(true), { timeout: 5000 });
       const rows = screen.getAllByRole('row');

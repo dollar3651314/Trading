@@ -180,4 +180,27 @@ class AdminHardeningTest extends AdminTestSupport {
           orig.get("body_zh"), orig.get("title_en"), orig.get("body_en"), orig.get("enabled"));
     }
   }
+
+  @Test
+  void 追保和强平也不能停用_文案变量可以改_迁移把安全提醒追保强平都打开了() throws Exception {
+    Admin s = superAdmin();
+    for (String c : new String[] {"MARGIN_CALL", "LIQUIDATED"}) {
+      MockHttpServletResponse off = call(put("/api/admin/notify/templates/" + c), s.cookie(), "{\"enabled\":false}");
+      assertThat(off.getStatus()).as(c).isEqualTo(400);
+      assertThat(off.getContentAsString()).as(c).contains("SECURITY_TEMPLATE_CANNOT_DISABLE");
+      assertThat(app.trading.notification.api.NotifyAdminApi.cannotDisable(c)).isTrue();
+      assertThat(app.trading.notification.api.NotifyAdminApi.securityTemplate(c)).as("只锁停用，不算安全提醒").isFalse();
+    }
+    Map<String, Object> orig = jdbc.queryForMap("SELECT body_zh FROM notify_template WHERE code = 'MARGIN_CALL'");
+    try {
+      // 删掉变量也可以（只锁停用）
+      body(call(put("/api/admin/notify/templates/MARGIN_CALL"), s.cookie(), "{\"bodyZh\":\"保证金不足，请尽快处理\"}"));
+    } finally {
+      jdbc.update("UPDATE notify_template SET body_zh = ? WHERE code = 'MARGIN_CALL'", orig.get("body_zh"));
+    }
+    for (Map<String, Object> r : jdbc.queryForList("SELECT code, enabled FROM notify_template")) {
+      String c = (String) r.get("code");
+      if (app.trading.notification.api.NotifyAdminApi.cannotDisable(c)) assertThat(r.get("enabled")).as(c + " 启用").isEqualTo(Boolean.TRUE);
+    }
+  }
 }

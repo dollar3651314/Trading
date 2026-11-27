@@ -1298,13 +1298,16 @@ export function updateTemplate(id: string, patch: Partial<Pick<NotifyTemplate, '
     requirePerm('notify_template:edit');
     const t = db.templates.find((x) => x.id === id);
     if (!t) throw new ApiError('errors.notFound');
+    // #46 复审：安全提醒、追保、强平不能停用（和后端同一个顺序：先于"内置模板"的检查）
+    if ((securityTemplateCode(t.code) || ['MARGIN_CALL', 'LIQUIDATED'].includes(t.code.toUpperCase())) && patch.enabled === false) {
+      throw new ApiError('errors.securityTemplateCannotDisable');
+    }
     // 内置模板不能禁用（禁用会导致出金结算等流程失败）
     if (t.builtIn && patch.enabled === false) throw new ApiError('errors.builtInCannotDisable');
     // 第 6 批 TB-37：告警邮件模板不能在后台改
     if (t.locked) throw new ApiError('errors.templateLocked');
     // #46 审查：安全提醒只能改文案，不能停用，原来文案里的变量不能删
     if (securityTemplateCode(t.code)) {
-      if (patch.enabled === false) throw new ApiError('errors.securityTemplateCannotDisable');
       const missing = (['titleZh', 'bodyZh', 'titleEn', 'bodyEn'] as const).filter((f) => {
         const nv = patch[f];
         return nv !== undefined && (t[f].match(/\{[A-Za-z0-9_]+}/g) ?? []).some((v) => !nv.includes(v));
