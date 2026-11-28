@@ -12,7 +12,7 @@ import type { AuthOptions, TgLoginReason } from '../../api/types';
 import { QrCode } from '../../components/QrCode';
 import { AuthLayout } from '../auth/AuthLayout';
 import { EmergencyLogin } from './EmergencyLogin';
-import { botLink } from './tgLib';
+import { botStartLink } from './tgLib';
 
 const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security'];
 
@@ -33,7 +33,8 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
   const r = reasonProp ?? (params.get('r') as TgLoginReason | null);
   const reason = r && REASONS.includes(r) ? r : null;
   const bot = options?.botUsername ?? null;
-  const link = botLink(bot);
+  // 验收反馈 1c：深链接，机器人一定会回一条（要重新授权的回提示，不用的回主菜单）
+  const link = botStartLink(bot);
   return (
     <AuthLayout title={t('tg.title')} subtitle={bot ? t('tg.subtitle', { bot }) : t('tg.subtitleNoBot')}>
       <EmergencyLogin />

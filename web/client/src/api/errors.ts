@@ -12,6 +12,7 @@ export type ApiErrorReason =
   | 'server'
   | 'timeout'
   | 'unauthorized'
+  | 'securityLogout'
   | 'invalidCredentials'
   | 'accountLocked'
   | 'accountFrozen'
@@ -110,6 +111,8 @@ export function errorKey(e: unknown): string {
 /** 后端业务错误码（`BizException`、`GlobalExceptionHandler`）对应的 reason */
 export const SERVER_CODES: Record<string, ApiErrorReason> = {
   UNAUTHORIZED: 'unauthorized',
+  // 验收反馈 1b：会话因为安全事件作废了（回机器人点「重新授权」）
+  SECURITY_LOGOUT: 'securityLogout',
   // 第一阶段只走 Telegram（TB-33）：注册、邮箱登录、忘记密码关闭
   TELEGRAM_ONLY: 'telegramOnly',
   // TB-1：Telegram 账户提现默认关（第 4 批验收后打开）

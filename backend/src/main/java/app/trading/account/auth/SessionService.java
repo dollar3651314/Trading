@@ -67,6 +67,21 @@ class SessionService {
     if (token != null && !token.isBlank()) mapper.revokeSession(Secrets.sha256(token));
   }
 
+  /**
+   * 安全事件作废全部会话（验收反馈 1b）：记下原因 SECURITY。之后网页再拿旧会话来，返回 401 {@code SECURITY_LOGOUT}，
+   * 网页据此去"回机器人重新授权"的提示页，而不是普通的登录页 / 提示页
+   */
+  @Transactional
+  void revokeAllForSecurity(long userId) {
+    mapper.revokeUserSessionsWithReason(userId, "SECURITY");
+  }
+
+  /** 这个令牌的会话是因为什么作废的（没作废、不存在为 null） */
+  String revokeReason(String token) {
+    if (token == null || token.isBlank()) return null;
+    return mapper.sessionRevokeReason(Secrets.sha256(token));
+  }
+
   /** 作废该用户的所有会话；keepToken 不为空时保留这一个（修改密码时保留当前设备） */
   @Transactional
   void revokeAll(long userId, String keepToken) {

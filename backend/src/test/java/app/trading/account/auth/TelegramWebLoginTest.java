@@ -117,7 +117,7 @@ class TelegramWebLoginTest {
   }
 
   @Test
-  void 验过身份建机器人会话_302到干净网址_发刚在浏览器里登录的提醒(CapturedOutput out) throws Exception {
+  void 验过身份建机器人会话_302到干净网址_不再发刚在浏览器里登录的提醒_会话标出从机器人来(CapturedOutput out) throws Exception {
     long tgId = newTgId();
     TgAccount a = telegram.openAccount(tgId, null);
     Map<String, String> p = telegramParams(tgId, -5);
@@ -129,15 +129,41 @@ class TelegramWebLoginTest {
     assertThat(r.getHeader("Set-Cookie")).contains("HttpOnly").contains("SameSite=Strict").contains("Max-Age=43200");
     Cookie c = cookieOf(r);
     assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getContentAsString())
-        .contains("\"userId\":\"" + a.userId() + "\"").contains("\"email\":null");
+        .contains("\"userId\":\"" + a.userId() + "\"").contains("\"email\":null").contains("\"fromTelegram\":true");
     assertThat(jdbc.queryForObject("SELECT kind FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1", String.class, a.userId())).isEqualTo("BOT");
     assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(MINUTE, created_at, max_expires_at) FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1",
         Integer.class, a.userId())).isEqualTo(12 * 60);
     assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(MINUTE, created_at, expires_at) FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1",
         Integer.class, a.userId())).isEqualTo(30);
-    assertThat(jdbc.queryForObject("SELECT CONCAT(channel, ' ', status) FROM notify_record WHERE user_id = ? AND template_code = 'LOGIN_NEW_DEVICE'", String.class,
-        a.userId())).isEqualTo("TELEGRAM PENDING");
+    // 验收反馈 B（Amos：「每次使用后都发，太烦，不要发这个」）：从机器人进网页不再发"刚在浏览器里登录"；「退出所有网页会话」在机器人主菜单里
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'LOGIN_NEW_DEVICE'", Integer.class, a.userId())).isZero();
     assertThat(out.getAll()).as("日志里不出现身份参数").doesNotContain(p.get("hash")).doesNotContain(String.valueOf(tgId));
+  }
+
+  @Autowired AuthAccess authAccess;
+
+  /** 验收反馈 1b：安全事件作废的会话回 401 SECURITY_LOGOUT（网页去"回机器人重新授权"的提示页）；别的原因作废的照旧 UNAUTHORIZED */
+  @Test
+  void 安全事件作废的会话回SECURITY_LOGOUT_别的作废照旧UNAUTHORIZED() throws Exception {
+    long tgId = newTgId();
+    TgAccount a = telegram.openAccount(tgId, null);
+    Cookie c = cookieOf(open(telegramParams(tgId, -1), null));
+    assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getStatus()).isEqualTo(200);
+    authAccess.securityEvent(a.userId(), app.trading.account.api.SecurityEvent.PIN_SET);
+    MockHttpServletResponse r = mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse();
+    assertThat(r.getStatus()).isEqualTo(401);
+    assertThat(r.getContentAsString()).contains("\"code\":\"SECURITY_LOGOUT\"").contains("重新授权");
+    assertThat(jdbc.queryForObject("SELECT revoke_reason FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1", String.class, a.userId())).isEqualTo("SECURITY");
+
+    ((MutableClock) clock).advance(Duration.ofSeconds(2));
+    telegram.reauthorize(a.userId());
+    Cookie c2 = cookieOf(open(telegramParams(tgId, -1), null));
+    sessions.revokeAll(a.userId(), null); // 例如「不是我，退出所有网页会话」：不是安全事件
+    MockHttpServletResponse r2 = mvc.perform(get("/api/me/session").cookie(c2)).andReturn().getResponse();
+    assertThat(r2.getStatus()).isEqualTo(401);
+    assertThat(r2.getContentAsString()).contains("\"code\":\"UNAUTHORIZED\"");
+    assertThat(mvc.perform(get("/api/me/session").cookie(new Cookie("fx_session", "no-such-token"))).andReturn().getResponse().getContentAsString())
+        .contains("\"code\":\"UNAUTHORIZED\"");
   }
 
   @Test

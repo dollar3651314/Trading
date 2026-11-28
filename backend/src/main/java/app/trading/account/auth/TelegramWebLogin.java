@@ -3,7 +3,6 @@ package app.trading.account.auth;
 import app.trading.account.api.SecurityEvent;
 import app.trading.account.api.TelegramAccountApi.TgAccount;
 import app.trading.account.api.UserStatus;
-import app.trading.notification.api.NotifyApi;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -35,7 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
  *       hash 只能用一次（"已用 hash"表的主键，INSERT 成功才算，原子）；只认 {@code id}；冻结、授权后有安全事件的拒绝。</li>
  *   <li><b>一次性链接（退路，{@code FX_TG_LOGIN_MODE=link}）</b>：机器人现做随机令牌（库里只存哈希），60 秒、只能用一次
  *       （{@code UPDATE … WHERE used_at IS NULL}，影响 1 行才算）。</li>
- *   <li>通过后建<b>机器人会话</b>（闲置 30 分钟、最长 12 小时），给机器人发"刚在浏览器里登录"（设备大致信息、IP 前三段）。</li>
+ *   <li>通过后建<b>机器人会话</b>（闲置 30 分钟、最长 12 小时）。验收反馈 B：不再给机器人发"刚在浏览器里登录"（Amos 嫌每次都发太烦），
+ *       「退出所有网页会话」是机器人主菜单里的常驻按钮。</li>
  * </ul>
  * <b>日志里不出现身份参数</b>（id、hash、名字、令牌）：失败只记原因。
  */
@@ -67,18 +67,16 @@ class TelegramWebLogin {
   private final TelegramAccounts accounts;
   private final AuthService auth;
   private final SessionService sessions;
-  private final NotifyApi notify;
   private final Clock clock;
   private final String botToken;
   private final String mode;
 
-  TelegramWebLogin(AuthMapper mapper, TelegramAccounts accounts, AuthService auth, SessionService sessions, NotifyApi notify, Clock clock,
+  TelegramWebLogin(AuthMapper mapper, TelegramAccounts accounts, AuthService auth, SessionService sessions, Clock clock,
       @Value("${trading.telegram.token:}") String botToken, @Value("${trading.telegram.login-mode:login-url}") String mode) {
     this.mapper = mapper;
     this.accounts = accounts;
     this.auth = auth;
     this.sessions = sessions;
-    this.notify = notify;
     this.clock = clock;
     this.botToken = botToken == null ? "" : botToken.strip();
     this.mode = mode == null ? "login-url" : mode.strip();
@@ -185,7 +183,8 @@ class TelegramWebLogin {
     Optional<SecurityEvent> ev = auth.lastSecurityEventSince(a.userId(), a.authorizedAt());
     if (ev.isPresent()) return fail(Outcome.REAUTH);
     String token = sessions.createBot(a.userId(), ip, userAgent);
-    notify.toUser(a.userId(), "LOGIN_NEW_DEVICE", Map.of("device", device(userAgent), "ip", maskIp(ip)));
+    // 验收反馈 B（Amos：「每次使用后都发，太烦，不要发这个」）：从机器人进网页不再发"刚在浏览器里登录"；
+    // 「退出所有网页会话」改成机器人主菜单里的常驻按钮。应急开关下的网页登录（安全事件）照旧发 TG_EMERGENCY_LOGIN（EmergencyLogin）
     return new Result(Outcome.OK, token, next);
   }
 

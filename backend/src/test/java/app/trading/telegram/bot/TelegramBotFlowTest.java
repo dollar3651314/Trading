@@ -214,6 +214,10 @@ class TelegramBotFlowTest {
     ((MutableClock) clock).advance(Duration.ofSeconds(1));
     account.freeze(acc.userId());
     account.unfreeze(acc.userId());
+    // 验收反馈 1a：解冻（安全事件）以后机器人主动发一条「重新授权」（冻结那一下不发：冻结的只回"已冻结"）；先等它到，再看客户自己发消息时的回应
+    FakeTelegram.Call prompt = replyContaining(id, "网页已全部退出");
+    assertThat(text(prompt)).contains("账户刚解冻").contains("网页已全部退出");
+    assertThat(buttons(prompt)).contains("重新授权").contains("\"callback_data\":\"" + UpdateHandler.CB_REAUTH + "\"");
     tg.clear();
     tg.push(tg.text(id, null, "/start"));
     FakeTelegram.Call c = replies(id, 1).getFirst();
@@ -229,6 +233,67 @@ class TelegramBotFlowTest {
     assertThat(text(r.get(3))).startsWith("客户号 #" + acc.userId());
     tg.push(tg.text(id, null, "/start"));
     assertThat(text(replies(id, 5).get(4))).startsWith("客户号 #" + acc.userId());
+  }
+
+  @Autowired app.trading.account.auth.AuthAccess authAccess;
+
+  /** 等发给这个聊天、文字里含 part 的一条回复 */
+  FakeTelegram.Call replyContaining(long chat, String part) throws InterruptedException {
+    long end = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+    while (System.nanoTime() < end) {
+      for (FakeTelegram.Call c : replies(chat, 0)) if (text(c).contains(part)) return c;
+      Thread.sleep(20);
+    }
+    throw new AssertionError("没等到含「" + part + "」的回复：" + replies(chat, 0).stream().map(TelegramBotFlowTest::text).toList());
+  }
+
+  @Test
+  void 设提现密码这类安全事件后_机器人主动发重新授权_高优先级_点了能用() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    tg.clear();
+    authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.PIN_SET);
+    FakeTelegram.Call p = replyContaining(id, "网页已全部退出");
+    assertThat(text(p)).contains("提现密码有变化").contains("「重新授权」").contains("「打开交易」");
+    assertThat(buttons(p)).contains("\"callback_data\":\"" + UpdateHandler.CB_REAUTH + "\"");
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    tg.push(tg.callback(id, null, id, "private", UpdateHandler.CB_REAUTH));
+    assertThat(text(replyContaining(id, "已重新授权"))).isEqualTo("已重新授权。");
+    assertThat(account.lastSecurityEventSince(acc.userId(), accounts.byUserId(acc.userId()).orElseThrow().authorizedAt())).isEmpty();
+  }
+
+  @Test
+  void 提示页的深链接start_reauth_要重新授权时回提示_不用时回主菜单_主菜单有退出所有网页会话() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    tg.clear();
+    tg.push(tg.text(id, null, "/start reauth"));
+    FakeTelegram.Call menu = replies(id, 1).getFirst();
+    assertThat(text(menu)).startsWith("客户号 #" + acc.userId());
+    // 验收反馈 B：主菜单常驻「退出所有网页会话」
+    assertThat(buttons(menu)).contains("退出所有网页会话").contains("\"callback_data\":\"" + app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL + "\"");
+
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.KYC_FIRST);
+    replyContaining(id, "网页已全部退出");
+    tg.clear();
+    tg.push(tg.text(id, null, "/start reauth"));
+    FakeTelegram.Call again = replies(id, 1).getFirst();
+    assertThat(text(again)).contains("安全变更").contains("提交了身份认证");
+    assertThat(buttons(again)).contains("重新授权");
+  }
+
+  @Test
+  void 主菜单的退出所有网页会话_作废全部网页会话() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    jdbc.update("INSERT INTO account_session (user_id, token_hash, ip, user_agent, created_at, last_seen_at, expires_at) VALUES (?, ?, '203.0.113.9', 't', NOW(3), NOW(3), NOW(3) + INTERVAL 1 DAY)",
+        acc.userId(), String.format("%064x", ThreadLocalRandom.current().nextLong(Long.MAX_VALUE)));
+    tg.clear();
+    tg.push(tg.callback(id, null, id, "private", app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL));
+    assertThat(text(replyContaining(id, "已退出所有网页会话"))).isEqualTo(UpdateHandler.TEXT_LOGGED_OUT);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_session WHERE user_id = ? AND revoked_at IS NULL", Integer.class, acc.userId())).isZero();
   }
 
   @Test

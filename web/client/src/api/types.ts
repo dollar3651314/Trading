@@ -34,6 +34,8 @@ export interface Session {
   email: string | null;
   /** 有 TG 账户的客户的 Telegram 用户名（可能为空） */
   telegramUsername?: string | null;
+  /** 验收反馈 A：这次是从 Telegram 机器人进来的（后端会话种类 BOT）：不显示"添加到主屏幕"引导 */
+  fromTelegram?: boolean;
 }
 
 export type EmailCodePurpose = 'register' | 'resetPassword';

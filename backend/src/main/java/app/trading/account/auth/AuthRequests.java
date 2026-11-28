@@ -47,5 +47,9 @@ final class AuthRequests {
    * 登录后返回给前端的信息（令牌在 Cookie 里，不在响应体里）。
    * 机器人开户的客户（纯 Telegram）{@code email} 为空；有 TG 账户的带 {@code telegramUsername}（没有用户名时为空）。
    */
-  record SessionView(String userId, String email, String telegramUsername) {}
+  /**
+   * @param fromTelegram 验收反馈 A：这次会话是从机器人进来的（login_url 一键登录 / 一次性链接，会话种类 BOT）。网页据此不显示"添加到主屏幕"引导
+   *     （Telegram 内置浏览器里加不了，iOS 内置浏览器的 User-Agent 也靠不住）。登录、注册刚建的网页会话是 false
+   */
+  record SessionView(String userId, String email, String telegramUsername, boolean fromTelegram) {}
 }

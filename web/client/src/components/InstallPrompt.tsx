@@ -2,12 +2,15 @@
  * 手机行情页顶部的提示卡片（页面内普通卡片，不浮动遮挡）："添加到主屏幕，接收提醒" + "允许通知"。
  * 点"以后再说""添加到主屏幕""允许通知"任一按钮后本地记住，不再出现。
  * 原型里只调用浏览器的通知权限请求，不接后端推送服务。
+ * 验收反馈 A：从 Telegram 打开时不显示（Telegram 内置浏览器里加不到主屏幕）。主要看会话种类（后端说这次是从机器人进来的 BOT 会话，
+ * iOS 内置浏览器的 User-Agent 靠不住），User-Agent 里有 Telegram（安卓内置浏览器会带）也不显示。
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useToast } from '../app/contexts';
+import { useAuth, useToast } from '../app/contexts';
 import { syncPushSubscription } from '../api/webPush';
 import { notificationPermission, requestNotificationPermission } from '../lib/notify';
+import { isTelegramUa } from '../lib/telegramUa';
 import { Icon } from './Icon';
 
 const KEY = 'fx.installPrompt.dismissed';
@@ -32,6 +35,7 @@ function readInstallDismissed(): boolean {
 export function InstallPrompt() {
   const { t } = useTranslation();
   const toast = useToast();
+  const { session } = useAuth();
   const [visible, setVisible] = useState(() => !readInstallDismissed() && !isStandalone());
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [, setPerm] = useState(notificationPermission());
@@ -78,7 +82,7 @@ export function InstallPrompt() {
     dismiss();
   };
 
-  if (!visible) return null;
+  if (!visible || session?.fromTelegram || isTelegramUa()) return null;
   return (
     <section className="card install-card" aria-labelledby="install-title">
       <div className="install-icon">

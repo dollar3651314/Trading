@@ -742,7 +742,8 @@
     "notTgAccount": "Only Telegram accounts can request a manual PIN reset.",
     "captchaInvalid": "Wrong or expired captcha. Try a new one",
     "notSelfFrozen": "No freeze you set in the bot; other freezes are lifted manually",
-    "recoveryPaused": "Manual applications are paused for now (the reviewer is away). If you are worried about your account, freeze withdrawals first and apply again later."
+    "recoveryPaused": "Manual applications are paused for now (the reviewer is away). If you are worried about your account, freeze withdrawals first and apply again later.",
+    "securityLogout": "Your account just had a security change and the web was signed out. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\"."
   },
   "validation": {
     "fixAll": "Please fix the highlighted fields",

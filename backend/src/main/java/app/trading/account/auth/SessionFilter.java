@@ -68,7 +68,11 @@ class SessionFilter extends OncePerRequestFilter {
       res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
       res.setContentType(MediaType.APPLICATION_JSON_VALUE);
       res.setCharacterEncoding(StandardCharsets.UTF_8.name());
-      res.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"未登录或登录已失效\",\"fields\":[]" + TraceIdFilter.jsonField() + "}");
+      // 验收反馈 1b：因为安全事件作废的会话单独回 SECURITY_LOGOUT，网页去"回机器人点「重新授权」"的提示页
+      boolean security = "SECURITY".equals(sessions.revokeReason(token(req, props.cookieName())));
+      res.getWriter().write(security
+          ? "{\"code\":\"SECURITY_LOGOUT\",\"message\":\"账户刚有安全变更，网页已退出：请回到 Telegram 机器人点「重新授权」\",\"fields\":[]" + TraceIdFilter.jsonField() + "}"
+          : "{\"code\":\"UNAUTHORIZED\",\"message\":\"未登录或登录已失效\",\"fields\":[]" + TraceIdFilter.jsonField() + "}");
       return;
     }
     CurrentUser.set(req, userId);

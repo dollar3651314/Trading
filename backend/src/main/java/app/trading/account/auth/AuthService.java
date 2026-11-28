@@ -60,6 +60,8 @@ class AuthService {
    */
   private void securityEvent(long userId, String type) {
     mapper.insertSecurityEvent(userId, type, LocalDateTime.now(clock.withZone(ZoneOffset.UTC)));
+    // 验收反馈 1a：机器人在事务提交后看要不要主动发「重新授权」
+    events.publishEvent(new app.trading.account.api.SecurityEventRecorded(userId, type));
   }
 
   /**
@@ -69,7 +71,7 @@ class AuthService {
   @Transactional
   void securityEventAndLogout(long userId, String type) {
     securityEvent(userId, type);
-    sessions.revokeAll(userId, null);
+    sessions.revokeAllForSecurity(userId);
   }
 
   java.util.List<SecurityEvent> securityEventsSince(long userId, LocalDateTime since) {
