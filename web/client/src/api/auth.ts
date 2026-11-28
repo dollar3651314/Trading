@@ -82,7 +82,7 @@ export const PROTOTYPE_EMAIL_CODE = mock.MOCK_EMAIL_CODE;
 /** 登录方式（TG 机器人第 2 批）。原型：不限制（照常显示注册、登录），机器人用户名是测试机器人 */
 let optionsPromise: Promise<AuthOptions> | null = null;
 export function getAuthOptions(): Promise<AuthOptions> {
-  if (IS_MOCK) return Promise.resolve({ telegramOnly: false, botUsername: 'TradingAssistTestBot', loginMode: 'login-url', emergencyLogin: false, loginBotUsername: null });
+  if (IS_MOCK) return Promise.resolve({ telegramOnly: false, botUsername: 'TradingAssistTestBot', loginMode: 'link', emergencyLogin: false, loginBotUsername: null });
   if (!optionsPromise) {
     optionsPromise = real.getAuthOptions().catch((e) => {
       optionsPromise = null;

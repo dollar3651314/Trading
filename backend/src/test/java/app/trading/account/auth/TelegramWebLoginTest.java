@@ -49,7 +49,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
  * 第一阶段只走 Telegram（注册、邮箱登录、忘记密码关闭）。机器人令牌是测试假值，Telegram 指向一个连不上的地址（不连真实 Telegram）。
  */
 @SpringBootTest(properties = {"trading.telegram.token=" + TelegramWebLoginTest.TOKEN, "trading.telegram.username=TradingAssistTestBot",
-    "trading.telegram.api-url=http://127.0.0.1:1", "trading.auth.phase1-telegram-only=true"})
+    "trading.telegram.api-url=http://127.0.0.1:1", "trading.auth.phase1-telegram-only=true",
+    // 这个类测 login_url 一键登录；验收反馈方案 ② 以后默认是 link，这里明确选 login-url
+    "trading.telegram.login-mode=login-url"})
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(FixedClockConfig.class)
@@ -126,15 +128,15 @@ class TelegramWebLoginTest {
     assertThat(r.getHeader("Location")).isEqualTo("/positions");
     assertThat(r.getHeader("Cache-Control")).isEqualTo("no-store");
     assertThat(r.getHeader("Referrer-Policy")).isEqualTo("no-referrer");
-    assertThat(r.getHeader("Set-Cookie")).contains("HttpOnly").contains("SameSite=Strict").contains("Max-Age=43200");
+    assertThat(r.getHeader("Set-Cookie")).contains("HttpOnly").contains("SameSite=Strict").contains("Max-Age=604800");
     Cookie c = cookieOf(r);
     assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getContentAsString())
         .contains("\"userId\":\"" + a.userId() + "\"").contains("\"email\":null").contains("\"fromTelegram\":true");
     assertThat(jdbc.queryForObject("SELECT kind FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1", String.class, a.userId())).isEqualTo("BOT");
-    assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(MINUTE, created_at, max_expires_at) FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-        Integer.class, a.userId())).isEqualTo(12 * 60);
+    // 11/28 Amos 定：机器人会话 7 天滑动有效期，没有最长时间（以前是闲置 30 分钟、最长 12 小时）
+    assertThat(jdbc.queryForObject("SELECT max_expires_at IS NULL FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1", Boolean.class, a.userId())).isTrue();
     assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(MINUTE, created_at, expires_at) FROM account_session WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-        Integer.class, a.userId())).isEqualTo(30);
+        Integer.class, a.userId())).isEqualTo(7 * 24 * 60);
     // 验收反馈 B（Amos：「每次使用后都发，太烦，不要发这个」）：从机器人进网页不再发"刚在浏览器里登录"；「退出所有网页会话」在机器人主菜单里
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM notify_record WHERE user_id = ? AND template_code = 'LOGIN_NEW_DEVICE'", Integer.class, a.userId())).isZero();
     assertThat(out.getAll()).as("日志里不出现身份参数").doesNotContain(p.get("hash")).doesNotContain(String.valueOf(tgId));
@@ -258,19 +260,24 @@ class TelegramWebLoginTest {
   }
 
   @Test
-  void 机器人会话_闲置超过30分钟失效_冻结立即失效() throws Exception {
+  void 机器人会话_7天滑动有效期_用着就续_Cookie跟着续_过期失效_冻结立即失效() throws Exception {
     long tgId = newTgId();
     TgAccount a = telegram.openAccount(tgId, null);
     Cookie c = cookieOf(open(telegramParams(tgId, 0), null));
     assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getStatus()).isEqualTo(200);
-    // 续期不超过最长到期时间
-    jdbc.update("UPDATE account_session SET last_seen_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 5 MINUTE), "
-        + "max_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 2 MINUTE) WHERE user_id = ? AND kind = 'BOT'", a.userId());
-    assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getStatus()).isEqualTo(200);
-    assertThat(jdbc.queryForObject("SELECT expires_at <= max_expires_at FROM account_session WHERE user_id = ? AND kind = 'BOT'", Boolean.class, a.userId()))
-        .as("续期到 30 分钟以后，但不超过最长 12 小时").isTrue();
+    // 11/28：6 天没用、还剩 1 天到期 → 这次用了就续到"现在 + 7 天"，没有最长时间；Cookie 也续成 7 天
+    jdbc.update("UPDATE account_session SET last_seen_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 6 DAY), expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 1 DAY) "
+        + "WHERE user_id = ? AND kind = 'BOT'", a.userId());
+    MockHttpServletResponse used = mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse();
+    assertThat(used.getStatus()).isEqualTo(200);
+    assertThat(used.getHeader("Set-Cookie")).as("Cookie 跟着续").contains("fx_session=" + c.getValue()).contains("Max-Age=604800").contains("HttpOnly")
+        .contains("SameSite=Strict").contains("Path=/api");
+    assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), expires_at) FROM account_session WHERE user_id = ? AND kind = 'BOT'", Integer.class,
+        a.userId())).as("续到现在 + 7 天").isBetween(7 * 24 - 1, 7 * 24);
+    MockHttpServletResponse again = mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse();
+    assertThat(again.getHeader("Set-Cookie")).as("1 分钟内再用不重复续").isNull();
     jdbc.update("UPDATE account_session SET expires_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 SECOND) WHERE user_id = ? AND kind = 'BOT'", a.userId());
-    assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getStatus()).isEqualTo(401);
+    assertThat(mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse().getStatus()).as("7 天没用就过期").isEqualTo(401);
 
     Cookie c2 = cookieOf(open(telegramParams(tgId, 0), null));
     assertThat(mvc.perform(get("/api/me/session").cookie(c2)).andReturn().getResponse().getStatus()).isEqualTo(200);

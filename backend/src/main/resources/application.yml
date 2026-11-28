@@ -46,9 +46,10 @@ trading:
     # 第一阶段只走 Telegram（TB-33，TG 机器人第 2 批）：true = 关闭注册、邮箱登录、忘记密码（含发验证码），网页没有会话时显示"请在 Telegram 打开"提示页。
     # 默认关（第 2 批审查 🟡1）：Amos 统一验收时用 sudo trading set FX_PHASE1_TELEGRAM_ONLY true 打开
     phase1-telegram-only: ${FX_PHASE1_TELEGRAM_ONLY:false}
-    # 机器人会话（从机器人一键登录）：闲置 30 分钟、最长 12 小时（技术方案 11 页第 2 节）
-    bot-session-idle-minutes: 30
-    bot-session-max-hours: 12
+    # 机器人会话（从机器人进网页）：7 天滑动有效期（Amos 11/28：「登录有效期设置为7天，如果7天内打开过网页，就从打开的时间开始算再延长七天」）。
+    # 每次用网页都续到"现在 + 7 天"，会话 Cookie 跟着续（Max-Age 同样 7 天）；安全事件、冻结、「退出所有网页会话」、换绑照样马上作废。
+    # 网页登录（WEB）、应急登录（EMERGENCY）的会话不受影响（session-ttl-hours）
+    bot-session-days: ${FX_BOT_SESSION_DAYS:7}
   # 通用限流（功能取舍对照表 P-05，common/ratelimit）：Redis 计数，Redis 不可用时放行。超限返回 429 RATE_LIMITED 和 Retry-After。
   # Nginx 外层还有一道更宽松的限流（deploy/nginx/site.conf.template）。上限填 0 表示这一层不限。
   # IP 是 Nginx 传来的真实客户端 IP；大陆移动网络很多人共用一个出口 IP，按 IP 的上限留足余量
@@ -205,9 +206,9 @@ trading:
     api-url: ${FX_TG_API_URL:https://api.telegram.org}
     # 网页客户端地址（login_url 按钮「打开交易」「查看」用）。批 2 做好一键登录落地页、绑好域名之前不填：不填就不显示这些按钮
     web-url: ${FX_TG_WEB_URL:}
-    # 进入网页的方式（第 2 批）：login-url = login_url 按钮一键登录（默认，要先在 BotFather /setdomain 绑上网页的域名）；
-    # link = 退路：回调按钮 + 机器人现发一条 60 秒、只能用一次的链接（域名绑不上时用）
-    login-mode: ${FX_TG_LOGIN_MODE:login-url}
+    # 进入网页的方式：link = 一次性链接（默认，验收反馈方案 ②：点网页入口按钮后同一条消息上换成 60 秒一次性链接，iOS 上一直在 Telegram 里打开）；
+    # login-url = login_url 按钮一键登录（要先在 BotFather /setdomain 绑网页的域名；iOS 上授权过以后会跳到 Safari）
+    login-mode: ${FX_TG_LOGIN_MODE:link}
     # 第 5 批应急开关（TB-34）：另一个只管登录的机器人（网页「用 Telegram 登录」的登录小部件用它）。用户名 sudo trading set FX_TG_LOGIN_BOT_USERNAME，
     # 令牌只由 Amos 用 sudo trading set-key FX_TG_LOGIN_BOT_TOKEN 填；没填 = 应急开关打开了也不显示「用 Telegram 登录」
     login-bot:

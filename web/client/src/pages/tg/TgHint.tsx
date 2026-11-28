@@ -14,7 +14,7 @@ import { AuthLayout } from '../auth/AuthLayout';
 import { EmergencyLogin } from './EmergencyLogin';
 import { botStartLink } from './tgLib';
 
-const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security'];
+const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security', 'continue'];
 
 export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason | null }) {
   const { t } = useTranslation();
@@ -33,13 +33,15 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
   const r = reasonProp ?? (params.get('r') as TgLoginReason | null);
   const reason = r && REASONS.includes(r) ? r : null;
   const bot = options?.botUsername ?? null;
-  // 验收反馈 1c：深链接，机器人一定会回一条（要重新授权的回提示，不用的回主菜单）
-  const link = botStartLink(bot);
+  // 深链接，机器人一定会回一条：安全事件后 /start reauth，其他 /start open（发一整套带一次性链接的新菜单）
+  const link = botStartLink(bot, reason === 'security' || reason === 'reauth' ? 'reauth' : 'open');
+  // 11/28：从机器人的普通按钮进来、这个浏览器里没有会话——短页「回到机器人继续」
+  const cont = reason === 'continue';
   return (
-    <AuthLayout title={t('tg.title')} subtitle={bot ? t('tg.subtitle', { bot }) : t('tg.subtitleNoBot')}>
+    <AuthLayout title={t(cont ? 'tg.continueTitle' : 'tg.title')} subtitle={cont ? t('tg.continueSubtitle') : bot ? t('tg.subtitle', { bot }) : t('tg.subtitleNoBot')}>
       <EmergencyLogin />
       {reason && (
-        <div className={`notice ${reason === 'refused' ? 'info' : 'error'}`} role="alert" data-testid="tg-reason">
+        <div className={`notice ${reason === 'refused' || reason === 'continue' ? 'info' : 'error'}`} role="alert" data-testid="tg-reason">
           {t(`tg.reason.${reason}`)}
         </div>
       )}
@@ -50,7 +52,7 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
       {link && (
         <>
           <a className="btn btn-primary btn-lg btn-block" href={link} data-testid="tg-open">
-            {t('tg.open', { bot })}
+            {t(cont ? 'tg.continueOpen' : 'tg.open', { bot })}
           </a>
           <div className="tg-qr">
             <QrCode value={link} size={152} label={t('tg.qrLabel')} />

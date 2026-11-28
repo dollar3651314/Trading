@@ -296,6 +296,77 @@ class TelegramBotFlowTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_session WHERE user_id = ? AND revoked_at IS NULL", Integer.class, acc.userId())).isZero();
   }
 
+  long prompts(long chat) throws InterruptedException {
+    return replies(chat, 0).stream().filter(c -> text(c).contains("网页已全部退出")).count();
+  }
+
+  @Test
+  void 重新授权提示去重_同一个客户1分钟内只发一条_过了1分钟再有安全事件再发() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    tg.clear();
+    authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.PIN_SET);
+    authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.PIN_CHANGE);
+    replyContaining(id, "网页已全部退出");
+    // 标记：客户自己发一条，机器人回"最近有安全变更"（这条不是主动提示）；它到了，前面排队的主动提示也都到了
+    tg.push(tg.text(id, null, "/start"));
+    replyContaining(id, "最近有安全变更");
+    assertThat(prompts(id)).as("1 分钟内只发一条").isEqualTo(1);
+
+    ((MutableClock) clock).advance(Duration.ofSeconds(61));
+    authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.KYC_FIRST);
+    long end = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+    while (prompts(id) < 2 && System.nanoTime() < end) Thread.sleep(20);
+    assertThat(prompts(id)).as("过了 1 分钟再有安全事件，再发一条").isEqualTo(2);
+  }
+
+  @Test
+  void 冻结的账户_有安全事件也不发重新授权提示() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    ((MutableClock) clock).advance(Duration.ofSeconds(1));
+    account.freeze(acc.userId());
+    try {
+      tg.clear();
+      authAccess.securityEvent(acc.userId(), app.trading.account.api.SecurityEvent.PIN_SET);
+      tg.push(tg.text(id, null, "/start"));
+      assertThat(text(replyContaining(id, "已冻结"))).isEqualTo(UpdateHandler.TEXT_FROZEN);
+      assertThat(prompts(id)).as("冻结的不发「重新授权」").isZero();
+    } finally {
+      account.unfreeze(acc.userId());
+    }
+  }
+
+  @Test
+  void 主菜单的当前网页会话_列出设备IP前三段登录时间和方式_旁边是退出所有网页会话() throws Exception {
+    long id = newId();
+    TgAccount acc = signup(id, null);
+    String hash1 = String.format("%064x", ThreadLocalRandom.current().nextLong(Long.MAX_VALUE));
+    String hash2 = String.format("%064x", ThreadLocalRandom.current().nextLong(Long.MAX_VALUE));
+    String hash3 = String.format("%064x", ThreadLocalRandom.current().nextLong(Long.MAX_VALUE));
+    jdbc.update("INSERT INTO account_session (user_id, token_hash, kind, ip, user_agent, created_at, last_seen_at, expires_at) VALUES (?, ?, 'BOT', '203.0.113.45', "
+        + "'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Telegram-iOS/11.0', '2026-11-28 02:05:00', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3) + INTERVAL 1 HOUR)", acc.userId(), hash1);
+    jdbc.update("INSERT INTO account_session (user_id, token_hash, kind, ip, user_agent, created_at, last_seen_at, expires_at) VALUES (?, ?, 'WEB', '198.51.100.7', "
+        + "'Mozilla/5.0 (Windows NT 10.0) Chrome/130.0', '2026-11-28 03:10:00', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3) + INTERVAL 1 HOUR)", acc.userId(), hash2);
+    jdbc.update("INSERT INTO account_session (user_id, token_hash, kind, ip, user_agent, created_at, last_seen_at, expires_at, revoked_at) VALUES (?, ?, 'WEB', '192.0.2.9', "
+        + "'x', '2026-11-28 04:00:00', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3) + INTERVAL 1 HOUR, UTC_TIMESTAMP(3))", acc.userId(), hash3);
+    tg.clear();
+    tg.push(tg.text(id, null, "/start"));
+    FakeTelegram.Call menu = replies(id, 1).getFirst();
+    assertThat(buttons(menu)).contains("当前网页会话").contains("\"callback_data\":\"" + UpdateHandler.CB_SESSIONS + "\"").contains("退出所有网页会话");
+    tg.push(tg.callback(id, null, id, "private", UpdateHandler.CB_SESSIONS));
+    FakeTelegram.Call list = replyContaining(id, "当前网页会话（");
+    assertThat(text(list)).contains("2 个").contains("iPhone · Telegram 内置浏览器，IP 203.0.113.*，11-28 02:05 UTC 登录（从机器人进入）")
+        .contains("Windows · Chrome，IP 198.51.100.*，11-28 03:10 UTC 登录（网页登录）").doesNotContain("192.0.2").doesNotContain("203.0.113.45");
+    assertThat(text(list).indexOf("Windows")).as("新的在前").isLessThan(text(list).indexOf("iPhone"));
+    assertThat(buttons(list)).contains("\"callback_data\":\"" + app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL + "\"");
+    tg.push(tg.callback(id, null, id, "private", app.trading.notification.api.TelegramSender.ACTION_LOGOUT_ALL));
+    replyContaining(id, "已退出所有网页会话");
+    tg.push(tg.callback(id, null, id, "private", UpdateHandler.CB_SESSIONS));
+    replyContaining(id, "现在没有登录着的网页会话");
+  }
+
   @Test
   void 通知设置按类开关_强平和安全提醒不能关() throws Exception {
     long id = newId();

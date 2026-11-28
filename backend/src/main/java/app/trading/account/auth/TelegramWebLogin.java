@@ -72,14 +72,14 @@ class TelegramWebLogin {
   private final String mode;
 
   TelegramWebLogin(AuthMapper mapper, TelegramAccounts accounts, AuthService auth, SessionService sessions, Clock clock,
-      @Value("${trading.telegram.token:}") String botToken, @Value("${trading.telegram.login-mode:login-url}") String mode) {
+      @Value("${trading.telegram.token:}") String botToken, @Value("${trading.telegram.login-mode:link}") String mode) {
     this.mapper = mapper;
     this.accounts = accounts;
     this.auth = auth;
     this.sessions = sessions;
     this.clock = clock;
     this.botToken = botToken == null ? "" : botToken.strip();
-    this.mode = mode == null ? "login-url" : mode.strip();
+    this.mode = mode == null ? "link" : mode.strip();
   }
 
   boolean linkMode() {

@@ -134,10 +134,10 @@ interface AuthMapper {
 
   SessionRow findActiveSession(@Param("tokenHash") String tokenHash);
 
-  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours, @Param("botIdleMinutes") int botIdleMinutes);
+  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours, @Param("botDays") long botDays);
 
   int insertBotSession(@Param("userId") long userId, @Param("tokenHash") String tokenHash, @Param("ip") String ip, @Param("userAgent") String userAgent,
-      @Param("idleMinutes") int idleMinutes, @Param("maxHours") int maxHours);
+      @Param("botDays") long botDays);
 
   int revokeSession(@Param("tokenHash") String tokenHash);
 
@@ -147,6 +147,9 @@ interface AuthMapper {
   int revokeUserSessionsWithReason(@Param("userId") long userId, @Param("reason") String reason);
 
   String sessionRevokeReason(@Param("tokenHash") String tokenHash);
+
+  /** 这个客户还有效的会话（条件和 findActiveSession 一样），新的在前 */
+  java.util.List<Rows.ActiveSession> activeSessions(@Param("userId") long userId, @Param("limit") int limit);
 
   // ---------- 第 5 批：应急开关（TB-34） ----------
 

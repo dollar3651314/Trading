@@ -33,7 +33,7 @@ class SessionService {
   @Transactional
   String createBot(long userId, String ip, String userAgent) {
     String token = Secrets.newToken();
-    mapper.insertBotSession(userId, Secrets.sha256(token), ip, truncate(userAgent, 255), props.botSessionIdleMinutes(), props.botSessionMaxHours());
+    mapper.insertBotSession(userId, Secrets.sha256(token), ip, truncate(userAgent, 255), props.botSessionTtl().toDays());
     return token;
   }
 
@@ -58,7 +58,7 @@ class SessionService {
     if (token == null || token.isBlank()) return null;
     SessionRow s = mapper.findActiveSession(Secrets.sha256(token));
     if (s == null) return null;
-    if (s.idleSeconds() >= 60) mapper.extendSession(s.id(), props.sessionTtlHours(), props.botSessionIdleMinutes());
+    if (s.idleSeconds() >= 60) mapper.extendSession(s.id(), props.sessionTtlHours(), props.botSessionTtl().toDays());
     return s;
   }
 

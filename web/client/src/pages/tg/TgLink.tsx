@@ -31,6 +31,13 @@ export default function TgLink() {
     tgLink(token)
       .then(async (r) => {
         if ('reason' in r) {
+          // 11/28：链接过期 / 用过了，但这个浏览器里本来就有有效会话（7 天内用过）——直接进去，不让客户感知"重新登录"
+          const s = await restoreSession().catch(() => null);
+          if (s) {
+            setSession(s);
+            navigate('/', { replace: true });
+            return;
+          }
           setFailed(r.reason);
           return;
         }

@@ -77,6 +77,10 @@ class SessionFilter extends OncePerRequestFilter {
     }
     CurrentUser.set(req, userId);
     CurrentUser.setBotSession(req, "BOT".equals(s.kind()));
+    // 11/28 机器人会话 7 天滑动：服务器这边续了期（闲置超过 1 分钟才续），Cookie 也跟着续到"现在 + 7 天"，不然 Cookie 会在第一次登录 7 天后自己过期
+    if ("BOT".equals(s.kind()) && s.idleSeconds() >= 60) {
+      res.addHeader(org.springframework.http.HttpHeaders.SET_COOKIE, AuthController.sessionCookie(props, token(req, props.cookieName()), props.botSessionTtl()));
+    }
     chain.doFilter(req, res);
   }
 }
