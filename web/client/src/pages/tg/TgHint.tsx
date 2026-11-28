@@ -12,7 +12,7 @@ import type { AuthOptions, TgLoginReason } from '../../api/types';
 import { QrCode } from '../../components/QrCode';
 import { AuthLayout } from '../auth/AuthLayout';
 import { EmergencyLogin } from './EmergencyLogin';
-import { botStartLink } from './tgLib';
+import { asTgPage, botStartLink } from './tgLib';
 
 const REASONS: TgLoginReason[] = ['refused', 'invalid', 'expired', 'used', 'no_account', 'frozen', 'reauth', 'disabled', 'security', 'continue'];
 
@@ -33,8 +33,9 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
   const r = reasonProp ?? (params.get('r') as TgLoginReason | null);
   const reason = r && REASONS.includes(r) ? r : null;
   const bot = options?.botUsername ?? null;
-  // 深链接，机器人一定会回一条：安全事件后 /start reauth，其他 /start open（发一整套带一次性链接的新菜单）
-  const link = botStartLink(bot, reason === 'security' || reason === 'reauth' ? 'reauth' : 'open');
+  // 深链接，机器人一定会回一条：安全事件后 /start reauth，其他 /start open（发一整套带一次性令牌的新菜单）；
+  // 「回到机器人继续」带上本来要去的页面（p，白名单），机器人把那一页放第一个（验收修复 5）
+  const link = botStartLink(bot, reason === 'security' || reason === 'reauth' ? 'reauth' : 'open', reason === 'continue' ? asTgPage(params.get('p')) : null);
   // 11/28：从机器人的普通按钮进来、这个浏览器里没有会话——短页「回到机器人继续」
   const cont = reason === 'continue';
   return (

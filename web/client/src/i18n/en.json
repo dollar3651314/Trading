@@ -945,7 +945,7 @@
       "reauth": "There was a recent security change on your account. Go back to the bot, tap \"Re-authorize\", then open trading.",
       "disabled": "This sign-in method is not available now. Go back to the bot and tap the button again.",
       "security": "For security, all web sessions of this account have been signed out (you just set or changed your withdrawal PIN, submitted identity verification or made another security change), and withdrawals pause for a while. Go back to the Telegram bot, tap \"Re-authorize\", then \"Open trading\".",
-      "continue": "Tap below to go back to the bot, then tap the \"Enter trading ›\" button in the latest message. If you use the web at least once every 7 days, the bot buttons open it directly."
+      "continue": "After you are back in the bot, tap a button in the latest message (if there is no new message, send /start). If you use the web at least once every 7 days, the bot buttons open it directly."
     },
     "recoverTitle": "Recover a Telegram account",
     "recoverSteps": "Recovery (moving the account to a new Telegram) is requested in the bot only: open the bot with your new Telegram, tap \"Recover my account\" and send your customer number, your name as verified, and the last 4 characters of your ID number. The current holder is notified; after a 48-hour objection period a reviewer verifies you by video, and an approved request runs 24 hours later. Support will never DM you for passwords or codes.",

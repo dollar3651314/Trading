@@ -150,3 +150,11 @@ html[data-kb='1'] .bottomnav, html[data-kb='1'] .m-actbar { display: none; }
 .sym-spark { display: flex; align-items: center; justify-content: center; }
 .chart-gesture { margin: 4px 12px 0; font-size: 11px; color: var(--subtle); }
 @media (prefers-reduced-motion: reduce) { .px-tick, .flash-up, .flash-down { animation: none; } }
+/* 11/28 Telegram 内置浏览器识别诊断页 /tg-check：字大、长内容换行，方便手机截图 */
+.tg-check { max-width: 720px; margin: 0 auto; padding: 16px; font-size: 16px; line-height: 1.5; }
+.tg-check h1 { font-size: 22px; margin: 4px 0 8px; }
+.tg-check h2 { font-size: 18px; margin: 18px 0 8px; }
+.tg-check table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.tg-check th, .tg-check td { border: 1px solid var(--border, #ccc); padding: 8px; vertical-align: top; text-align: left; overflow-wrap: anywhere; word-break: break-word; }
+.tg-check th { width: 38%; font-weight: 600; }
+.tg-check td { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; }

@@ -37,6 +37,9 @@ public interface TelegramAccountApi {
    */
   String createLoginLink(long userId, String next);
 
+  /** 一套菜单的一组一次性登录令牌（每个路径一个，60 秒；用掉一个同组一起作废）。返回 路径 → 令牌原值 */
+  java.util.Map<String, String> createLoginLinkGroup(long userId, java.util.List<String> paths);
+
   /**
    * 第 4 批 4b：人工换绑执行——这个客户的 TG 账户改成新的 TG 用户编号（新 TG 不能已经绑了别的客户，唯一键兜底），授权时间改成 at。
    * 安全事件和作废会话由调用方做

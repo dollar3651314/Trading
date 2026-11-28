@@ -163,6 +163,24 @@ class TelegramWebLogin {
     return token;
   }
 
+  /**
+   * 一套菜单的一组令牌（验收反馈：每个进网页的按钮都带自己的令牌，点哪个都能登录）：同一个组，用掉一个，同组别的一起作废。
+   * 返回 路径 → 令牌原值（原值只在这里出现一次）
+   */
+  @Transactional
+  java.util.Map<String, String> createLinkGroup(long userId, java.util.List<String> paths) {
+    String group = Secrets.newToken().replaceAll("[^A-Za-z0-9]", "");
+    group = group.length() > 32 ? group.substring(0, 32) : group;
+    LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+    for (String p : paths) {
+      String token = Secrets.newToken();
+      mapper.insertGroupLinkToken(Secrets.sha256(token), userId, group, safeNext(p), now.plus(LINK_TTL), now);
+      out.put(p, token);
+    }
+    return out;
+  }
+
   @Transactional
   Result link(String token, String ip, String userAgent) {
     if (!linkMode()) return Result.fail(Outcome.DISABLED);
@@ -170,6 +188,9 @@ class TelegramWebLogin {
     String h = Secrets.sha256(token.strip());
     LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     if (mapper.useLinkToken(h, now) != 1) return fail(Outcome.EXPIRED); // 不存在、过期、用过都一样回答
+    // 同一套菜单里的别的令牌一起作废（没用的不能留着以后再用）
+    String group = mapper.linkTokenGroup(h);
+    if (group != null) mapper.burnLinkTokenGroup(group, now);
     AuthMapper.LinkToken t = mapper.linkToken(h);
     Optional<TgAccount> acc = accounts.byUserId(t.userId());
     if (acc.isEmpty()) return fail(Outcome.NO_ACCOUNT);

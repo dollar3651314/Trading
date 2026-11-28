@@ -80,6 +80,16 @@
     INSERT INTO account_tg_link_token (token_hash, user_id, next_path, expires_at, created_at) VALUES (#{tokenHash}, #{userId}, #{next}, #{expiresAt}, #{now})
   </insert>
 
+  <insert id="insertGroupLinkToken">
+    INSERT INTO account_tg_link_token (token_hash, user_id, group_id, next_path, expires_at, created_at) VALUES (#{tokenHash}, #{userId}, #{groupId}, #{next}, #{expiresAt}, #{now})
+  </insert>
+
+  <select id="linkTokenGroup" resultType="string">SELECT group_id FROM account_tg_link_token WHERE token_hash = #{tokenHash}</select>
+
+  <update id="burnLinkTokenGroup">
+    UPDATE account_tg_link_token SET used_at = #{now} WHERE group_id = #{groupId} AND used_at IS NULL
+  </update>
+
   <update id="useLinkToken">
     UPDATE account_tg_link_token SET used_at = #{now} WHERE token_hash = #{tokenHash} AND used_at IS NULL AND expires_at &gt; #{now}
   </update>
