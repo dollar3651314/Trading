@@ -141,6 +141,9 @@ interface AuthMapper {
 
   int revokeSession(@Param("tokenHash") String tokenHash);
 
+  /** 作废一个会话并记原因（DEVICE：BOT 会话换了平台，#48 审查跟进） */
+  int revokeSessionWithReason(@Param("tokenHash") String tokenHash, @Param("reason") String reason);
+
   int revokeUserSessions(@Param("userId") long userId, @Param("exceptTokenHash") String exceptTokenHash);
 
   /** 验收反馈 1b：作废全部会话并记原因（SECURITY 安全事件） */

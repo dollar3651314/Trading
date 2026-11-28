@@ -205,6 +205,24 @@ class EmergencyLoginTest {
     assertThat(sw.evaluate().getFirst().ok()).isTrue();
   }
 
+  /** #48 审查跟进：应急登录的会话照旧按网页会话 72 小时续期，不是机器人会话的 7 天 */
+  @Test
+  void 应急登录的会话续期是72小时_不是7天() throws Exception {
+    long tgId = newTgId();
+    long uid = oldCustomer(tgId);
+    emergency.set(true, "admin:1", "amos", "机器人被封");
+    MockHttpServletResponse r = login(widget(tgId, -5, LOGIN_TOKEN));
+    assertThat(r.getHeader("Set-Cookie")).contains("Max-Age=259200");
+    Cookie c = r.getCookie("fx_session");
+    jdbc.update("UPDATE account_session SET last_seen_at = DATE_SUB(UTC_TIMESTAMP(3), INTERVAL 1 HOUR), expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 1 HOUR) "
+        + "WHERE user_id = ? AND kind = 'EMERGENCY' AND revoked_at IS NULL", uid);
+    MockHttpServletResponse used = mvc.perform(get("/api/me/session").cookie(c)).andReturn().getResponse();
+    assertThat(used.getStatus()).isEqualTo(200);
+    assertThat(jdbc.queryForObject("SELECT TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(3), expires_at) FROM account_session WHERE user_id = ? AND kind = 'EMERGENCY' AND revoked_at IS NULL",
+        Integer.class, uid)).as("续到现在 + 72 小时").isBetween(71, 72);
+    assertThat(used.getHeader("Set-Cookie")).as("应急会话不改 Cookie（只有机器人会话跟着续）").isNull();
+  }
+
   @Test
   void 和现在一样时报EMERGENCY_UNCHANGED() {
     assertThat(emergency.state().on()).isFalse();

@@ -55,9 +55,23 @@ class SessionService {
   /** 有效时返回会话（用户 ID、种类 WEB / BOT），否则返回 null；顺带续期 */
   @Transactional
   SessionRow resolveSession(String token) {
+    return resolveSession(token, null);
+  }
+
+  /**
+   * 同上；userAgent 不为空时，BOT 会话做粗略的设备绑定（#48 审查跟进）：这次请求的平台大类（iOS / 安卓 / Windows / macOS / Linux）和建会话时
+   * 明显不同（例如 iPhone 建的会话拿到 Windows 上用），就作废这个会话（原因 DEVICE），回 401。只看平台大类，Telegram、系统版本号变了都不算；
+   * 看不出平台的不算。iPad 和 Mac 算同一类（iPad 的浏览器经常说自己是 Mac）
+   */
+  @Transactional
+  SessionRow resolveSession(String token, String userAgent) {
     if (token == null || token.isBlank()) return null;
     SessionRow s = mapper.findActiveSession(Secrets.sha256(token));
     if (s == null) return null;
+    if ("BOT".equals(s.kind()) && userAgent != null && platformChanged(s.userAgent(), userAgent)) {
+      mapper.revokeSessionWithReason(Secrets.sha256(token), "DEVICE");
+      return null;
+    }
     if (s.idleSeconds() >= 60) mapper.extendSession(s.id(), props.sessionTtlHours(), props.botSessionTtl().toDays());
     return s;
   }
@@ -86,6 +100,25 @@ class SessionService {
   @Transactional
   void revokeAll(long userId, String keepToken) {
     mapper.revokeUserSessions(userId, keepToken == null ? null : Secrets.sha256(keepToken));
+  }
+
+  /** 平台大类：IOS / ANDROID / WINDOWS / APPLE_DESKTOP / LINUX；看不出来为 null。iPad 归到 APPLE_DESKTOP（和 Mac 同一类） */
+  static String platform(String ua) {
+    if (ua == null || ua.isBlank()) return null;
+    if (ua.contains("iPad")) return "APPLE_DESKTOP";
+    if (ua.contains("iPhone") || ua.contains("iPod")) return "IOS";
+    if (ua.contains("Android")) return "ANDROID";
+    if (ua.contains("Windows")) return "WINDOWS";
+    if (ua.contains("Macintosh") || ua.contains("Mac OS X")) return "APPLE_DESKTOP";
+    if (ua.contains("Linux") || ua.contains("X11")) return "LINUX";
+    return null;
+  }
+
+  /** 两边都看得出平台、而且不是同一类才算变了 */
+  static boolean platformChanged(String before, String now) {
+    String a = platform(before);
+    String b = platform(now);
+    return a != null && b != null && !a.equals(b);
   }
 
   private static String truncate(String s, int max) {
