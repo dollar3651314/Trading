@@ -18,16 +18,41 @@ const options = vi.hoisted(() => ({
   loginBotUsername: 'TradingLoginTestBot' as string | null,
 }));
 const tgEmergencyLogin = vi.hoisted(() => vi.fn());
+/** 登录方式接口已经回应的次数（关着时的用例要等页面真正拿到配置再断言"不显示"） */
+const optionsServed = vi.hoisted(() => ({ n: 0 }));
 const restoreSession = vi.hoisted(() => vi.fn());
 vi.mock('../../api/auth', async (orig) => ({
   ...(await orig<typeof import('../../api/auth')>()),
-  getAuthOptions: () => Promise.resolve({ ...options }),
+  getAuthOptions: () =>
+    Promise.resolve({ ...options }).then((o) => {
+      optionsServed.n++;
+      return o;
+    }),
   tgEmergencyLogin: (...a: unknown[]) => tgEmergencyLogin(...a),
   restoreSession: (...a: unknown[]) => restoreSession(...a),
 }));
 
 type Cb = (user: Record<string, string | number>) => void;
 const callback = () => (window as unknown as Record<string, Cb | undefined>).onTrEmergencyTelegramAuth;
+
+/**
+ * 等小部件真正挂好：findBy 只说明方框渲染出来了，挂脚本、设回调在之后的副作用里（React 提交后才跑），
+ * 直接调 callback() 可能还是 undefined（偶发失败的原因）。这里等到回调和脚本都在，不放宽任何断言
+ */
+async function widgetReady() {
+  const box = await screen.findByTestId('tg-emergency');
+  await waitFor(() => {
+    expect(callback()).toBeTypeOf('function');
+    expect(box.querySelector('script')).not.toBeNull();
+  });
+  return box;
+}
+
+/** 等这次渲染的页面（提示页和应急登录各请求一次）拿到登录方式，并让随后的状态更新落地，再断言"不显示" */
+async function optionsSettled(before: number) {
+  await waitFor(() => expect(optionsServed.n).toBeGreaterThanOrEqual(before + 2));
+  await act(async () => {});
+}
 
 function hint() {
   return renderPage(
@@ -49,7 +74,7 @@ describe('应急开关：用 Telegram 登录', () => {
 
   it('开着时提示页上方有应急提示和登录小部件（登录机器人、回调），冻结和找回入口照旧', async () => {
     hint();
-    const box = await screen.findByTestId('tg-emergency');
+    const box = await widgetReady();
     expect(box).toHaveTextContent('24 小时内不能提现');
     expect(box).toHaveTextContent('只保留最后登录的一台设备');
     const s = box.querySelector('script');
@@ -66,7 +91,7 @@ describe('应急开关：用 Telegram 登录', () => {
     tgEmergencyLogin.mockResolvedValue({ withdrawAt: '2026-11-28T14:05:00Z' });
     restoreSession.mockResolvedValue({ userId: 1, email: null });
     hint();
-    await screen.findByTestId('tg-emergency');
+    await widgetReady();
     const user = { id: 6100000001, first_name: 'Li', username: 'li', auth_date: 1790000000, hash: 'ab'.repeat(32) };
     await act(async () => callback()!(user));
     expect(tgEmergencyLogin).toHaveBeenCalledWith(user);
@@ -83,7 +108,7 @@ describe('应急开关：用 Telegram 登录', () => {
   it('失败按原因显示（冻结、过期），不认识的原因按校验没通过', async () => {
     tgEmergencyLogin.mockResolvedValueOnce({ reason: 'frozen' }).mockResolvedValueOnce({ reason: 'expired' }).mockResolvedValueOnce({ reason: '<x>' });
     hint();
-    await screen.findByTestId('tg-emergency');
+    await widgetReady();
     await act(async () => callback()!({ id: 1, hash: 'x' }));
     expect(await screen.findByTestId('tg-emergency-error')).toHaveTextContent('账户已冻结，请联系客服。');
     await act(async () => callback()!({ id: 1, hash: 'x' }));
@@ -94,14 +119,18 @@ describe('应急开关：用 Telegram 登录', () => {
 
   it('开关关着、登录机器人用户名不合法时不显示', async () => {
     options.emergencyLogin = false;
+    let before = optionsServed.n;
     const r = hint();
     await screen.findByTestId('tg-freeze');
+    await optionsSettled(before);
     expect(screen.queryByTestId('tg-emergency')).toBeNull();
     r.unmount();
     options.emergencyLogin = true;
     options.loginBotUsername = 'bad"name';
+    before = optionsServed.n;
     hint();
     await screen.findByTestId('tg-freeze');
+    await optionsSettled(before);
     expect(screen.queryByTestId('tg-emergency')).toBeNull();
     expect(callback()).toBeUndefined();
   });

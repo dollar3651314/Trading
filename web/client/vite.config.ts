@@ -51,9 +51,10 @@ export default defineConfig(({ mode }) => ({
       workbox: {
         // 后台 /admin/ 是另一个应用、/api/ 是后端、原型站的 /site/ 是官网（v2），客户端的 Service Worker 不能接管它们的导航请求
         navigateFallback: '/index.html',
-        // 验收修复 6：诊断页 /tg-check 不走 Service Worker 缓存的旧 index.html，每次都向服务器要最新版本
-        // （真机：Safari 里缓存着 #51 之前的版本时，旧版本没有这条路由，被守卫送到 /login → "请在 Telegram 里打开"）
-        navigateFallbackDenylist: [/^\/admin/, /^\/api/, /^\/site/, /^\/tg-check(\/|$)/],
+        // 验收修复 6、7：诊断页 /tg-check 和机器人进网页的入口页 /tg、/tg-link 不走 Service Worker 缓存的旧 index.html，每次都向服务器要最新版本
+        // （真机：Safari 里缓存着 #51 之前的版本时，旧版本没有 /tg-check 路由，被守卫送到 /login → "请在 Telegram 里打开"）。
+        // Workbox 拿"路径 + 查询串"去比，所以要认 ? 结尾（/tg?r=continue、/tg-link?p=positions）；/tg-checkout、/tgx 不算
+        navigateFallbackDenylist: [/^\/admin/, /^\/api/, /^\/site/, /^\/tg-check(\/|\?|$)/, /^\/tg(-link)?(\/|\?|$)/],
         // 收到 Web Push 后显示系统通知、点击打开站内信（public/push-sw.js，S17）
         importScripts: ['push-sw.js'],
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
