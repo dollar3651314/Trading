@@ -62,7 +62,7 @@ class SessionFilter extends OncePerRequestFilter {
 
   @Override
   protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws ServletException, IOException {
-    Rows.SessionRow s = sessions.resolveSession(token(req, props.cookieName()), req.getHeader(org.springframework.http.HttpHeaders.USER_AGENT));
+    Rows.SessionRow s = sessions.resolveSession(token(req, props.cookieName()), req.getHeader(org.springframework.http.HttpHeaders.USER_AGENT), true);
     Long userId = s == null ? null : s.userId();
     if (userId == null) {
       res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

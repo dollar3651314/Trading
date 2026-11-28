@@ -105,10 +105,17 @@ class TelegramWebLoginTest {
   }
 
   MockHttpServletResponse open(Map<String, String> params, String next) throws Exception {
+    // #49 审查起：建会话时看得出平台的，之后没有 User-Agent 的请求会被当成换了设备；这里的测试大多直接用 MockMvc（不带 User-Agent）查会话，
+    // 所以默认不带 User-Agent 建会话（看不出平台 = 不做设备绑定）；设备绑定在 openAs 那几个测试里单独测
+    return openAs(params, next, null);
+  }
+
+  MockHttpServletResponse openAs(Map<String, String> params, String next, String ua) throws Exception {
     MockHttpServletRequestBuilder b = get("/api/tg/login").with(r -> {
       r.setRemoteAddr("203.0.113.9");
       return r;
-    }).header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Telegram-iOS/11.0");
+    });
+    if (ua != null) b = b.header("User-Agent", ua);
     if (next != null) b = b.param(TelegramWebLogin.NEXT, next);
     for (Map.Entry<String, String> e : params.entrySet()) b = b.param(e.getKey(), e.getValue());
     return mvc.perform(b).andReturn().getResponse();
@@ -182,10 +189,8 @@ class TelegramWebLoginTest {
   void 机器人会话_平台大类变了作废_版本号变了不作废_看不出平台的不作废() throws Exception {
     long tgId = newTgId();
     TgAccount a = telegram.openAccount(tgId, null);
-    Cookie c = cookieOf(open(telegramParams(tgId, -1), null)); // 用 iPhone + Telegram 的 User-Agent 建的
+    Cookie c = cookieOf(openAs(telegramParams(tgId, -1), null, IPHONE_OLD)); // 用 iPhone + Telegram 的 User-Agent 建的
     assertThat(sessionWith(c, IPHONE_NEW)).as("iOS、Telegram 升级了：照常").isEqualTo(200);
-    assertThat(sessionWith(c, null)).as("没有 User-Agent：看不出平台，不作废").isEqualTo(200);
-    assertThat(sessionWith(c, "curl/8.0")).as("看不出平台：不作废").isEqualTo(200);
     assertThat(sessionWith(c, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0")).as("拿到 Windows 上用：作废").isEqualTo(401);
     assertThat(jdbc.queryForObject("SELECT revoke_reason FROM account_session WHERE user_id = ? AND kind = 'BOT' ORDER BY id DESC LIMIT 1", String.class, a.userId()))
         .isEqualTo("DEVICE");
@@ -193,10 +198,30 @@ class TelegramWebLoginTest {
 
     for (String other : new String[] {"Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/130.0 Mobile Telegram-Android/11.4", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) Safari/605.1.15"}) {
       ((MutableClock) clock).advance(Duration.ofSeconds(2));
-      Cookie c2 = cookieOf(open(telegramParams(tgId, -1), null));
+      Cookie c2 = cookieOf(openAs(telegramParams(tgId, -1), null, IPHONE_OLD));
       assertThat(sessionWith(c2, IPHONE_NEW)).isEqualTo(200);
       assertThat(sessionWith(c2, other)).as(other).isEqualTo(401);
     }
+  }
+
+  /** #49 审查：建会话时看得出平台的，之后没有 User-Agent、认不出平台的请求也作废；建会话时看不出平台的照旧不作废 */
+  @Test
+  void 建会话时看得出平台_之后没有UA或认不出平台也作废_建会话时看不出平台的照旧() throws Exception {
+    long tgId = newTgId();
+    TgAccount a = telegram.openAccount(tgId, null);
+    Cookie c = cookieOf(openAs(telegramParams(tgId, -1), null, IPHONE_OLD));
+    assertThat(sessionWith(c, IPHONE_NEW)).isEqualTo(200);
+    assertThat(sessionWith(c, null)).as("没有 User-Agent：作废").isEqualTo(401);
+    assertThat(jdbc.queryForObject("SELECT revoke_reason FROM account_session WHERE user_id = ? AND kind = 'BOT' ORDER BY id DESC LIMIT 1", String.class, a.userId()))
+        .isEqualTo("DEVICE");
+    ((MutableClock) clock).advance(Duration.ofSeconds(2));
+    Cookie c2 = cookieOf(openAs(telegramParams(tgId, -1), null, IPHONE_OLD));
+    assertThat(sessionWith(c2, "curl/8.0")).as("认不出平台：作废").isEqualTo(401);
+
+    ((MutableClock) clock).advance(Duration.ofSeconds(2));
+    Cookie unknown = cookieOf(openAs(telegramParams(tgId, -1), null, "SomeBrowser/1.0"));
+    assertThat(sessionWith(unknown, null)).as("建会话时就看不出平台：不做设备绑定").isEqualTo(200);
+    assertThat(sessionWith(unknown, "Mozilla/5.0 (Windows NT 10.0) Chrome/130.0")).isEqualTo(200);
   }
 
   @Test
@@ -207,6 +232,8 @@ class TelegramWebLoginTest {
     assertThat(SessionService.platformChanged(IPHONE_OLD, IPHONE_NEW)).isFalse();
     assertThat(SessionService.platformChanged(IPHONE_OLD, "Mozilla/5.0 (Linux; Android 14)")).isTrue();
     assertThat(SessionService.platformChanged(null, "Mozilla/5.0 (Windows NT 10.0)")).isFalse();
+    assertThat(SessionService.platformChanged(IPHONE_OLD, null)).as("#49：原来看得出平台、这次没有 User-Agent 算变了").isTrue();
+    assertThat(SessionService.platformChanged(IPHONE_OLD, "curl/8.0")).isTrue();
     // 网页登录（WEB）的会话不做设备绑定
     long tgId = newTgId();
     TgAccount a = telegram.openAccount(tgId, null);

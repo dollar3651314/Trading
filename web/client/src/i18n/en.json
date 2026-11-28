@@ -968,7 +968,8 @@
     },
     "continueTitle": "Continue in the bot",
     "continueSubtitle": "You are not signed in in this browser yet, or it has been more than 7 days.",
-    "continueOpen": "Back to the bot"
+    "continueOpen": "Back to the bot",
+    "continueDeviceNote": "If you switched devices or turned on \"desktop site\", you need to enter again."
   },
   "pin": {
     "title": "Withdrawal PIN",

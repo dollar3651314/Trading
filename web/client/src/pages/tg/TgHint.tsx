@@ -45,6 +45,12 @@ export default function TgHint({ reason: reasonProp }: { reason?: TgLoginReason 
           {t(`tg.reason.${reason}`)}
         </div>
       )}
+      {/* #49 审查：从机器人进网页的会话粗略绑定设备的平台，换了设备或开了"桌面版网站"会要求重新进入 */}
+      {cont && (
+        <p className="muted small" data-testid="tg-device-note">
+          {t('tg.continueDeviceNote')}
+        </p>
+      )}
       <ol className="tg-steps">
         <li>{t('tg.step1')}</li>
         <li>{t('tg.step2')}</li>
