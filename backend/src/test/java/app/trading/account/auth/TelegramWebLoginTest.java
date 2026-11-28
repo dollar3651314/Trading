@@ -168,6 +168,53 @@ class TelegramWebLoginTest {
         .contains("\"code\":\"UNAUTHORIZED\"");
   }
 
+  static final String IPHONE_OLD = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Telegram-iOS/11.0";
+  static final String IPHONE_NEW = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Telegram-iOS/11.4.2";
+
+  int sessionWith(Cookie c, String ua) throws Exception {
+    var b = get("/api/me/session").cookie(c);
+    if (ua != null) b = b.header("User-Agent", ua);
+    return mvc.perform(b).andReturn().getResponse().getStatus();
+  }
+
+  /** #48 审查跟进：BOT 会话粗略绑定设备的平台。Telegram、系统版本号变了不作废；平台大类明显变了（iPhone → Windows / 安卓 / Mac）作废 */
+  @Test
+  void 机器人会话_平台大类变了作废_版本号变了不作废_看不出平台的不作废() throws Exception {
+    long tgId = newTgId();
+    TgAccount a = telegram.openAccount(tgId, null);
+    Cookie c = cookieOf(open(telegramParams(tgId, -1), null)); // 用 iPhone + Telegram 的 User-Agent 建的
+    assertThat(sessionWith(c, IPHONE_NEW)).as("iOS、Telegram 升级了：照常").isEqualTo(200);
+    assertThat(sessionWith(c, null)).as("没有 User-Agent：看不出平台，不作废").isEqualTo(200);
+    assertThat(sessionWith(c, "curl/8.0")).as("看不出平台：不作废").isEqualTo(200);
+    assertThat(sessionWith(c, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0")).as("拿到 Windows 上用：作废").isEqualTo(401);
+    assertThat(jdbc.queryForObject("SELECT revoke_reason FROM account_session WHERE user_id = ? AND kind = 'BOT' ORDER BY id DESC LIMIT 1", String.class, a.userId()))
+        .isEqualTo("DEVICE");
+    assertThat(sessionWith(c, IPHONE_OLD)).as("作废了就不能再用").isEqualTo(401);
+
+    for (String other : new String[] {"Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/130.0 Mobile Telegram-Android/11.4", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) Safari/605.1.15"}) {
+      ((MutableClock) clock).advance(Duration.ofSeconds(2));
+      Cookie c2 = cookieOf(open(telegramParams(tgId, -1), null));
+      assertThat(sessionWith(c2, IPHONE_NEW)).isEqualTo(200);
+      assertThat(sessionWith(c2, other)).as(other).isEqualTo(401);
+    }
+  }
+
+  @Test
+  void 平台大类_iPad和Mac算同一类_WEB会话不做设备绑定() throws Exception {
+    assertThat(SessionService.platform(IPHONE_OLD)).isEqualTo("IOS");
+    assertThat(SessionService.platform("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) Telegram-iOS/11.0")).isEqualTo("APPLE_DESKTOP");
+    assertThat(SessionService.platformChanged("Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X)", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")).isFalse();
+    assertThat(SessionService.platformChanged(IPHONE_OLD, IPHONE_NEW)).isFalse();
+    assertThat(SessionService.platformChanged(IPHONE_OLD, "Mozilla/5.0 (Linux; Android 14)")).isTrue();
+    assertThat(SessionService.platformChanged(null, "Mozilla/5.0 (Windows NT 10.0)")).isFalse();
+    // 网页登录（WEB）的会话不做设备绑定
+    long tgId = newTgId();
+    TgAccount a = telegram.openAccount(tgId, null);
+    String token = sessions.create(a.userId(), "203.0.113.9", IPHONE_OLD);
+    Cookie c = new Cookie("fx_session", token);
+    assertThat(sessionWith(c, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130.0")).isEqualTo(200);
+  }
+
   @Test
   void hash被篡改_拒绝() throws Exception {
     long tgId = newTgId();

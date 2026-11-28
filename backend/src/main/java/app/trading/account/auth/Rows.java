@@ -13,7 +13,8 @@ final class Rows {
 
   /** idleSeconds：距离上次续期的秒数，由数据库算出 */
   /** kind：WEB 网页登录 / BOT 从机器人一键登录（TG 机器人第 2 批） */
-  record SessionRow(long id, long userId, long idleSeconds, String kind) {}
+  /** userAgent：建会话时的 User-Agent（BOT 会话按它粗略绑定设备的平台，#48 审查跟进） */
+  record SessionRow(long id, long userId, long idleSeconds, String kind, String userAgent) {}
 
   /** 机器人"当前网页会话"列表用 */
   record ActiveSession(String kind, String ip, String userAgent, java.time.LocalDateTime createdAt) {}
