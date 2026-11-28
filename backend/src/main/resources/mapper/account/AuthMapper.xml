@@ -86,6 +86,7 @@
 
   <select id="linkTokenGroup" resultType="string">SELECT group_id FROM account_tg_link_token WHERE token_hash = #{tokenHash}</select>
 
+  <select id="lockLinkTokenGroup" resultType="string">SELECT token_hash FROM account_tg_link_token WHERE group_id = #{groupId} ORDER BY token_hash FOR UPDATE</select>
   <update id="burnLinkTokenGroup">
     UPDATE account_tg_link_token SET used_at = #{now} WHERE group_id = #{groupId} AND used_at IS NULL
   </update>

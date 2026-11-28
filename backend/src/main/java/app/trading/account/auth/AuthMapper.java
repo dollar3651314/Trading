@@ -43,6 +43,9 @@ interface AuthMapper {
   /** 这个令牌的组 */
   String linkTokenGroup(@Param("tokenHash") String tokenHash);
 
+  /** 先按固定顺序锁住同组的令牌行（两个同组令牌同时用时排队，不互相死锁） */
+  java.util.List<String> lockLinkTokenGroup(@Param("groupId") String groupId);
+
   /** 同组别的还没用的令牌一起作废 */
   int burnLinkTokenGroup(@Param("groupId") String groupId, @Param("now") java.time.LocalDateTime now);
 

@@ -185,9 +185,9 @@ public class UpdateHandler {
       return;
     }
     TgAccount a = acc.get();
-    if (!gate(chat, a)) return;
-    syncUsername(a, from);
     String cmd = text == null ? "" : text.strip();
+    if (!gate(chat, a, targetPage(cmd))) return;
+    syncUsername(a, from);
     if (cmd.startsWith("/settings")) send(chat, prefsText(), prefsKeyboard(a.userId()));
     // 网页没有有效会话时显示「回到机器人继续」，深链接 /start open_<页面>（安全事件后 /start reauth）；机器人发一整套新菜单，
     // 每个进网页的按钮都带自己的 60 秒一次性令牌（同一组，用掉一个其余一起作废），要去的那一页放第一个「进入持仓 ›」。
@@ -252,11 +252,12 @@ public class UpdateHandler {
       send(chat, TEXT_LOGGED_OUT, null);
       return;
     }
-    if (CB_REAUTH.equals(data)) {
+    if (CB_REAUTH.equals(data) || data.startsWith(CB_REAUTH + ":")) {
       accounts.reauthorize(a.userId());
       edit(chat, messageId, "已重新授权。", null);
-      // 重新授权以后网页会话都已作废：一整套带一次性令牌的新菜单
-      sendMenu(chat, a, true, null);
+      // 重新授权以后网页会话都已作废：一整套带一次性令牌的新菜单；从 /start reauth_<页面> 来的，那一页放第一个
+      Page target = data.startsWith(CB_REAUTH + ":") ? PAGES.stream().filter(p -> p.key().equals(data.substring(CB_REAUTH.length() + 1))).findFirst().orElse(null) : null;
+      sendMenu(chat, a, true, target);
       return;
     }
     if (!gate(chat, a)) return;
@@ -399,6 +400,11 @@ public class UpdateHandler {
 
   /** 冻结、要重新授权时回应并返回 false */
   private boolean gate(long chat, TgAccount a) {
+    return gate(chat, a, null);
+  }
+
+  /** 同上；target：深链接里要去的页面（/start reauth_positions），「重新授权」按钮带上它，授权后那一页放第一个 */
+  private boolean gate(long chat, TgAccount a, Page target) {
     if (UserStatus.FROZEN == status(a)) {
       send(chat, TEXT_FROZEN, null);
       return false;
@@ -406,7 +412,7 @@ public class UpdateHandler {
     Optional<SecurityEvent> ev = account.lastSecurityEventSince(a.userId(), a.authorizedAt());
     if (ev.isPresent()) {
       send(chat, "你的账户最近有安全变更（" + eventName(ev.get().type()) + "）。为了安全，请确认是你本人后重新授权。",
-          keyboard(List.of(row(cb("重新授权", CB_REAUTH)))));
+          keyboard(List.of(row(cb("重新授权", target == null ? CB_REAUTH : CB_REAUTH + ":" + target.key())))));
       return false;
     }
     return true;
@@ -497,12 +503,13 @@ public class UpdateHandler {
     send(chat, menuText(a) + (fresh && hasTokens(kb) ? freshHint() : ""), kb);
   }
 
-  private static boolean hasTokens(InlineKeyboardMarkup kb) {
-    return kb.getKeyboard().stream().flatMap(List::stream).anyMatch(b -> b.getUrl() != null && b.getUrl().contains("/tg-link#t="));
+  private boolean hasTokens(InlineKeyboardMarkup kb) {
+    return kb.getKeyboard().stream().flatMap(List::stream).anyMatch(b -> b.getUrl() != null && b.getUrl().startsWith(props.base() + "/tg-link") && b.getUrl().contains("#t="));
   }
 
   private String freshHint() {
-    return "\n\n点上面任一个按钮进入网页（60 秒内有效，只能用一次，用掉一个其余一起失效；别转发）。之后 7 天内用过网页，机器人里的按钮都直接进入。";
+    return "\n\n点下面任一个按钮进入网页（60 秒内有效，只能用一次，用掉一个其余一起失效；别转发）。过期以后再点：这个浏览器 7 天内用过网页的直接进入那一页，"
+        + "没用过的网页会让你回到机器人拿新按钮。";
   }
 
   /** 没有指定目标页时第一个按钮上的字 */
@@ -550,11 +557,15 @@ public class UpdateHandler {
 
   static final String UNFREEZE_PATH = "/me/withdraw-freeze";
 
-  /** 有这一页的令牌就是一次性链接按钮（令牌在网址 # 后面），没有就是普通按钮 */
+  /**
+   * 有这一页的令牌就是一次性链接按钮（令牌在网址 # 后面），没有就是普通按钮。
+   * 网址里带页面键 ?p=positions（#51 审查）：令牌过期以后再点，网页照样知道要去哪一页——浏览器里有会话直接进那一页，没有就「回到机器人继续」带上这一页
+   */
   private InlineKeyboardButton web(Map<String, String> tokens, String path, String text) {
     String token = tokens.get(path);
     if (token == null) return login(text, path);
-    return InlineKeyboardButton.builder().text(text).url(props.base() + "/tg-link#t=" + token).build();
+    Page page = pageOfPath(path);
+    return InlineKeyboardButton.builder().text(text).url(props.base() + "/tg-link" + (page != null ? "?p=" + page.key() : "") + "#t=" + token).build();
   }
 
   private InlineKeyboardMarkup prefsKeyboard(long userId) {

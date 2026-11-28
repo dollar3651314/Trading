@@ -86,11 +86,45 @@ describe('回到机器人继续', () => {
     expect(await screen.findByText('首页')).toBeInTheDocument();
   });
 
-  it('一次性链接过期、也没有会话：按原因显示', async () => {
+  it('一次性链接过期、也没有会话：去「回到机器人继续」（旧链接没有页面键时深链接是 ?start=open）', async () => {
     window.history.replaceState(null, '', '/tg-link#t=' + 'b'.repeat(43));
     tgLink.mockResolvedValue({ reason: 'expired' });
     restoreSession.mockResolvedValue(null);
     renderPage(routes(), '/tg-link');
-    expect(await screen.findByTestId('tg-reason')).toBeInTheDocument();
+    expect(await screen.findByText('回到机器人继续')).toBeInTheDocument();
+    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=open');
+  });
+
+  it('#51 审查：旧菜单的「持仓」令牌过期、浏览器里有会话：进持仓页，不是首页', async () => {
+    window.history.replaceState(null, '', '/tg-link?p=positions#t=' + 'c'.repeat(43));
+    tgLink.mockResolvedValue({ reason: 'expired' });
+    restoreSession.mockResolvedValue({ userId: '1', email: null, fromTelegram: true });
+    renderPage(routes(), '/tg-link?p=positions');
+    expect(await screen.findByText('持仓页')).toBeInTheDocument();
+    expect(window.location.hash).toBe('');
+  });
+
+  it('#51 审查：旧菜单的「持仓」令牌过期、没有会话：「回到机器人继续」带上持仓页 ?start=open_positions', async () => {
+    window.history.replaceState(null, '', '/tg-link?p=positions#t=' + 'd'.repeat(43));
+    tgLink.mockResolvedValue({ reason: 'used' });
+    restoreSession.mockResolvedValue(null);
+    renderPage(routes(), '/tg-link?p=positions');
+    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=open_positions');
+  });
+
+  it('页面键不在白名单：没有会话时深链接不带页面', async () => {
+    window.history.replaceState(null, '', '/tg-link?p=evil#t=' + 'e'.repeat(43));
+    tgLink.mockResolvedValue({ reason: 'expired' });
+    restoreSession.mockResolvedValue(null);
+    renderPage(routes(), '/tg-link?p=evil');
+    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=open');
+  });
+
+  it('冻结这类别的原因照旧按原因显示', async () => {
+    window.history.replaceState(null, '', '/tg-link?p=positions#t=' + 'f'.repeat(43));
+    tgLink.mockResolvedValue({ reason: 'frozen' });
+    restoreSession.mockResolvedValue(null);
+    renderPage(routes(), '/tg-link?p=positions');
+    expect(await screen.findByTestId('tg-reason')).toHaveTextContent('账户已冻结');
   });
 });
