@@ -35,11 +35,13 @@ import app.trading.common.config.ConfigKey;
 import app.trading.common.config.SystemConfig;
 
 /**
- * 一次性链接模式（FX_TG_LOGIN_MODE=link，默认；11/28 Amos 定的最终做法）的机器人一侧：
+ * 一次性链接模式（FX_TG_LOGIN_MODE=link，默认；11/28 Amos 定的做法，验收修复 5 补全）的机器人一侧：
  * <ul>
- *   <li>平时的菜单、提醒里进网页的按钮都是<b>普通网址按钮、不带令牌</b>（{@code ?from=tg}），7 天内用过网页就直接进入；</li>
- *   <li>网页没有会话时让客户回机器人：{@code /start open}（安全事件后 {@code /start reauth}）→ 机器人发<b>一整套新菜单</b>，「打开交易」换成
- *       60 秒一次性链接「进入交易 ›」（令牌在 # 后面），别的按钮照常——客户只要看最新这一条；</li>
+ *   <li>客户自己要菜单时（/start、/start open、/start open_<页面>、/start reauth、回调按钮）机器人发<b>一整套新菜单</b>：
+ *       打开交易/行情/持仓/充值/提现<b>每个按钮都带自己的 60 秒一次性令牌</b>（{@code /tg-link#t=}，一次做一组，用掉一个同组的一起作废），
+ *       点哪个都能登录并直达那一页；{@code open_<页面>} 指的那一页放第一个「进入持仓 ›」；</li>
+ *   <li>机器人主动发的提醒照旧是<b>普通网址按钮、不带令牌</b>（{@code ?from=tg}），7 天内用过网页就直接进入；</li>
+ *   <li>验收发现的死循环：退出后点普通按钮 → 「回到机器人继续」→ /start open_positions → 新菜单的「持仓」也要带令牌，登录后落在 /positions；</li>
  *   <li>旧消息上以前的回调按钮 {@code open:…}：给<b>点的人</b>（回调里的 from）发他自己的一整套新菜单，转发来的消息也拿不到别人的令牌；</li>
  *   <li>「退出所有网页会话」作废全部网页会话。</li>
  * </ul>
@@ -98,7 +100,8 @@ class TelegramBotLinkModeTest {
     return tg.await("sendMessage", c -> c.body().path("chat_id").asString("").equals(String.valueOf(chat)), n, Duration.ofSeconds(15));
   }
 
-  static final Pattern LINK = Pattern.compile("^https://trade\\.example\\.test/tg-link#t=([A-Za-z0-9_-]{43})$");
+  /** 一次性链接：#51 审查起网址里带页面键 ?p=positions（令牌过期后网页照样知道去哪一页） */
+  static final Pattern LINK = Pattern.compile("^https://trade\\.example\\.test/tg-link(?:\\?p=[a-z]+)?#t=([A-Za-z0-9_-]{43})$");
 
   /** 键盘里每颗按钮：文字|回调数据，网址按钮写 url=网址 */
   static List<String> layout(tools.jackson.databind.JsonNode msgBody) {
@@ -112,14 +115,36 @@ class TelegramBotLinkModeTest {
   }
 
   static String token(List<String> layout) {
+    return token(layout, UpdateHandler.TEXT_ENTER);
+  }
+
+  /** 文字为 text 的按钮里的一次性令牌（按钮必须是 /tg-link#t= 链接） */
+  static String token(List<String> layout, String text) {
     for (String b : layout) {
-      if (b.startsWith(UpdateHandler.TEXT_ENTER + "|url=")) {
-        Matcher m = LINK.matcher(b.substring((UpdateHandler.TEXT_ENTER + "|url=").length()));
+      if (b.startsWith(text + "|url=")) {
+        Matcher m = LINK.matcher(b.substring((text + "|url=").length()));
         assertThat(m.matches()).as(b).isTrue();
         return m.group(1);
       }
     }
-    throw new AssertionError("没有「进入交易 ›」：" + layout);
+    throw new AssertionError("没有「" + text + "」：" + layout);
+  }
+
+  /** 新菜单里进网页的五个按钮都是带令牌的链接，第一个是 first */
+  static void assertFreshMenu(List<String> menu, String first) {
+    assertThat(menu.getFirst()).startsWith(first + "|url=");
+    for (String text : List.of("打开交易", "行情", "持仓", "充值", "提现")) {
+      String label = first.equals("进入" + (text.equals("打开交易") ? "交易" : text) + " ›") ? first : text;
+      assertThat(LINK.matcher(menu.stream().filter(b -> b.startsWith(label + "|url=")).findFirst().orElseThrow(() -> new AssertionError(label + "：" + menu))
+          .substring((label + "|url=").length())).matches()).as(label).isTrue();
+    }
+    assertThat(menu).noneMatch(b -> b.contains("?from=tg") || b.contains("login_url") || b.contains("open:"));
+    assertThat(menu).contains("冻结提现|wdfreeze", "当前网页会话|sessions", "退出所有网页会话|logoutall");
+    // 每个按钮的网址都带自己那一页的键
+    for (String[] k : new String[][] {{"行情", "markets"}, {"持仓", "positions"}, {"充值", "assets"}, {"提现", "withdraw"}}) {
+      String label = first.startsWith("进入" + k[0]) ? first : k[0];
+      assertThat(menu).anyMatch(b -> b.startsWith(label + "|url=https://trade.example.test/tg-link?p=" + k[1] + "#t="));
+    }
   }
 
   MockHttpServletResponse redeem(String token) throws Exception {
@@ -127,45 +152,193 @@ class TelegramBotLinkModeTest {
   }
 
   @Test
-  void 平时的菜单和提醒_进网页的按钮是普通网址_不带令牌() throws Exception {
+  void 平时的_start也发带令牌的新菜单_五个按钮各一个令牌同一组_主动提醒仍是普通网址() throws Exception {
     long id = newId();
     TgAccount a = accounts.openAccount(id, null);
     tg.push(tg.text(id, null, "/start"));
-    List<String> menu = layout(sent(id, 1).getFirst().body());
-    assertThat(menu).contains("打开交易|url=https://trade.example.test/trade?from=tg", "行情|url=https://trade.example.test/markets?from=tg",
-        "持仓|url=https://trade.example.test/positions?from=tg", "充值|url=https://trade.example.test/assets?from=tg",
-        "提现|url=https://trade.example.test/assets/withdraw?from=tg");
-    assertThat(menu).noneMatch(b -> b.contains("#t=") || b.contains("login_url") || b.contains("open:"));
-    int before = jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token WHERE user_id = ?", Integer.class, a.userId());
-    assertThat(before).as("平时的菜单不做令牌").isZero();
+    FakeTelegram.Call m = sent(id, 1).getFirst();
+    List<String> menu = layout(m.body());
+    assertFreshMenu(menu, UpdateHandler.TEXT_ENTER);
+    assertThat(m.body().path("text").asString("")).contains("点下面任一个按钮").contains("60 秒").contains("7 天").doesNotContain("上面");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token WHERE user_id = ?", Integer.class, a.userId())).as("一页一个令牌").isEqualTo(5);
+    assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT group_id) FROM account_tg_link_token WHERE user_id = ? AND group_id IS NOT NULL", Integer.class, a.userId()))
+        .as("同一组").isEqualTo(1);
 
     sender.send(a.userId(), "成交提醒：EURUSD 买入 0.1 手", app.trading.notification.api.TelegramSender.Priority.NORMAL, "/positions?pid=9", null);
     assertThat(layout(sent(id, 2).get(1).body())).containsExactly("查看|url=https://trade.example.test/positions?pid=9&from=tg");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token WHERE user_id = ?", Integer.class, a.userId())).as("提醒不做令牌").isEqualTo(5);
   }
 
   @Test
-  void start_open_发一整套新菜单_打开交易换成一次性链接_别的照常_令牌换会话7天_只能用一次() throws Exception {
+  void start_open_每个按钮的令牌直达自己那页_换会话7天_用掉一个同组其余一起作废() throws Exception {
     long id = newId();
     TgAccount a = accounts.openAccount(id, null);
     tg.push(tg.text(id, null, "/start open"));
     FakeTelegram.Call m = sent(id, 1).getFirst();
     List<String> menu = layout(m.body());
     assertThat(m.body().path("text").asString("")).startsWith("客户号 #" + a.userId()).contains("60 秒").contains("7 天");
-    assertThat(menu.getFirst()).startsWith(UpdateHandler.TEXT_ENTER + "|url=");
-    assertThat(menu).contains("行情|url=https://trade.example.test/markets?from=tg", "提现|url=https://trade.example.test/assets/withdraw?from=tg")
-        .contains("冻结提现|wdfreeze", "当前网页会话|sessions", "退出所有网页会话|logoutall").doesNotContain("打开交易|url=https://trade.example.test/trade?from=tg");
-    String t = token(menu);
-    MockHttpServletResponse r = redeem(t);
-    assertThat(r.getContentAsString()).isEqualTo("{\"next\":\"/trade\"}");
+    assertFreshMenu(menu, UpdateHandler.TEXT_ENTER);
+    String trade = token(menu);
+    String markets = token(menu, "行情");
+    MockHttpServletResponse r = redeem(markets);
+    assertThat(r.getContentAsString()).as("点「行情」落在行情页").isEqualTo("{\"next\":\"/markets\"}");
     assertThat(r.getHeader("Set-Cookie")).contains("Max-Age=604800");
     assertThat(mvc.perform(get("/api/me/session").cookie(r.getCookie("fx_session"))).andReturn().getResponse().getContentAsString())
         .contains("\"userId\":\"" + a.userId() + "\"").contains("\"fromTelegram\":true");
-    assertThat(redeem(t).getContentAsString()).as("只能用一次").contains("TG_LOGIN_EXPIRED");
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token WHERE token_hash = ?", Integer.class, t)).as("库里不存原值").isZero();
+    assertThat(redeem(markets).getContentAsString()).as("只能用一次").contains("TG_LOGIN_EXPIRED");
+    assertThat(redeem(trade).getContentAsString()).as("同一套菜单的其余令牌一起作废").contains("TG_LOGIN_EXPIRED");
+    assertThat(redeem(token(menu, "提现")).getContentAsString()).contains("TG_LOGIN_EXPIRED");
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token WHERE token_hash = ?", Integer.class, markets)).as("库里不存原值").isZero();
 
-    // 安全事件后的深链接 /start reauth：不用重新授权时一样发带一次性链接的新菜单
+    // 每一页的令牌各自指向自己那页（新发一套，逐个试一个就作废其余，所以每次重发）
+    int k = 1;
+    for (String[] p : new String[][] {{"打开交易", "/trade"}, {"持仓", "/positions"}, {"充值", "/assets"}, {"提现", "/assets/withdraw"}}) {
+      tg.push(tg.text(id, null, "/start open"));
+      k++;
+      List<String> again = layout(sent(id, k).get(k - 1).body());
+      String text = p[0].equals("打开交易") ? UpdateHandler.TEXT_ENTER : p[0];
+      assertThat(redeem(token(again, text)).getContentAsString()).as(p[0]).isEqualTo("{\"next\":\"" + p[1] + "\"}");
+    }
+
+    // 安全事件后的深链接 /start reauth：不用重新授权时一样发带令牌的新菜单
     tg.push(tg.text(id, null, "/start reauth"));
-    assertThat(layout(sent(id, 2).get(1).body()).getFirst()).startsWith(UpdateHandler.TEXT_ENTER);
+    assertFreshMenu(layout(sent(id, k + 1).get(k).body()), UpdateHandler.TEXT_ENTER);
+  }
+
+  @Test
+  void 死循环场景_退出后_start_open_positions_新菜单的持仓令牌登录并落在持仓页() throws Exception {
+    long id = newId();
+    TgAccount a = accounts.openAccount(id, null);
+    // 先登录过，再「退出所有网页会话」——之后普通按钮（?from=tg）进网页没有会话，网页显示「回到机器人继续」，深链接 /start open_positions
+    tg.push(tg.text(id, null, "/start"));
+    MockHttpServletResponse first = redeem(token(layout(sent(id, 1).getFirst().body())));
+    tg.push(tg.callback(id, null, id, "private", "logoutall"));
+    assertThat(sent(id, 2).get(1).body().path("text").asString("")).startsWith("已退出所有网页会话");
+    assertThat(mvc.perform(get("/api/me/session").cookie(first.getCookie("fx_session"))).andReturn().getResponse().getStatus()).isEqualTo(401);
+
+    tg.push(tg.text(id, null, "/start open_positions"));
+    List<String> menu = layout(sent(id, 3).get(2).body());
+    assertFreshMenu(menu, "进入持仓 ›");
+    assertThat(menu).as("持仓只出现一次（放在第一个）").noneMatch(b -> b.startsWith("持仓|"));
+    MockHttpServletResponse r = redeem(token(menu, "进入持仓 ›"));
+    assertThat(r.getContentAsString()).isEqualTo("{\"next\":\"/positions\"}");
+    assertThat(mvc.perform(get("/api/me/session").cookie(r.getCookie("fx_session"))).andReturn().getResponse().getContentAsString())
+        .contains("\"userId\":\"" + a.userId() + "\"");
+
+    // 就算客户点的不是第一个，菜单里别的按钮（例如「行情」）也一样能登录——不会再回到「回到机器人继续」
+    tg.push(tg.text(id, null, "/start open_positions"));
+    assertThat(redeem(token(layout(sent(id, 4).get(3).body()), "行情")).getContentAsString()).isEqualTo("{\"next\":\"/markets\"}");
+  }
+
+  @Test
+  void start参数里的页面只认白名单_不认识的退回默认菜单_reauth也能带页面() throws Exception {
+    long id = newId();
+    accounts.openAccount(id, null);
+    tg.push(tg.text(id, null, "/start open_admin"));
+    assertFreshMenu(layout(sent(id, 1).getFirst().body()), UpdateHandler.TEXT_ENTER);
+    tg.push(tg.text(id, null, "/start open_withdraw"));
+    List<String> w = layout(sent(id, 2).get(1).body());
+    assertFreshMenu(w, "进入提现 ›");
+    assertThat(redeem(token(w, "进入提现 ›")).getContentAsString()).isEqualTo("{\"next\":\"/assets/withdraw\"}");
+    tg.push(tg.text(id, null, "/start reauth_markets"));
+    assertFreshMenu(layout(sent(id, 3).get(2).body()), "进入行情 ›");
+  }
+
+  @Autowired java.time.Clock clock;
+  @Autowired app.trading.account.auth.AuthAccess authAccess;
+
+  int activeSessions(long userId) {
+    return jdbc.queryForObject("SELECT COUNT(*) FROM account_session WHERE user_id = ? AND revoked_at IS NULL", Integer.class, userId);
+  }
+
+  @Test
+  void 同组两个令牌同时用_只有一个换到会话_另一个回过期_不是500() throws Exception {
+    long id = newId();
+    TgAccount a = accounts.openAccount(id, null);
+    for (int round = 1; round <= 5; round++) {
+      tg.push(tg.text(id, null, "/start open"));
+      List<String> menu = layout(sent(id, round).get(round - 1).body());
+      String[] tokens = {token(menu, "行情"), token(menu, "持仓")};
+      int before = activeSessions(a.userId());
+      java.util.concurrent.CyclicBarrier go = new java.util.concurrent.CyclicBarrier(2);
+      java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+      try {
+        List<java.util.concurrent.Future<MockHttpServletResponse>> fs = new ArrayList<>();
+        for (String t : tokens) fs.add(pool.submit(() -> {
+          go.await();
+          return redeem(t);
+        }));
+        List<Integer> status = new ArrayList<>();
+        for (var f : fs) {
+          MockHttpServletResponse r = f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+          status.add(r.getStatus());
+          if (r.getStatus() != 200) assertThat(r.getContentAsString()).as("第 " + round + " 轮").contains("TG_LOGIN_EXPIRED");
+        }
+        assertThat(status).as("第 " + round + " 轮").containsExactlyInAnyOrder(200, 400);
+      } finally {
+        pool.shutdownNow();
+      }
+      assertThat(activeSessions(a.userId())).as("第 " + round + " 轮只多一个会话").isEqualTo(before + 1);
+    }
+  }
+
+  @Test
+  void 浏览器里已有同一客户的机器人会话_换令牌沿用它不新建_令牌和同组照样作废() throws Exception {
+    long id = newId();
+    TgAccount a = accounts.openAccount(id, null);
+    tg.push(tg.text(id, null, "/start"));
+    MockHttpServletResponse first = redeem(token(layout(sent(id, 1).getFirst().body())));
+    jakarta.servlet.http.Cookie c = first.getCookie("fx_session");
+    assertThat(activeSessions(a.userId())).isEqualTo(1);
+
+    tg.push(tg.text(id, null, "/start open_positions"));
+    List<String> menu = layout(sent(id, 2).get(1).body());
+    MockHttpServletResponse r = mvc.perform(post("/api/tg/link").cookie(c).contentType(MediaType.APPLICATION_JSON)
+        .content("{\"token\":\"" + token(menu, "进入持仓 ›") + "\"}")).andReturn().getResponse();
+    assertThat(r.getContentAsString()).isEqualTo("{\"next\":\"/positions\"}");
+    assertThat(r.getCookie("fx_session").getValue()).as("沿用原来的会话").isEqualTo(c.getValue());
+    assertThat(r.getHeader("Set-Cookie")).contains("Max-Age=604800");
+    assertThat(activeSessions(a.userId())).as("不新建会话").isEqualTo(1);
+    assertThat(redeem(token(menu, "行情")).getContentAsString()).as("同组照样作废").contains("TG_LOGIN_EXPIRED");
+
+    // 别的客户的会话 Cookie：不沿用，照常给令牌的主人建新会话
+    long other = newId();
+    TgAccount b = accounts.openAccount(other, null);
+    tg.push(tg.text(other, null, "/start"));
+    MockHttpServletResponse rb = mvc.perform(post("/api/tg/link").cookie(c).contentType(MediaType.APPLICATION_JSON)
+        .content("{\"token\":\"" + token(layout(sent(other, 1).getFirst().body())) + "\"}")).andReturn().getResponse();
+    assertThat(rb.getCookie("fx_session").getValue()).isNotEqualTo(c.getValue());
+    assertThat(mvc.perform(get("/api/me/session").cookie(rb.getCookie("fx_session"))).andReturn().getResponse().getContentAsString())
+        .contains("\"userId\":\"" + b.userId() + "\"");
+  }
+
+  @Test
+  void 要重新授权时_start_reauth_positions_授权后的新菜单把持仓放第一个() throws Exception {
+    long id = newId();
+    TgAccount a = accounts.openAccount(id, null);
+    ((app.trading.support.MutableClock) clock).advance(Duration.ofSeconds(1));
+    authAccess.securityEvent(a.userId(), app.trading.account.api.SecurityEvent.PIN_SET);
+    tg.push(tg.text(id, null, "/start reauth_positions"));
+    FakeTelegram.Call prompt = null;
+    long end = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+    while (prompt == null && System.nanoTime() < end) {
+      for (FakeTelegram.Call c : sent(id, 0)) if (c.body().path("text").asString("").contains("安全变更") && layout(c.body()).contains("重新授权|" + UpdateHandler.CB_REAUTH + ":positions")) prompt = c;
+      Thread.sleep(20);
+    }
+    assertThat(prompt).as("要重新授权的提示，按钮带上持仓页").isNotNull();
+    assertThat(layout(prompt.body())).containsExactly("重新授权|" + UpdateHandler.CB_REAUTH + ":positions");
+    ((app.trading.support.MutableClock) clock).advance(Duration.ofSeconds(1));
+    int n = sent(id, 0).size();
+    tg.push(tg.callback(id, null, id, "private", UpdateHandler.CB_REAUTH + ":positions"));
+    FakeTelegram.Call menu = null;
+    end = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+    while (menu == null && System.nanoTime() < end) {
+      for (FakeTelegram.Call c : sent(id, 0).subList(n, sent(id, 0).size())) if (c.body().path("text").asString("").startsWith("客户号 #")) menu = c;
+      Thread.sleep(20);
+    }
+    assertThat(menu).as("授权后的新菜单").isNotNull();
+    assertFreshMenu(layout(menu.body()), "进入持仓 ›");
+    assertThat(redeem(token(layout(menu.body()), "进入持仓 ›")).getContentAsString()).isEqualTo("{\"next\":\"/positions\"}");
   }
 
   @Test
@@ -181,7 +354,9 @@ class TelegramBotLinkModeTest {
     tg.push(tg.callback(clicker, null, owner, "private", "open:/positions"));
     FakeTelegram.Call reply = sent(clicker, 1).getFirst();
     assertThat(reply.body().path("text").asString("")).startsWith("客户号 #" + c.userId());
-    String t = token(layout(reply.body()));
+    List<String> menu = layout(reply.body());
+    assertFreshMenu(menu, "进入持仓 ›");
+    String t = token(menu, "进入持仓 ›");
     assertThat(mvc.perform(get("/api/me/session").cookie(redeem(t).getCookie("fx_session"))).andReturn().getResponse().getContentAsString())
         .as("令牌是点的人自己的").contains("\"userId\":\"" + c.userId() + "\"");
     Thread.sleep(300);
@@ -189,7 +364,7 @@ class TelegramBotLinkModeTest {
 
     tg.push(tg.callback(stranger, null, owner, "private", "open:/positions"));
     assertThat(sent(stranger, 1).getFirst().body().path("text").asString("")).as("没开户：只提示开户").containsAnyOf("暂未开放开户", "请先发 /start 授权开户");
-    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token", Integer.class)).as("只做了 clicker 那一个令牌").isEqualTo(tokensBefore + 1);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM account_tg_link_token", Integer.class)).as("只做了 clicker 那一组（五页各一个）令牌").isEqualTo(tokensBefore + 5);
   }
 
   @Test

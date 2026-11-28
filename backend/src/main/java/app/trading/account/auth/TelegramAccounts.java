@@ -102,6 +102,11 @@ class TelegramAccounts implements TelegramAccountApi {
   }
 
   @Override
+  public java.util.Map<String, String> createLoginLinkGroup(long userId, java.util.List<String> paths) {
+    return webLogin.getObject().createLinkGroup(userId, paths);
+  }
+
+  @Override
   public void logoutAllWeb(long userId) {
     sessions.revokeAll(userId, null);
   }

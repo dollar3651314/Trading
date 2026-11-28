@@ -104,7 +104,13 @@ class TelegramLoginController {
 
   @PostMapping("/api/tg/link")
   ResponseEntity<LinkResult> link(@RequestBody(required = false) LinkRequest body, HttpServletRequest req) {
-    TelegramWebLogin.Result r = login.link(body == null ? null : body.token(), req.getRemoteAddr(), req.getHeader(HttpHeaders.USER_AGENT));
+    TelegramWebLogin.Result r;
+    try {
+      r = login.link(body == null ? null : body.token(), req.getRemoteAddr(), req.getHeader(HttpHeaders.USER_AGENT), SessionFilter.token(req, props.cookieName()));
+    } catch (org.springframework.dao.PessimisticLockingFailureException e) {
+      // #51 审查：同组令牌同时用撞上锁（死锁、等锁超时）——按"链接过期"回答，不回 500（整组已经或马上作废，客户回机器人拿新的）
+      r = TelegramWebLogin.Result.fail(TelegramWebLogin.Outcome.EXPIRED);
+    }
     if (r.outcome() != TelegramWebLogin.Outcome.OK) {
       throw new BizException("TG_LOGIN_" + r.outcome().name(), "从机器人进入没有成功：" + r.outcome().name().toLowerCase(Locale.ROOT));
     }

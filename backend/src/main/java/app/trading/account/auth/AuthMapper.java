@@ -36,6 +36,19 @@ interface AuthMapper {
   int insertLinkToken(@Param("tokenHash") String tokenHash, @Param("userId") long userId, @Param("next") String next,
       @Param("expiresAt") java.time.LocalDateTime expiresAt, @Param("now") java.time.LocalDateTime now);
 
+  /** 一组令牌里的一个（同一套菜单，验收反馈：用掉一个同组一起作废） */
+  int insertGroupLinkToken(@Param("tokenHash") String tokenHash, @Param("userId") long userId, @Param("groupId") String groupId, @Param("next") String next,
+      @Param("expiresAt") java.time.LocalDateTime expiresAt, @Param("now") java.time.LocalDateTime now);
+
+  /** 这个令牌的组 */
+  String linkTokenGroup(@Param("tokenHash") String tokenHash);
+
+  /** 先按固定顺序锁住同组的令牌行（两个同组令牌同时用时排队，不互相死锁） */
+  java.util.List<String> lockLinkTokenGroup(@Param("groupId") String groupId);
+
+  /** 同组别的还没用的令牌一起作废 */
+  int burnLinkTokenGroup(@Param("groupId") String groupId, @Param("now") java.time.LocalDateTime now);
+
   /** 原子地标成已用：没用过、没过期才改，返回影响行数 */
   int useLinkToken(@Param("tokenHash") String tokenHash, @Param("now") java.time.LocalDateTime now);
 

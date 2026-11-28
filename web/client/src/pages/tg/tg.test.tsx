@@ -8,7 +8,7 @@ import { vi } from 'vitest';
 import { renderPage } from '../../test/renderApp';
 import { TelegramOnly } from './TelegramOnly';
 import TgHint from './TgHint';
-import { botLink, botStartLink, tokenFromHash } from './tgLib';
+import { asTgPage, botLink, botStartLink, tgPageOfPath, tokenFromHash } from './tgLib';
 
 const options = vi.hoisted(() => ({ telegramOnly: true, botUsername: 'TradingAssistTestBot' as string | null, loginMode: 'login-url' as const }));
 vi.mock('../../api/auth', async (orig) => ({
@@ -65,6 +65,14 @@ describe('第一阶段只走 Telegram', () => {
     expect(botStartLink('TradingAssistBot')).toBe('https://t.me/TradingAssistBot?start=open');
     expect(botStartLink('TradingAssistBot', 'reauth')).toBe('https://t.me/TradingAssistBot?start=reauth');
     expect(botStartLink('evil.com/x')).toBeNull();
+    // 验收修复 5：带上目标页（只认白名单；start 参数只能是 [A-Za-z0-9_-]、最长 64）
+    expect(botStartLink('TradingAssistBot', 'open', 'positions')).toBe('https://t.me/TradingAssistBot?start=open_positions');
+    expect(botStartLink('TradingAssistBot', 'reauth', 'withdraw')).toBe('https://t.me/TradingAssistBot?start=reauth_withdraw');
+    expect(botStartLink('TradingAssistBot', 'open', asTgPage('../admin'))).toBe('https://t.me/TradingAssistBot?start=open');
+    expect(asTgPage('constructor')).toBeNull();
+    expect(tgPageOfPath('/positions')).toBe('positions');
+    expect(tgPageOfPath('/assets/withdraw')).toBe('withdraw');
+    expect(tgPageOfPath('/me/settings')).toBeNull();
   });
 
   it('一次性链接：令牌从 # 后面取', () => {

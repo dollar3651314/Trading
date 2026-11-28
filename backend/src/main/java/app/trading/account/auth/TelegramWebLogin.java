@@ -163,16 +163,56 @@ class TelegramWebLogin {
     return token;
   }
 
+  /**
+   * 一套菜单的一组令牌（验收反馈：每个进网页的按钮都带自己的令牌，点哪个都能登录）：同一个组，用掉一个，同组别的一起作废。
+   * 返回 路径 → 令牌原值（原值只在这里出现一次）
+   */
+  @Transactional
+  java.util.Map<String, String> createLinkGroup(long userId, java.util.List<String> paths) {
+    String group = Secrets.newToken().replaceAll("[^A-Za-z0-9]", "");
+    group = group.length() > 32 ? group.substring(0, 32) : group;
+    LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+    for (String p : paths) {
+      String token = Secrets.newToken();
+      mapper.insertGroupLinkToken(Secrets.sha256(token), userId, group, safeNext(p), now.plus(LINK_TTL), now);
+      out.put(p, token);
+    }
+    return out;
+  }
+
   @Transactional
   Result link(String token, String ip, String userAgent) {
+    return link(token, ip, userAgent, null);
+  }
+
+  /**
+   * 一次性令牌换会话。existingSession：浏览器里已有的会话令牌（Cookie）——还有效、是同一个客户的机器人会话时<b>沿用它</b>，
+   * 不再建新会话（#51 审查：不让「当前网页会话」越堆越多）；令牌和同组的照样作废
+   */
+  @Transactional
+  Result link(String token, String ip, String userAgent, String existingSession) {
     if (!linkMode()) return Result.fail(Outcome.DISABLED);
     if (token == null || token.isBlank() || token.length() > 100) return fail(Outcome.INVALID);
     String h = Secrets.sha256(token.strip());
     LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    // #51 审查：同组两个令牌同时用——先按固定顺序锁住整组再标记，第二个排队后看到已用，回"过期"（不死锁）
+    String group = mapper.linkTokenGroup(h);
+    if (group != null) mapper.lockLinkTokenGroup(group);
     if (mapper.useLinkToken(h, now) != 1) return fail(Outcome.EXPIRED); // 不存在、过期、用过都一样回答
+    // 同一套菜单里的别的令牌一起作废（没用的不能留着以后再用）
+    if (group != null) mapper.burnLinkTokenGroup(group, now);
     AuthMapper.LinkToken t = mapper.linkToken(h);
     Optional<TgAccount> acc = accounts.byUserId(t.userId());
     if (acc.isEmpty()) return fail(Outcome.NO_ACCOUNT);
+    if (existingSession != null && !existingSession.isBlank()) {
+      Rows.SessionRow s = sessions.resolveSession(existingSession, userAgent, true);
+      if (s != null && "BOT".equals(s.kind()) && s.userId() == t.userId()) {
+        if (auth.status(t.userId()) == UserStatus.FROZEN) return fail(Outcome.FROZEN);
+        if (auth.lastSecurityEventSince(t.userId(), acc.get().authorizedAt()).isPresent()) return fail(Outcome.REAUTH);
+        return new Result(Outcome.OK, existingSession, t.nextPath());
+      }
+    }
     return session(acc.get(), t.nextPath(), ip, userAgent);
   }
 

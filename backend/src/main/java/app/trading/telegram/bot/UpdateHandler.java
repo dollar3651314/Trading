@@ -185,14 +185,14 @@ public class UpdateHandler {
       return;
     }
     TgAccount a = acc.get();
-    if (!gate(chat, a)) return;
-    syncUsername(a, from);
     String cmd = text == null ? "" : text.strip();
+    if (!gate(chat, a, targetPage(cmd))) return;
+    syncUsername(a, from);
     if (cmd.startsWith("/settings")) send(chat, prefsText(), prefsKeyboard(a.userId()));
-    // 11/28 Amos 定：网页没有有效会话时显示「回到机器人继续」，深链接 /start open（安全事件后是 /start reauth）；
-    // 这时发一整套新的菜单，「打开交易」换成 60 秒一次性链接「进入交易 ›」，别的按钮照常——客户只要看最新这一条
-    else if (START_FRESH.contains(cmd)) sendMenu(chat, a, true);
-    else sendMenu(chat, a, false);
+    // 网页没有有效会话时显示「回到机器人继续」，深链接 /start open_<页面>（安全事件后 /start reauth）；机器人发一整套新菜单，
+    // 每个进网页的按钮都带自己的 60 秒一次性令牌（同一组，用掉一个其余一起作废），要去的那一页放第一个「进入持仓 ›」。
+    // 验收反馈：机器人不知道浏览器里有没有会话，所以平时的 /start（和别的消息）也一律发这种菜单（令牌没用 60 秒就过期）
+    else sendMenu(chat, a, true, targetPage(cmd));
   }
 
   // ---------- 按钮 ----------
@@ -252,26 +252,27 @@ public class UpdateHandler {
       send(chat, TEXT_LOGGED_OUT, null);
       return;
     }
-    if (CB_REAUTH.equals(data)) {
+    if (CB_REAUTH.equals(data) || data.startsWith(CB_REAUTH + ":")) {
       accounts.reauthorize(a.userId());
       edit(chat, messageId, "已重新授权。", null);
-      // 重新授权以后网页会话都已作废：这一套菜单的「打开交易」带一次性链接
-      sendMenu(chat, a, true);
+      // 重新授权以后网页会话都已作废：一整套带一次性令牌的新菜单；从 /start reauth_<页面> 来的，那一页放第一个
+      Page target = data.startsWith(CB_REAUTH + ":") ? PAGES.stream().filter(p -> p.key().equals(data.substring(CB_REAUTH.length() + 1))).findFirst().orElse(null) : null;
+      sendMenu(chat, a, true, target);
       return;
     }
     if (!gate(chat, a)) return;
     if (CB_SIGNUP.equals(data) || CB_MENU.equals(data)) {
       // 已经开过户又点了旧的「授权开户」：不再开户，回主菜单
-      send(chat, menuText(a), menuKeyboard(a.userId()));
+      sendMenu(chat, a, true, null);
     } else if (data.startsWith(CB_OPEN)) {
-      // 以前一次性链接模式的回调按钮（旧消息上的）：给点的人（回调里的 from，不管消息是谁转发来的）发一整套新的菜单，带他自己的一次性链接
-      sendMenu(chat, a, true);
+      // 以前一次性链接模式的回调按钮（旧消息上的）：给点的人（回调里的 from，不管消息是谁转发来的）发一整套新的菜单，带他自己的一次性令牌，点的那一页放第一个
+      sendMenu(chat, a, true, pageOfPath(data.substring(CB_OPEN.length())));
     } else if (CB_PREFS.equals(data)) {
       send(chat, prefsText(), prefsKeyboard(a.userId()));
     } else if (data.startsWith(CB_PREF)) {
       togglePref(chat, messageId, a, data.substring(CB_PREF.length()));
     } else if (!CB_DECLINE.equals(data) && !CB_NOOP.equals(data)) {
-      send(chat, menuText(a), menuKeyboard(a.userId()));
+      sendMenu(chat, a, true, null);
     }
   }
 
@@ -358,7 +359,8 @@ public class UpdateHandler {
     }
     edit(chat, messageId, "已授权开户。", null);
     // 刚开户还没有网页会话：欢迎卡片的「打开交易」带一次性链接
-    send(chat, welcomeText(a) + freshHint(), menuKeyboard(a.userId(), true));
+    InlineKeyboardMarkup kb = menuKeyboard(a.userId(), true, null);
+    send(chat, welcomeText(a) + (hasTokens(kb) ? freshHint() : ""), kb);
   }
 
   private void togglePref(long chat, Integer messageId, TgAccount a, String code) {
@@ -398,6 +400,11 @@ public class UpdateHandler {
 
   /** 冻结、要重新授权时回应并返回 false */
   private boolean gate(long chat, TgAccount a) {
+    return gate(chat, a, null);
+  }
+
+  /** 同上；target：深链接里要去的页面（/start reauth_positions），「重新授权」按钮带上它，授权后那一页放第一个 */
+  private boolean gate(long chat, TgAccount a, Page target) {
     if (UserStatus.FROZEN == status(a)) {
       send(chat, TEXT_FROZEN, null);
       return false;
@@ -405,7 +412,7 @@ public class UpdateHandler {
     Optional<SecurityEvent> ev = account.lastSecurityEventSince(a.userId(), a.authorizedAt());
     if (ev.isPresent()) {
       send(chat, "你的账户最近有安全变更（" + eventName(ev.get().type()) + "）。为了安全，请确认是你本人后重新授权。",
-          keyboard(List.of(row(cb("重新授权", CB_REAUTH)))));
+          keyboard(List.of(row(cb("重新授权", target == null ? CB_REAUTH : CB_REAUTH + ":" + target.key())))));
       return false;
     }
     return true;
@@ -470,39 +477,51 @@ public class UpdateHandler {
   }
 
   /** 欢迎卡片 / 主菜单：「打开交易」和快捷入口是 login_url 按钮（网页地址没配置时不显示），「通知设置」 */
-  private InlineKeyboardMarkup menuKeyboard(long userId) {
-    return menuKeyboard(userId, false);
+  /** 网页里能直达的页面（深链接 /start open_<键> 只认这几个；Telegram 的 start 参数只能是 [A-Za-z0-9_-]、最长 64） */
+  record Page(String key, String path, String label) {}
+
+  static final List<Page> PAGES = List.of(new Page("trade", "/trade", "交易"), new Page("markets", "/markets", "行情"), new Page("positions", "/positions", "持仓"),
+      new Page("assets", "/assets", "充值"), new Page("withdraw", "/assets/withdraw", "提现"));
+
+  /** 深链接参数里的目标页：/start open_positions、/start reauth_positions；别的（或不认识的页面）为 null */
+  static Page targetPage(String cmd) {
+    if (cmd == null) return null;
+    java.util.regex.Matcher m = java.util.regex.Pattern.compile("^/start (?:open|reauth)_([a-z]{1,20})$").matcher(cmd);
+    if (!m.matches()) return null;
+    return PAGES.stream().filter(p -> p.key().equals(m.group(1))).findFirst().orElse(null);
   }
 
-  /** 进网页的深链接参数：这两种 /start 发一整套带一次性链接的新菜单 */
-  static final java.util.Set<String> START_FRESH = java.util.Set.of("/start open", "/start reauth");
-
-  /** 主菜单；fresh 时（客户这时多半没有网页会话）「打开交易」换成 60 秒一次性链接「进入交易 ›」 */
-  private void sendMenu(long chat, TgAccount a, boolean fresh) {
-    InlineKeyboardMarkup kb = menuKeyboard(a.userId(), fresh);
-    send(chat, menuText(a) + (fresh && freshLink(kb) ? freshHint() : ""), kb);
+  /** 旧回调按钮里的路径对应哪一页（带参数的去掉参数比） */
+  static Page pageOfPath(String path) {
+    String p = path == null ? "" : path.replaceAll("[?#].*$", "");
+    return PAGES.stream().filter(x -> x.path().equals(p)).findFirst().orElse(null);
   }
 
-  private static boolean freshLink(InlineKeyboardMarkup kb) {
-    return kb.getKeyboard().stream().flatMap(List::stream).anyMatch(b -> TEXT_ENTER.equals(b.getText()));
+  /** 主菜单；fresh 时（一次性链接模式）每个进网页的按钮都带自己的 60 秒一次性令牌，target 那一页放第一个「进入… ›」 */
+  private void sendMenu(long chat, TgAccount a, boolean fresh, Page target) {
+    InlineKeyboardMarkup kb = menuKeyboard(a.userId(), fresh, target);
+    send(chat, menuText(a) + (fresh && hasTokens(kb) ? freshHint() : ""), kb);
+  }
+
+  private boolean hasTokens(InlineKeyboardMarkup kb) {
+    return kb.getKeyboard().stream().flatMap(List::stream).anyMatch(b -> b.getUrl() != null && b.getUrl().startsWith(props.base() + "/tg-link") && b.getUrl().contains("#t="));
   }
 
   private String freshHint() {
-    return props.linkMode() && props.hasWebUrl() ? "\n\n点「" + TEXT_ENTER + "」进入网页（60 秒内有效，只能用一次，别转发）。之后 7 天内用过网页，下面的按钮都直接进入。" : "";
+    return "\n\n点下面任一个按钮进入网页（60 秒内有效，只能用一次，用掉一个其余一起失效；别转发）。过期以后再点：这个浏览器 7 天内用过网页的直接进入那一页，"
+        + "没用过的网页会让你回到机器人拿新按钮。";
   }
 
-  /** 一次性链接按钮上的字 */
+  /** 没有指定目标页时第一个按钮上的字 */
   static final String TEXT_ENTER = "进入交易 ›";
 
-  /** 主菜单键盘；fresh 时（一次性链接模式）「打开交易」换成一次性链接按钮，别的按钮照常（普通网址按钮，没有令牌） */
-  private InlineKeyboardMarkup menuKeyboard(long userId, boolean fresh) {
+  /**
+   * 主菜单键盘。fresh 时（一次性链接模式）：一次做一组令牌（同一组，用掉一个其余作废），每个进网页的按钮都是带自己令牌的链接，
+   * 点哪个都能登录并直达那一页（验收反馈：只有「进入交易 ›」带令牌时，客户点了「持仓」又回到「回到机器人继续」，死循环）；
+   * 第一个按钮是要去的那一页「进入持仓 ›」（没指定时「进入交易 ›」）。不是 fresh、或者令牌做不出来时用普通按钮
+   */
+  private InlineKeyboardMarkup menuKeyboard(long userId, boolean fresh, Page target) {
     List<InlineKeyboardRow> rows = new ArrayList<>();
-    if (props.hasWebUrl()) {
-      InlineKeyboardButton enter = fresh && props.linkMode() ? enterButton(userId, "/trade") : null;
-      rows.add(row(enter != null ? enter : login("打开交易", "/trade")));
-      rows.add(row(login("行情", "/markets"), login("持仓", "/positions")));
-      rows.add(row(login("充值", "/assets"), login("提现", "/assets/withdraw")));
-    }
     // 第 4 批 4c：自己冻结提现（BOT_SELF）；冻结着的给"解除"入口（网页输提现密码，24 小时后自动解冻）
     boolean selfFrozen = false;
     try {
@@ -510,23 +529,43 @@ public class UpdateHandler {
     } catch (RuntimeException e) {
       log.debug("查提现冻结失败：{}", e.toString());
     }
-    if (selfFrozen && props.hasWebUrl()) rows.add(row(login("解除自己设的提现冻结", "/me/withdraw-freeze")));
-    else if (!selfFrozen) rows.add(row(cb("冻结提现", CB_FREEZE)));
+    if (props.hasWebUrl()) {
+      Page first = target != null ? target : PAGES.getFirst();
+      Map<String, String> tokens = Map.of();
+      if (fresh && props.linkMode()) {
+        List<String> paths = new ArrayList<>(PAGES.stream().map(Page::path).toList());
+        if (selfFrozen) paths.add(UNFREEZE_PATH);
+        try {
+          tokens = accounts.createLoginLinkGroup(userId, paths);
+        } catch (RuntimeException e) {
+          log.warn("做一次性链接失败：{}", e.toString());
+        }
+      }
+      Map<String, String> t = tokens;
+      rows.add(row(web(t, first.path(), t.isEmpty() ? (first == PAGES.getFirst() ? "打开交易" : first.label()) : "进入" + first.label() + " ›")));
+      List<InlineKeyboardButton> rest = new ArrayList<>();
+      for (Page p : PAGES) if (p != first) rest.add(web(t, p.path(), p == PAGES.getFirst() ? "打开交易" : p.label()));
+      for (int k = 0; k < rest.size(); k += 2) rows.add(k + 1 < rest.size() ? row(rest.get(k), rest.get(k + 1)) : row(rest.get(k)));
+      if (selfFrozen) rows.add(row(web(t, UNFREEZE_PATH, "解除自己设的提现冻结")));
+    }
+    if (!selfFrozen) rows.add(row(cb("冻结提现", CB_FREEZE)));
     rows.add(row(cb("通知设置", CB_PREFS)));
     // 验收反馈 B：不再每次登录都发"刚在浏览器里登录"；「当前网页会话」随时能看，旁边就是「退出所有网页会话」
     rows.add(row(cb("当前网页会话", CB_SESSIONS), cb("退出所有网页会话", CB_LOGOUT_ALL)));
     return keyboard(rows);
   }
 
-  /** 60 秒、只能用一次的链接按钮（令牌在网址 # 后面，库里只存哈希，绑定这个客户）；做不出来时返回 null（用普通按钮） */
-  private InlineKeyboardButton enterButton(long userId, String path) {
-    try {
-      String token = accounts.createLoginLink(userId, path);
-      return InlineKeyboardButton.builder().text(TEXT_ENTER).url(props.base() + "/tg-link#t=" + token).build();
-    } catch (RuntimeException e) {
-      log.warn("做一次性链接失败：{}", e.toString());
-      return null;
-    }
+  static final String UNFREEZE_PATH = "/me/withdraw-freeze";
+
+  /**
+   * 有这一页的令牌就是一次性链接按钮（令牌在网址 # 后面），没有就是普通按钮。
+   * 网址里带页面键 ?p=positions（#51 审查）：令牌过期以后再点，网页照样知道要去哪一页——浏览器里有会话直接进那一页，没有就「回到机器人继续」带上这一页
+   */
+  private InlineKeyboardButton web(Map<String, String> tokens, String path, String text) {
+    String token = tokens.get(path);
+    if (token == null) return login(text, path);
+    Page page = pageOfPath(path);
+    return InlineKeyboardButton.builder().text(text).url(props.base() + "/tg-link" + (page != null ? "?p=" + page.key() : "") + "#t=" + token).build();
   }
 
   private InlineKeyboardMarkup prefsKeyboard(long userId) {

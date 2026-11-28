@@ -14,6 +14,7 @@ import { Layout } from './components/Layout';
 import { startEngine } from './api/trading';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { TelegramOnly } from './pages/tg/TelegramOnly';
+import { tgPageOfPath } from './pages/tg/tgLib';
 
 const Login = lazy(() => import('./pages/auth/Login'));
 const Register = lazy(() => import('./pages/auth/Register'));
@@ -39,6 +40,7 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const TgHint = lazy(() => import('./pages/tg/TgHint'));
 const TgEntry = lazy(() => import('./pages/tg/TgEntry'));
 const TgLink = lazy(() => import('./pages/tg/TgLink'));
+const TgCheck = lazy(() => import('./pages/tg/TgCheck'));
 
 // 原型：行情驱动的挂单成交、止盈止损、强平在浏览器内模拟（真实环境在服务端，这里什么都不做）
 startEngine();
@@ -49,8 +51,12 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (checking) return <Loading rows={4} />;
   // 验收反馈 1b：会话是因为安全事件没的，去"回机器人点「重新授权」"的提示页，不去登录页
   if (!session && securityLogout) return <Navigate to="/tg?r=security" replace />;
-  // 11/28：从机器人的普通按钮进来（?from=tg）、这个浏览器里没有有效会话：短页「回到机器人继续」（深链接 /start open）
-  if (!session && new URLSearchParams(location.search).get('from') === 'tg') return <Navigate to="/tg?r=continue" replace />;
+  // 11/28：从机器人的普通按钮进来（?from=tg）、这个浏览器里没有有效会话：短页「回到机器人继续」（深链接 /start open_<页面>，
+  // 机器人新菜单里这一页放第一个，验收修复 5）
+  if (!session && new URLSearchParams(location.search).get('from') === 'tg') {
+    const page = tgPageOfPath(location.pathname);
+    return <Navigate to={`/tg?r=continue${page ? `&p=${page}` : ''}`} replace />;
+  }
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }
@@ -76,6 +82,8 @@ export function AppRoutes() {
         <Route path="/tg/freeze" element={<TgEntry kind="freeze" />} />
         <Route path="/tg/recover" element={<TgEntry kind="recover" />} />
         <Route path="/tg-link" element={<TgLink />} />
+        {/* 11/28：Telegram 内置浏览器识别诊断，不登录、不受"只走 Telegram"限制 */}
+        <Route path="/tg-check" element={<TgCheck />} />
         <Route
           element={
             <RequireAuth>
