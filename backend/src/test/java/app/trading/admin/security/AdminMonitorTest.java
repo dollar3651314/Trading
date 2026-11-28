@@ -31,6 +31,7 @@ import tools.jackson.databind.ObjectMapper;
 class AdminMonitorTest extends AdminTestSupport {
 
   @Autowired LedgerApi ledger;
+  @Autowired app.trading.common.web.TgGateCounter tgGate;
   @Autowired QuoteProcessor processor;
   @Autowired app.trading.market.config.SymbolCatalog catalog;
   final ObjectMapper json = new ObjectMapper();
@@ -329,6 +330,13 @@ class AdminMonitorTest extends AdminTestSupport {
     assertThat(s.get("onlineCustomers").asLong()).isGreaterThanOrEqualTo(1);
     assertThat(s.has("platformPnl")).isTrue();
     assertThat(s.has("openReconciliations")).isTrue();
+    // 方案 B：非 Telegram 打开被拦次数（近 7 天），按平台大类
+    long ios = s.path("tgGateBlocked7d").path("IOS").asLong();
+    tgGate.hit("IOS");
+    JsonNode s2 = body(call(get("/api/admin/dashboard"), d.cookie(), null));
+    assertThat(s2.path("tgGateBlocked7d").path("IOS").asLong()).isGreaterThanOrEqualTo(ios + 1);
+    assertThat(s2.path("tgGateBlocked7d").has("ANDROID")).isTrue();
+    assertThat(s2.path("tgGateBlocked7d").has("OTHER")).isTrue();
     assertThat(call(get("/api/admin/risk"), d.cookie(), null).getStatus()).isEqualTo(403);
     assertThat(body(call(get("/api/admin/trade-symbols"), d.cookie(), null)).toString()).contains("XAUUSD");
   }

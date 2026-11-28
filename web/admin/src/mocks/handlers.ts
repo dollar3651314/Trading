@@ -198,7 +198,7 @@ export function getDashboard(): Promise<DashboardStats> {
   const zero: DashboardStats = {
     todayRegistrations: 0, onlineCustomers: 0, todayDeposit: '0.00', todayDepositCount: 0, todayWithdraw: '0.00', todayWithdrawCount: 0,
     openPositions: 0, platformPnl: '0.00', platformNetExposure: '0', platformThreshold: db.riskSettings.platformThresholdUsd,
-    pendingKyc: 0, pendingWithdrawals: 0, failedTasks: 0, openReconciliations: 0, updatedAt: nowString(),
+    pendingKyc: 0, pendingWithdrawals: 0, failedTasks: 0, openReconciliations: 0, updatedAt: nowString(), tgGateBlocked7d: { IOS: 0, ANDROID: 0, OTHER: 0 },
   };
   return respond(
     () => {
@@ -221,6 +221,7 @@ export function getDashboard(): Promise<DashboardStats> {
         failedTasks: db.tasks.filter((t) => t.status === 'failed').length,
         openReconciliations: db.reconItems.filter((r) => r.status === 'open').length,
         updatedAt: nowString(),
+        tgGateBlocked7d: { IOS: 12, ANDROID: 5, OTHER: 3 },
       };
     },
     { empty: () => zero },

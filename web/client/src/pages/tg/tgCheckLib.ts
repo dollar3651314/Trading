@@ -1,5 +1,7 @@
 /** 诊断页 /tg-check 用的纯函数：浏览器这边能看到的信息（测试在 tgcheck.test.tsx） */
 
+import { isTelegramInApp, platformFamily } from '../../lib/telegramInApp';
+
 export type Row = [string, string];
 
 /** 名字里带 telegram 的 window 属性（只要名字，不读值） */
@@ -108,6 +110,8 @@ export function collectClientInfo(w: Window = window): Row[] {
     ['iOS Telegram 标记："TelegramWebviewProxy" in window', has(w, 'TelegramWebviewProxy')],
     ['iOS Telegram 标记："TelegramWebviewProxyProto" in window', has(w, 'TelegramWebviewProxyProto')],
     ['inapp-spy 的 Telegram 判断（三个标记任一个有）', isTelegramWebview(w) ? '是 Telegram' : '不是'],
+    ['网页门禁用的判断 isTelegramInApp()（inapp-spy 5.0.10 依赖）', isTelegramInApp() ? '是 Telegram 内置浏览器' : '不是'],
+    ['平台大类（引导步骤、匿名计数用）', platformFamily(ua)],
     ['UA 是 Safari 形状（inapp-spy isSafariRegex）', SAFARI_UA.test(ua) ? '是' : '不是'],
     ['UA 命中内置浏览器通用规则（inapp-spy inappRegex）', INAPP_UA.test(ua) ? '命中' : '没命中'],
     ['"SchemaDataExtractor" in window（有＝Safari 本体）', has(w, 'SchemaDataExtractor')],

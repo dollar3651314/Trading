@@ -556,7 +556,10 @@
     "todayWithdraw": "Withdrawals today (on-chain)",
     "todo": "To do",
     "txCount": "{{count}} transactions",
-    "updatedAt": "Updated {{time}}"
+    "updatedAt": "Updated {{time}}",
+    "tgGate": "Opened outside Telegram and blocked (last 7 days)",
+    "tgGateDetail": "iOS {{ios}} · Android {{android}} · Other {{other}}",
+    "tgGateHint": "The client web only works in Telegram's in-app browser; each time the guide page is shown elsewhere it is counted (anonymous)"
   },
   "depositStatus": {
     "confirming": "Confirming",
