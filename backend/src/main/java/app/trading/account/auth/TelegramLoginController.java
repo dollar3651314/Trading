@@ -31,6 +31,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class TelegramLoginController {
 
+  private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TelegramLoginController.class);
+
   private final TelegramWebLogin login;
   private final EmergencyLogin emergency;
   private final AuthProperties props;
@@ -108,6 +110,7 @@ class TelegramLoginController {
     try {
       r = login.link(body == null ? null : body.token(), req.getRemoteAddr(), req.getHeader(HttpHeaders.USER_AGENT), SessionFilter.token(req, props.cookieName()));
     } catch (org.springframework.dao.PessimisticLockingFailureException e) {
+      log.warn("一次性链接换会话撞上锁，按过期回答：{}", e.getClass().getSimpleName()); // 只记异常类型，不记令牌
       // #51 审查：同组令牌同时用撞上锁（死锁、等锁超时）——按"链接过期"回答，不回 500（整组已经或马上作废，客户回机器人拿新的）
       r = TelegramWebLogin.Result.fail(TelegramWebLogin.Outcome.EXPIRED);
     }

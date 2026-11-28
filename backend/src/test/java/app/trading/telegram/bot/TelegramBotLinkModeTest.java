@@ -145,6 +145,9 @@ class TelegramBotLinkModeTest {
       String label = first.startsWith("进入" + k[0]) ? first : k[0];
       assertThat(menu).anyMatch(b -> b.startsWith(label + "|url=https://trade.example.test/tg-link?p=" + k[1] + "#t="));
     }
+    // 「打开交易」（排第一个时是「进入交易 ›」）带 ?p=trade
+    String trade = first.equals(UpdateHandler.TEXT_ENTER) ? UpdateHandler.TEXT_ENTER : "打开交易";
+    assertThat(menu).anyMatch(b -> b.startsWith(trade + "|url=https://trade.example.test/tg-link?p=trade#t="));
   }
 
   MockHttpServletResponse redeem(String token) throws Exception {
