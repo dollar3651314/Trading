@@ -107,6 +107,16 @@ export function DashboardPage() {
               <div className="v">{data.openPositions}</div>
               <div className="muted">{t('dashboard.positionsHint')}</div>
             </div>
+            {data.tgGateBlocked7d ? (
+              <div className="card stat" data-testid="dash-tg-gate">
+                <div className="k">{t('dashboard.tgGate')}</div>
+                <div className="v">{data.tgGateBlocked7d.IOS + data.tgGateBlocked7d.ANDROID + data.tgGateBlocked7d.OTHER}</div>
+                <div className="muted">
+                  {t('dashboard.tgGateDetail', { ios: data.tgGateBlocked7d.IOS, android: data.tgGateBlocked7d.ANDROID, other: data.tgGateBlocked7d.OTHER })}
+                </div>
+                <div className="muted small">{t('dashboard.tgGateHint')}</div>
+              </div>
+            ) : null}
             <div className="card stat">
               <div className="k">{t('dashboard.platformPnl')}</div>
               <div className="v">

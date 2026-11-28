@@ -79,6 +79,8 @@ export interface DashboardStats {
   failedTasks: number;
   openReconciliations: number;
   updatedAt: string;
+  /** 方案 B：非 Telegram 打开被拦次数（近 7 天，客户端网页引导页显示次数），按平台大类；匿名计数，没有 IP、客户号、UA */
+  tgGateBlocked7d?: { IOS: number; ANDROID: number; OTHER: number };
 }
 
 /** 当前管理员（GET /api/admin/me）。menus 是后端按权限点和"是否显示"过滤后的菜单；模拟层不返回，按本地菜单配置显示 */

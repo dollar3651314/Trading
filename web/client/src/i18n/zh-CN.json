@@ -969,7 +969,19 @@
     "continueTitle": "回到机器人继续",
     "continueSubtitle": "这个浏览器里还没登录，或者超过 7 天没用了。",
     "continueOpen": "回到机器人",
-    "continueDeviceNote": "切换了设备或\"桌面版网站\"时需要重新进入。"
+    "continueDeviceNote": "切换了设备或\"桌面版网站\"时需要重新进入。",
+    "guide": {
+      "title": "请在 Telegram 里打开",
+      "subtitle": "为了账户安全，网页只能在 Telegram 的内置浏览器里使用。",
+      "why": "你现在是在 Telegram 以外的浏览器里打开的（或者 Telegram 用外部浏览器打开了链接）。",
+      "stepsTitle": "先打开 Telegram 的「应用内浏览器」（菜单名称随版本可能略有不同）：",
+      "iosStep1": "打开 Telegram → 设置 → 数据与存储（Data and Storage）→ 在应用内打开链接（Open Links in App），打开开关。",
+      "androidStep1": "打开 Telegram → 设置 → 聊天设置（Chat Settings）→ 应用内浏览器（In-App Browser），打开开关。",
+      "otherStep1": "请用手机上的 Telegram 打开机器人；电脑上的浏览器不能使用网页。",
+      "step2": "回到机器人，点最新一条消息里的按钮（如果没有新消息，发 /start）。",
+      "unsupported": "部分手机暂不支持（例如有些华为手机总是用外部浏览器打开链接），请换一台手机或联系客服。",
+      "open": "打开机器人 @{{bot}}"
+    }
   },
   "pin": {
     "title": "提现密码",

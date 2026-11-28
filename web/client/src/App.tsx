@@ -2,7 +2,7 @@
  * 路由（站点地图见需求说明书 5.1）。客户端部署在根路径 `/`，使用浏览器路由。
  */
 import { lazy, Suspense, type ReactNode } from 'react';
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AccountProvider } from './app/AccountProvider';
 import { AuthProvider } from './app/AuthProvider';
 import { useAuth } from './app/contexts';
@@ -14,6 +14,7 @@ import { Layout } from './components/Layout';
 import { startEngine } from './api/trading';
 import { useKeyboardInset } from './hooks/useKeyboardInset';
 import { TelegramOnly } from './pages/tg/TelegramOnly';
+import { TelegramGate } from './pages/tg/TelegramGate';
 import { tgPageOfPath } from './pages/tg/tgLib';
 
 const Login = lazy(() => import('./pages/auth/Login'));
@@ -73,48 +74,57 @@ export function AppRoutes() {
   return (
     <Suspense fallback={<Loading rows={4} />}>
       <Routes>
-        {/* 第一阶段只走 Telegram（TB-33）：后端说 telegramOnly 时这三页换成"请在 Telegram 打开"提示页 */}
-        <Route path="/login" element={<GuestOnly><TelegramOnly><Login /></TelegramOnly></GuestOnly>} />
-        <Route path="/register" element={<GuestOnly><TelegramOnly><Register /></TelegramOnly></GuestOnly>} />
-        <Route path="/forgot-password" element={<TelegramOnly><ForgotPassword /></TelegramOnly>} />
-        {/* TG 机器人第 2 批：提示页（从机器人进来没成功时 ?r=原因）、提示页上的两个入口、一次性链接（退路） */}
-        <Route path="/tg" element={<TgHint />} />
+        {/* 方案 B 门禁外（任何浏览器都能用）：申请冻结提现、找回 Telegram 账户（TG 丢了或被占的原主的止损入口）、浏览器环境诊断页 */}
         <Route path="/tg/freeze" element={<TgEntry kind="freeze" />} />
         <Route path="/tg/recover" element={<TgEntry kind="recover" />} />
-        <Route path="/tg-link" element={<TgLink />} />
-        {/* 11/28：Telegram 内置浏览器识别诊断，不登录、不受"只走 Telegram"限制 */}
         <Route path="/tg-check" element={<TgCheck />} />
+        {/* 方案 B（11/28 Amos）：其余页面都在门禁里——只走 Telegram、应急开关关着、又不在 Telegram 内置浏览器里时只显示引导页 */}
         <Route
           element={
-            <RequireAuth>
-              <SymbolsProvider>
-                <AccountProvider>
-                  <Layout />
-                </AccountProvider>
-              </SymbolsProvider>
-            </RequireAuth>
+            <TelegramGate>
+              <Outlet />
+            </TelegramGate>
           }
         >
-          <Route index element={<Navigate to="/markets" replace />} />
-          <Route path="markets" element={<Markets />} />
-          <Route path="trade" element={<Trade />} />
-          <Route path="trade/:symbol" element={<Trade />} />
-          <Route path="positions" element={<Positions />} />
-          <Route path="assets" element={<Assets />} />
-          <Route path="assets/ledger" element={<Ledger />} />
-          <Route path="assets/withdraw" element={<Withdraw />} />
-          <Route path="assets/whitelist" element={<Whitelist />} />
-          <Route path="assets/records" element={<Records />} />
-          <Route path="me" element={<Me />} />
-          <Route path="me/profile" element={<Profile />} />
-          <Route path="me/kyc" element={<Kyc />} />
-          <Route path="me/notifications" element={<Notifications />} />
-          <Route path="me/notify-prefs" element={<NotifyPrefs />} />
-          <Route path="me/password" element={<ChangePassword />} />
-          <Route path="me/withdraw-pin" element={<WithdrawPin />} />
-          <Route path="me/recovery" element={<Recovery />} />
-          <Route path="me/withdraw-freeze" element={<WithdrawFreeze />} />
-          <Route path="*" element={<NotFound />} />
+          {/* 第一阶段只走 Telegram（TB-33）：后端说 telegramOnly 时这三页换成"请在 Telegram 打开"提示页 */}
+          <Route path="/login" element={<GuestOnly><TelegramOnly><Login /></TelegramOnly></GuestOnly>} />
+          <Route path="/register" element={<GuestOnly><TelegramOnly><Register /></TelegramOnly></GuestOnly>} />
+          <Route path="/forgot-password" element={<TelegramOnly><ForgotPassword /></TelegramOnly>} />
+          {/* TG 机器人第 2 批：提示页（从机器人进来没成功时 ?r=原因）、一次性链接（退路） */}
+          <Route path="/tg" element={<TgHint />} />
+          <Route path="/tg-link" element={<TgLink />} />
+          <Route
+            element={
+              <RequireAuth>
+                <SymbolsProvider>
+                  <AccountProvider>
+                    <Layout />
+                  </AccountProvider>
+                </SymbolsProvider>
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Navigate to="/markets" replace />} />
+            <Route path="markets" element={<Markets />} />
+            <Route path="trade" element={<Trade />} />
+            <Route path="trade/:symbol" element={<Trade />} />
+            <Route path="positions" element={<Positions />} />
+            <Route path="assets" element={<Assets />} />
+            <Route path="assets/ledger" element={<Ledger />} />
+            <Route path="assets/withdraw" element={<Withdraw />} />
+            <Route path="assets/whitelist" element={<Whitelist />} />
+            <Route path="assets/records" element={<Records />} />
+            <Route path="me" element={<Me />} />
+            <Route path="me/profile" element={<Profile />} />
+            <Route path="me/kyc" element={<Kyc />} />
+            <Route path="me/notifications" element={<Notifications />} />
+            <Route path="me/notify-prefs" element={<NotifyPrefs />} />
+            <Route path="me/password" element={<ChangePassword />} />
+            <Route path="me/withdraw-pin" element={<WithdrawPin />} />
+            <Route path="me/recovery" element={<Recovery />} />
+            <Route path="me/withdraw-freeze" element={<WithdrawFreeze />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
         </Route>
       </Routes>
     </Suspense>

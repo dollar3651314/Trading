@@ -969,7 +969,19 @@
     "continueTitle": "Continue in the bot",
     "continueSubtitle": "You are not signed in in this browser yet, or it has been more than 7 days.",
     "continueOpen": "Back to the bot",
-    "continueDeviceNote": "If you switched devices or turned on \"desktop site\", you need to enter again."
+    "continueDeviceNote": "If you switched devices or turned on \"desktop site\", you need to enter again.",
+    "guide": {
+      "title": "Please open in Telegram",
+      "subtitle": "For account security, the web app only works inside Telegram's in-app browser.",
+      "why": "You opened this page outside Telegram (or Telegram opened the link in an external browser).",
+      "stepsTitle": "First turn on Telegram's in-app browser (menu names may vary slightly by version):",
+      "iosStep1": "Open Telegram → Settings → Data and Storage → Open Links in App, and turn it on.",
+      "androidStep1": "Open Telegram → Settings → Chat Settings → In-App Browser, and turn it on.",
+      "otherStep1": "Please open the bot with Telegram on your phone; desktop browsers can't use the web app.",
+      "step2": "Back in the bot, tap a button in the latest message (if there is no new message, send /start).",
+      "unsupported": "Some phones are not supported yet (e.g. some Huawei phones always open links in an external browser). Please use another phone or contact support.",
+      "open": "Open the bot @{{bot}}"
+    }
   },
   "pin": {
     "title": "Withdrawal PIN",

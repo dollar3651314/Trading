@@ -556,7 +556,10 @@
     "todayWithdraw": "今日出金（已上链）",
     "todo": "待办",
     "txCount": "共 {{count}} 笔",
-    "updatedAt": "更新于 {{time}}"
+    "updatedAt": "更新于 {{time}}",
+    "tgGate": "非 Telegram 打开被拦次数（近 7 天）",
+    "tgGateDetail": "iOS {{ios}} · 安卓 {{android}} · 其他 {{other}}",
+    "tgGateHint": "客户端网页只在 Telegram 内置浏览器里能用；在别的浏览器打开时显示引导页，每显示一次计一次（匿名）"
   },
   "depositStatus": {
     "confirming": "确认中",

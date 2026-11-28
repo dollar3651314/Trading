@@ -36,11 +36,11 @@ describe('没有会话 + 第一阶段只走 Telegram', () => {
     expect(window.location.pathname).toBe('/tg-check');
   });
 
-  it('对照：不认识的地址被守卫送到 /login，显示"请在 Telegram 里打开"（旧版本没有 /tg-check 路由时就是这样）', async () => {
+  it('对照：不认识的地址在门禁里——不在 Telegram 内置浏览器里时显示引导页（方案 B；#51 之前的旧版本没有 /tg-check 路由时，打开它也会落到这类页面）', async () => {
     window.history.replaceState(null, '', '/no-such-page');
     render(<App />);
-    expect(await screen.findByTestId('tg-open')).toBeInTheDocument();
-    expect(window.location.pathname).toBe('/login');
+    expect(await screen.findByTestId('tg-guide')).toBeInTheDocument();
+    expect(screen.queryByTestId('tg-check')).toBeNull();
   });
 
   it('Service Worker 不接管 /tg-check、/tg、/tg-link 的页面请求（含查询串；Workbox 拿路径 + 查询串去比）', () => {

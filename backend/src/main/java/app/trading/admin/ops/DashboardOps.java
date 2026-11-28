@@ -33,10 +33,10 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class DashboardOps {
 
-  /** 字段和原型 DashboardStats 一致 */
+  /** 字段和原型 DashboardStats 一致；tgGateBlocked7d（方案 B）：非 Telegram 打开被拦次数，近 7 天按平台大类 IOS / ANDROID / OTHER */
   record Stats(long todayRegistrations, long onlineCustomers, String todayDeposit, long todayDepositCount, String todayWithdraw, long todayWithdrawCount,
       long openPositions, String platformPnl, String platformNetExposure, String platformThreshold, long pendingKyc, long pendingWithdrawals, long failedTasks,
-      long openReconciliations, String updatedAt) {}
+      long openReconciliations, String updatedAt, Map<String, Long> tgGateBlocked7d) {}
 
   /** 字段和原型 TradingParams 一致；liquidationLevel 总是空（G6：逐仓，没有账户级强平线） */
   record Params(String marginCallLevel, String liquidationLevel, int marginCallThrottleMinutes, String updatedAt, String updatedBy) {}
@@ -53,9 +53,11 @@ class DashboardOps {
   private final AdminNames names;
   private final Audit audit;
   private final Clock clock;
+  private final app.trading.common.web.TgGateCounter tgGate;
 
   DashboardOps(CustomerAdminApi customers, TradingAdminApi trading, WalletAdminApi wallet, WalletReconApi recon, RiskApi risk, TaskService tasks,
-      SystemConfig config, AdminNames names, Audit audit, Clock clock) {
+      SystemConfig config, AdminNames names, Audit audit, Clock clock, app.trading.common.web.TgGateCounter tgGate) {
+    this.tgGate = tgGate;
     this.customers = customers;
     this.trading = trading;
     this.wallet = wallet;
@@ -78,7 +80,7 @@ class DashboardOps {
     return new Stats(customers.registeredSince(today), customers.activeSince(now.minus(Duration.ofMinutes(5))), Ops.money(dep.amount()), dep.count(),
         Ops.money(wd.amount()), wd.count(), trading.openPositionTotal(), Ops.money(trading.platformRealizedSince(today)), Ops.money(r.platformNetUsd()),
         Ops.money(r.platformThreshold()), customers.pendingKyc(), wallet.pendingReview(), tasks.count(null, TaskStatus.FAILED), recon.countIssues("OPEN"),
-        clock.instant().toString());
+        clock.instant().toString(), tgGate.lastDays(7));
   }
 
   @Transactional(readOnly = true)
