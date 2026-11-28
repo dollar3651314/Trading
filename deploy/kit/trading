@@ -1111,7 +1111,8 @@ cmd_status() {
     say "证书到期：${exp:-没有证书}"
   fi
   local filled=() k
-  for k in FX_TOPUP_API_KEY FX_TOPUP_API_SECRET FX_MAIL_PASSWORD FX_QUOTE_ALLTICK_TOKEN FX_QUOTE_ITICK_TOKEN FX_TG_BOT_TOKEN TEST_ADMIN_TOKEN_SHA256; do
+  # set-key 清单里的每一项都列出来（验收反馈：以前漏了后来加的 FX_TG_LOGIN_BOT_TOKEN），再加测试管理员令牌的哈希
+  for k in $KEY_ALLOWED TEST_ADMIN_TOKEN_SHA256; do
     if [ -n "$(envget "$k")" ]; then filled+=("$k=已填"); else filled+=("$k=空"); fi
   done
   say "Amos 填的（只说是否）：${filled[*]}"
@@ -1119,6 +1120,9 @@ cmd_status() {
   tgname=$(envget FX_TG_BOT_USERNAME)
   [ -n "$tgname" ] || tgname="$(prod && echo TradingAssistBot || echo TradingAssistTestBot)（默认）"
   say "Telegram 机器人：@$tgname，$([ -n "$(envget FX_TG_BOT_TOKEN)" ] && echo "令牌已填" || echo "令牌没填 = 机器人不启动")"
+  local lbname
+  lbname=$(envget FX_TG_LOGIN_BOT_USERNAME)
+  say "登录机器人（应急开关）：$([ -n "$lbname" ] && echo "@$lbname" || echo "没设用户名")，$([ -n "$(envget FX_TG_LOGIN_BOT_TOKEN)" ] && echo "令牌已填" || echo "令牌没填 = 应急开关打开了也不显示「用 Telegram 登录」")"
 }
 
 # 每个容器的内存（cgroup v2）：按容器进程号找 cgroup 目录（/proc/<pid>/cgroup 的 0:: 行），不依赖容器 ID 的长短和 cgroup 驱动；

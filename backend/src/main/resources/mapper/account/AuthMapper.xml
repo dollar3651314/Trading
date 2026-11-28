@@ -199,6 +199,14 @@
     SELECT id, turned_on, actor, actor_name, reason, created_at FROM account_tg_emergency_log ORDER BY id DESC LIMIT #{limit}
   </select>
 
+  <update id="revokeUserSessionsWithReason">
+    UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3), revoke_reason = #{reason} WHERE user_id = #{userId} AND revoked_at IS NULL
+  </update>
+
+  <select id="sessionRevokeReason" resultType="string">
+    SELECT revoke_reason FROM account_session WHERE token_hash = #{tokenHash} AND revoked_at IS NOT NULL
+  </select>
+
   <update id="revokeUserSessions">
     UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3)
     WHERE user_id = #{userId} AND revoked_at IS NULL

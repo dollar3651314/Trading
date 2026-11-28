@@ -8,7 +8,7 @@ import { vi } from 'vitest';
 import { renderPage } from '../../test/renderApp';
 import { TelegramOnly } from './TelegramOnly';
 import TgHint from './TgHint';
-import { botLink, tokenFromHash } from './tgLib';
+import { botLink, botStartLink, tokenFromHash } from './tgLib';
 
 const options = vi.hoisted(() => ({ telegramOnly: true, botUsername: 'TradingAssistTestBot' as string | null, loginMode: 'login-url' as const }));
 vi.mock('../../api/auth', async (orig) => ({
@@ -25,7 +25,8 @@ describe('第一阶段只走 Telegram', () => {
       </Routes>,
       '/login',
     );
-    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot');
+    // 验收反馈 1c：深链接 ?start=reauth（机器人会回重新授权提示或主菜单）
+    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=reauth');
     expect(screen.queryByText('邮箱登录表单')).toBeNull();
     expect(screen.getByRole('img', { name: '打开机器人的二维码' })).toBeInTheDocument();
     expect(screen.getByTestId('tg-freeze')).toHaveAttribute('href', '/tg/freeze');
@@ -61,6 +62,8 @@ describe('第一阶段只走 Telegram', () => {
     expect(botLink(null)).toBeNull();
     expect(botLink('evil.com/x')).toBeNull();
     expect(botLink('a')).toBeNull();
+    expect(botStartLink('TradingAssistBot')).toBe('https://t.me/TradingAssistBot?start=reauth');
+    expect(botStartLink('evil.com/x')).toBeNull();
   });
 
   it('一次性链接：令牌从 # 后面取', () => {

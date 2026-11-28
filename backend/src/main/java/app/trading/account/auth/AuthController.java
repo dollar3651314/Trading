@@ -77,11 +77,15 @@ class AuthController {
   @GetMapping("/api/me/session")
   SessionView me() {
     UserRow u = auth.user(CurrentUser.id());
-    return view(u);
+    return view(u, CurrentUser.botSession());
   }
 
   private SessionView view(UserRow u) {
-    return new SessionView(String.valueOf(u.id()), u.email(), telegram.byUserId(u.id()).map(t -> t.username()).orElse(null));
+    return view(u, false);
+  }
+
+  private SessionView view(UserRow u, boolean fromTelegram) {
+    return new SessionView(String.valueOf(u.id()), u.email(), telegram.byUserId(u.id()).map(t -> t.username()).orElse(null), fromTelegram);
   }
 
   private SessionView startSession(UserRow u, HttpServletRequest req, HttpServletResponse res) {

@@ -403,6 +403,12 @@ check "cancel-recovery：只认编号、原因必填；写撤销请求和审计�
   out=$(em_run env TR_CANCEL_WAIT_S=1 FAKE_CANCEL_RESULT= bash deploy/kit/trading cancel-recovery 14 "x") || exit 1; grep -q "已排队" <<< "$out" || exit 1
   : > "$tmp/em-sql"; env PATH="$tmp/fakebin:$PATH" TR_DIR="$tmp/tr" TR_OFFLINE_TEST=1 FAKE_SQL_LOG="$tmp/em-sql" bash deploy/kit/trading cancel-recovery 12 "停着" > /dev/null 2>&1 && exit 1
   [ -s "$tmp/em-sql" ] && exit 1; true'
+check "status 的\"Amos 填的\"列出 set-key 清单里的每一项（验收反馈：以前漏了 FX_TG_LOGIN_BOT_TOKEN），只说是否、不显示值；登录机器人单独一行" bash -c '
+  printf "FX_TG_LOGIN_BOT_TOKEN=not_a_real_token_check_only\nFX_TG_LOGIN_BOT_USERNAME=TradingLoginTestBot\n" > "$tmp/tr/.env"
+  out=$(tr_run bash deploy/kit/trading status) || true
+  line=$(grep "Amos 填的" <<< "$out") || { echo "$out"; exit 1; }
+  for k in $(sed -n "s/^KEY_ALLOWED=\"\(.*\)\"$/\1/p" deploy/kit/trading); do grep -q "$k=" <<< "$line" || { echo "少了 $k：$line"; exit 1; }; done
+  grep -q "FX_TG_LOGIN_BOT_TOKEN=已填" <<< "$line" && grep -q "FX_TG_BOT_TOKEN=空" <<< "$line" && ! grep -q "not_a_real_token" <<< "$out" && grep -q "登录机器人（应急开关）：@TradingLoginTestBot，令牌已填" <<< "$out"'
 check "第 5 批 set：登录机器人用户名、Amos 的后台账号编号在 set 清单（编号只认正整数）；登录机器人令牌只在 set-key 清单；compose 传给 trading-app、默认空" bash -c 'grep -q "^KEY_ALLOWED=\".* FX_TG_LOGIN_BOT_TOKEN .*\"$" deploy/kit/trading && ! grep -q "^SET_ALLOWED=.*FX_TG_LOGIN_BOT_TOKEN" deploy/kit/trading && grep -q "^SET_ALLOWED=\".* FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID .*\"$" deploy/kit/trading \
   && echo TR_SHARE_WITH_TOPUP=true > "$tmp/tr/.env" && tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID 12 > /dev/null && grep -q "^FX_ADMIN_OWNER_ID=12$" "$tmp/tr/.env" && ! tr_run bash deploy/kit/trading set FX_ADMIN_OWNER_ID amos > /dev/null \
   && tr_run bash deploy/kit/trading set FX_TG_LOGIN_BOT_USERNAME @TradingLoginBot > /dev/null && grep -q "^FX_TG_LOGIN_BOT_USERNAME=TradingLoginBot$" "$tmp/tr/.env" \

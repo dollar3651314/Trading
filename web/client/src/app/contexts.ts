@@ -12,6 +12,13 @@ export interface AuthValue {
   checking: boolean;
   setSession: (s: Session | null) => void;
   logout: () => Promise<void>;
+  /**
+   * 验收反馈 1b：会话是因为安全事件没的（本页刚设了提现密码等，或者后端回 401 SECURITY_LOGOUT）。
+   * 这时路由守卫去 /tg?r=security（"回到 Telegram 机器人，点「重新授权」，再点「打开交易」"），不去登录页
+   */
+  securityLogout: boolean;
+  /** 安全事件以后清掉会话，并标记 securityLogout */
+  endForSecurity: () => void;
 }
 export const AuthContext = createContext<AuthValue | null>(null);
 export function useAuth(): AuthValue {

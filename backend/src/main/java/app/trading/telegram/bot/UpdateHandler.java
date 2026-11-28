@@ -453,6 +453,7 @@ public class UpdateHandler {
       case SecurityEvent.REBIND -> "换绑了 Telegram";
       case SecurityEvent.PIN_SET, SecurityEvent.PIN_CHANGE, SecurityEvent.PIN_RESET -> "提现密码有变化";
       case SecurityEvent.KYC_FIRST -> "提交了身份认证";
+      case SecurityEvent.TG_WEB_LOGIN -> "用 Telegram 登录了网页";
       default -> "安全设置有变化";
     };
   }
@@ -498,6 +499,8 @@ public class UpdateHandler {
     if (selfFrozen && props.hasWebUrl()) rows.add(row(login("解除自己设的提现冻结", "/me/withdraw-freeze")));
     else if (!selfFrozen) rows.add(row(cb("冻结提现", CB_FREEZE)));
     rows.add(row(cb("通知设置", CB_PREFS)));
+    // 验收反馈 B：不再每次登录都发"刚在浏览器里登录"，退出全部网页会话的按钮常驻主菜单，随时能用
+    rows.add(row(cb("退出所有网页会话", CB_LOGOUT_ALL)));
     return keyboard(rows);
   }
 

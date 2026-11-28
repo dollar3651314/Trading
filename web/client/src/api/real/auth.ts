@@ -8,9 +8,15 @@ interface SessionView {
   userId: string;
   email: string | null;
   telegramUsername?: string | null;
+  fromTelegram?: boolean;
 }
 
-const toSession = (v: SessionView): Session => ({ userId: v.userId, email: v.email ?? null, ...(v.telegramUsername ? { telegramUsername: v.telegramUsername } : {}) });
+const toSession = (v: SessionView): Session => ({
+  userId: v.userId,
+  email: v.email ?? null,
+  ...(v.telegramUsername ? { telegramUsername: v.telegramUsername } : {}),
+  ...(v.fromTelegram ? { fromTelegram: true } : {}),
+});
 
 /** 后端的验证码用途是枚举 REGISTER / RESET_PASSWORD */
 const PURPOSE: Record<EmailCodePurpose, string> = { register: 'REGISTER', resetPassword: 'RESET_PASSWORD' };
@@ -57,6 +63,7 @@ export async function restoreSession(): Promise<Session | null> {
     return toSession(await get<SessionView>('/api/me/session', { quiet401: true }));
   } catch (e) {
     if (e instanceof ApiError && e.reason === 'unauthorized') return null;
+    // 其他（包括验收反馈 1b 的 securityLogout：会话因为安全事件作废了）交给 AuthProvider
     throw e;
   }
 }

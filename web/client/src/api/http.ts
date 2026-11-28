@@ -9,7 +9,8 @@ import { ApiError, fromServer, type ServerErrorBody, type ServerErrorOptions } f
 
 const TIMEOUT_MS = 15_000;
 
-type UnauthorizedHandler = () => void;
+/** code：后端的错误码（例如验收反馈 1b 的 SECURITY_LOGOUT：会话因为安全事件作废了） */
+type UnauthorizedHandler = (code?: string) => void;
 const unauthorizedHandlers = new Set<UnauthorizedHandler>();
 
 /** 登录失效（任意接口返回 401）时回调；返回取消函数 */
@@ -75,7 +76,7 @@ export async function request<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path
     data = undefined;
   }
   if (!res.ok) {
-    if (res.status === 401 && !opt.quiet401) unauthorizedHandlers.forEach((h) => h());
+    if (res.status === 401 && !opt.quiet401) unauthorizedHandlers.forEach((h) => h((data as ServerErrorBody | undefined)?.code));
     throw fromServer(res.status, data as ServerErrorBody | undefined, opt);
   }
   return data as T;

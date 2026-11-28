@@ -43,10 +43,12 @@ const TgLink = lazy(() => import('./pages/tg/TgLink'));
 // 原型：行情驱动的挂单成交、止盈止损、强平在浏览器内模拟（真实环境在服务端，这里什么都不做）
 startEngine();
 
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { session, checking } = useAuth();
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const { session, checking, securityLogout } = useAuth();
   const location = useLocation();
   if (checking) return <Loading rows={4} />;
+  // 验收反馈 1b：会话是因为安全事件没的，去"回机器人点「重新授权」"的提示页，不去登录页
+  if (!session && securityLogout) return <Navigate to="/tg?r=security" replace />;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }
