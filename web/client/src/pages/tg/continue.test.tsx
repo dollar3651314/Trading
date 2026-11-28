@@ -44,6 +44,8 @@ describe('回到机器人继续', () => {
     expect(screen.getByTestId('tg-reason')).toHaveTextContent('最新一条消息里的「进入交易 ›」');
     expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=open');
     expect(screen.queryByText('普通登录页')).toBeNull();
+    // #49 审查：说明换了设备或开了"桌面版网站"要重新进入
+    expect(screen.getByTestId('tg-device-note')).toHaveTextContent('切换了设备或"桌面版网站"时需要重新进入');
   });
 
   it('不是从机器人来的（没有 from=tg）：照旧去登录页', async () => {

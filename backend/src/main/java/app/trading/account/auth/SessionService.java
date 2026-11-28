@@ -55,20 +55,22 @@ class SessionService {
   /** 有效时返回会话（用户 ID、种类 WEB / BOT），否则返回 null；顺带续期 */
   @Transactional
   SessionRow resolveSession(String token) {
-    return resolveSession(token, null);
+    return resolveSession(token, null, false);
   }
 
   /**
-   * 同上；userAgent 不为空时，BOT 会话做粗略的设备绑定（#48 审查跟进）：这次请求的平台大类（iOS / 安卓 / Windows / macOS / Linux）和建会话时
-   * 明显不同（例如 iPhone 建的会话拿到 Windows 上用），就作废这个会话（原因 DEVICE），回 401。只看平台大类，Telegram、系统版本号变了都不算；
-   * 看不出平台的不算。iPad 和 Mac 算同一类（iPad 的浏览器经常说自己是 Mac）
+   * 同上；checkDevice 时 BOT 会话做粗略的设备绑定（#48、#49 审查跟进）：建会话时看得出平台大类（iOS / 安卓 / Windows / Apple 桌面 / Linux）的，
+   * 这次请求的平台大类明显不同（例如 iPhone 建的会话拿到 Windows 上用），或者这次没有 User-Agent、认不出平台，就作废这个会话（原因 DEVICE），回 401。
+   * Telegram、系统版本号变了不算；建会话时就看不出平台的不做这个检查。iPad 和 Mac 算同一类（iPad 的浏览器经常说自己是 Mac）。
+   * <p><b>这只是额外的一层</b>：只看 User-Agent，照抄受害者的 User-Agent 就能绕过；它防的是会话 Cookie 被原样拿到另一类设备上用。
+   * 真正的保护是提现密码、白名单 24 小时生效、每笔人工审核、安全事件作废会话。
    */
   @Transactional
-  SessionRow resolveSession(String token, String userAgent) {
+  SessionRow resolveSession(String token, String userAgent, boolean checkDevice) {
     if (token == null || token.isBlank()) return null;
     SessionRow s = mapper.findActiveSession(Secrets.sha256(token));
     if (s == null) return null;
-    if ("BOT".equals(s.kind()) && userAgent != null && platformChanged(s.userAgent(), userAgent)) {
+    if (checkDevice && "BOT".equals(s.kind()) && platformChanged(s.userAgent(), userAgent)) {
       mapper.revokeSessionWithReason(Secrets.sha256(token), "DEVICE");
       return null;
     }
@@ -114,11 +116,14 @@ class SessionService {
     return null;
   }
 
-  /** 两边都看得出平台、而且不是同一类才算变了 */
+  /**
+   * 建会话时看得出平台、这次不是同一类（包括这次没有 User-Agent 或认不出平台）才算变了；建会话时就看不出平台的一律不算（#49 审查）。
+   * 只是额外的一层：照抄受害者的 User-Agent 就能绕过
+   */
   static boolean platformChanged(String before, String now) {
     String a = platform(before);
-    String b = platform(now);
-    return a != null && b != null && !a.equals(b);
+    if (a == null) return false;
+    return !a.equals(platform(now));
   }
 
   private static String truncate(String s, int max) {

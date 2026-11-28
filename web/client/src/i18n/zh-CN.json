@@ -968,7 +968,8 @@
     },
     "continueTitle": "回到机器人继续",
     "continueSubtitle": "这个浏览器里还没登录，或者超过 7 天没用了。",
-    "continueOpen": "回到机器人"
+    "continueOpen": "回到机器人",
+    "continueDeviceNote": "切换了设备或\"桌面版网站\"时需要重新进入。"
   },
   "pin": {
     "title": "提现密码",
