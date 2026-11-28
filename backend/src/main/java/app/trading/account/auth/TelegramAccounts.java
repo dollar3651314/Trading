@@ -106,6 +106,12 @@ class TelegramAccounts implements TelegramAccountApi {
     sessions.revokeAll(userId, null);
   }
 
+  @Override
+  public java.util.List<WebSession> activeWebSessions(long userId, int limit) {
+    return mapper.activeSessions(userId, Math.max(1, Math.min(limit, 20))).stream()
+        .map(r -> new WebSession(TelegramWebLogin.device(r.userAgent()), TelegramWebLogin.maskIp(r.ip()), r.kind(), r.createdAt())).toList();
+  }
+
   private static String cut(String username) {
     if (username == null || username.isBlank()) return null;
     return username.length() > 64 ? username.substring(0, 64) : username;

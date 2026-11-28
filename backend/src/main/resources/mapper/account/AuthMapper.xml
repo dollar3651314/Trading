@@ -203,6 +203,14 @@
     UPDATE account_session SET revoked_at = UTC_TIMESTAMP(3), revoke_reason = #{reason} WHERE user_id = #{userId} AND revoked_at IS NULL
   </update>
 
+  <select id="activeSessions" resultType="app.trading.account.auth.Rows$ActiveSession">
+    SELECT s.kind, s.ip, s.user_agent, s.created_at
+    FROM account_session s
+    WHERE s.user_id = #{userId} AND s.revoked_at IS NULL AND s.expires_at &gt; UTC_TIMESTAMP(3)
+      AND (s.kind &lt;&gt; 'EMERGENCY' OR COALESCE((SELECT e.turned_on FROM account_tg_emergency_log e ORDER BY e.id DESC LIMIT 1), 0) = 1)
+    ORDER BY s.id DESC LIMIT #{limit}
+  </select>
+
   <select id="sessionRevokeReason" resultType="string">
     SELECT revoke_reason FROM account_session WHERE token_hash = #{tokenHash} AND revoked_at IS NOT NULL
   </select>

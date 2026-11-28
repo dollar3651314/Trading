@@ -51,4 +51,17 @@ public interface TelegramAccountApi {
 
   /** "不是我，退出所有网页会话"（第 2 批）：作废这个客户的全部网页会话（网页登录的和从机器人进入的） */
   void logoutAllWeb(long userId);
+
+  /**
+   * 一个还有效的网页会话（验收反馈：不再每次登录都发提醒，机器人菜单里改成可以随时查看）。
+   *
+   * @param device 设备大致信息（系统 · 浏览器，从 User-Agent 粗略判断）
+   * @param ip IP 只露前面一部分（IPv4 前三段）
+   * @param kind WEB 网页登录 / BOT 从机器人进入 / EMERGENCY 应急开关下用 Telegram 登录
+   * @param createdAt 登录时间（UTC）
+   */
+  record WebSession(String device, String ip, String kind, LocalDateTime createdAt) {}
+
+  /** 这个客户现在还有效的网页会话，新的在前，最多 limit 个 */
+  java.util.List<WebSession> activeWebSessions(long userId, int limit);
 }

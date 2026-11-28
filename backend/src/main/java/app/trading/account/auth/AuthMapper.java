@@ -148,6 +148,9 @@ interface AuthMapper {
 
   String sessionRevokeReason(@Param("tokenHash") String tokenHash);
 
+  /** 这个客户还有效的会话（条件和 findActiveSession 一样），新的在前 */
+  java.util.List<Rows.ActiveSession> activeSessions(@Param("userId") long userId, @Param("limit") int limit);
+
   // ---------- 第 5 批：应急开关（TB-34） ----------
 
   /** 应急开关下用 Telegram 登录的网页会话（和网页会话一样 ttlHours 小时、用着自动续期；开关关上就作废） */

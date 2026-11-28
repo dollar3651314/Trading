@@ -52,6 +52,8 @@ public class UpdateHandler {
   static final String CB_REAUTH = "reauth";
   static final String CB_MENU = "menu";
   static final String CB_PREFS = "prefs";
+  /** 验收反馈：「当前网页会话」（不再每次登录都发提醒，改成随时可以查看） */
+  static final String CB_SESSIONS = "sessions";
   static final String CB_PREF = "pref:";
   static final String CB_NOOP = "noop";
   /** 退路模式（FX_TG_LOGIN_MODE=link）：打开网页的回调按钮 open:路径，点了现发一条 60 秒一次性链接 */
@@ -244,6 +246,12 @@ public class UpdateHandler {
     }
     if (UserStatus.FROZEN == status(a)) {
       send(chat, TEXT_FROZEN, null);
+      return;
+    }
+    if (CB_SESSIONS.equals(data)) {
+      // 只读：冻结之外不用先重新授权（要重新授权时网页会话本来就已作废，列表是空的）
+      send(chat, sessionsText(accounts.activeWebSessions(a.userId(), 10)),
+          keyboard(List.of(row(cb("退出所有网页会话", CB_LOGOUT_ALL)), row(cb("返回", CB_MENU)))));
       return;
     }
     if (CB_LOGOUT_ALL.equals(data)) {
@@ -443,6 +451,26 @@ public class UpdateHandler {
     return true;
   }
 
+  private static final java.time.format.DateTimeFormatter SESSION_TIME = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm 'UTC'");
+
+  /** 「当前网页会话」的文字：设备 / 浏览器、IP 前三段、登录时间、怎么登录的 */
+  static String sessionsText(List<TelegramAccountApi.WebSession> list) {
+    if (list.isEmpty()) return "现在没有登录着的网页会话。";
+    StringBuilder sb = new StringBuilder("当前网页会话（" + list.size() + " 个，新的在前）：");
+    int i = 1;
+    for (TelegramAccountApi.WebSession s : list) {
+      String how = switch (s.kind()) {
+        case "BOT" -> "从机器人进入";
+        case "EMERGENCY" -> "应急开关下用 Telegram 登录";
+        default -> "网页登录";
+      };
+      sb.append('\n').append(i++).append(". ").append(s.device()).append("，IP ").append(s.ip()).append("，")
+          .append(s.createdAt() == null ? "时间未知" : s.createdAt().format(SESSION_TIME)).append(" 登录（").append(how).append("）");
+    }
+    sb.append("\n不认识的，点「退出所有网页会话」。");
+    return sb.toString();
+  }
+
   static String eventName(String type) {
     return switch (type) {
       case SecurityEvent.PASSWORD_CHANGE -> "改了密码";
@@ -499,8 +527,8 @@ public class UpdateHandler {
     if (selfFrozen && props.hasWebUrl()) rows.add(row(login("解除自己设的提现冻结", "/me/withdraw-freeze")));
     else if (!selfFrozen) rows.add(row(cb("冻结提现", CB_FREEZE)));
     rows.add(row(cb("通知设置", CB_PREFS)));
-    // 验收反馈 B：不再每次登录都发"刚在浏览器里登录"，退出全部网页会话的按钮常驻主菜单，随时能用
-    rows.add(row(cb("退出所有网页会话", CB_LOGOUT_ALL)));
+    // 验收反馈 B：不再每次登录都发"刚在浏览器里登录"；「当前网页会话」随时能看，旁边就是「退出所有网页会话」
+    rows.add(row(cb("当前网页会话", CB_SESSIONS), cb("退出所有网页会话", CB_LOGOUT_ALL)));
     return keyboard(rows);
   }
 
