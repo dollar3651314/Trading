@@ -6,12 +6,13 @@ export function botLink(username: string | null | undefined): string | null {
 }
 
 /**
- * 提示页"在 Telegram 打开"用的深链接（验收反馈 1c）：https://t.me/机器人?start=reauth。客户点了以后机器人会收到 /start reauth：
- * 要先重新授权的回「重新授权」提示，不用的回主菜单。聊天已经打开过时，普通链接打开以后什么都不会发生，客户会卡住
+ * 提示页"在 Telegram 打开"用的深链接（验收反馈 1c；11/28 改）：https://t.me/机器人?start=open（安全事件后 ?start=reauth）。
+ * 机器人收到以后：要先重新授权的回「重新授权」提示；不用的发一整套新菜单，「打开交易」是 60 秒一次性链接「进入交易 ›」。
+ * 聊天已经打开过时，普通链接打开以后什么都不会发生，客户会卡住
  */
-export function botStartLink(username: string | null | undefined): string | null {
+export function botStartLink(username: string | null | undefined, payload: 'open' | 'reauth' = 'open'): string | null {
   const l = botLink(username);
-  return l ? `${l}?start=reauth` : null;
+  return l ? `${l}?start=${payload}` : null;
 }
 
 /** 从 #t=令牌 里取令牌 */

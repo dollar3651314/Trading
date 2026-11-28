@@ -24,9 +24,13 @@ class TelegramButtonsTest {
   }
 
   @Test
-  void 退路模式_回调按钮() {
+  void 一次性链接模式_默认_普通网址按钮不带令牌_带from_tg() {
     InlineKeyboardButton b = TelegramSenderImpl.open(props("link"), "持仓", "/positions");
-    assertThat(b.getCallbackData()).isEqualTo("open:/positions");
+    assertThat(b.getUrl()).as("11/28 Amos 定：普通网址按钮，在 Telegram 里打开；7 天内用过网页直接进入").isEqualTo("https://trade.example.test/positions?from=tg");
+    assertThat(b.getUrl()).doesNotContain("#t=");
     assertThat(b.getLoginUrl()).isNull();
+    assertThat(b.getCallbackData()).isNull();
+    assertThat(b.getWebApp()).as("不是 web_app（不是 Mini App）").isNull();
+    assertThat(TelegramSenderImpl.open(props("link"), "查看", "/positions?pid=12").getUrl()).isEqualTo("https://trade.example.test/positions?pid=12&from=tg");
   }
 }

@@ -20,7 +20,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -98,18 +97,8 @@ public class UpdateHandler {
 
       点「授权开户」表示你已阅读并同意服务条款和隐私政策。""";
   static final String TEXT_FAILED = "操作没有成功：账户服务暂时不可用，可以稍后再试；一直不行请联系客服。";
-  static final String TEXT_LINK = "点「打开」进入网页（60 秒内有效，只能用一次；别转发给别人）。";
   static final String TEXT_LOGGED_OUT = "已退出所有网页会话。如果不是你本人登录的，建议马上检查账户。";
 
-  /** 60 秒后删一次性链接消息（守护线程，进程重启时没删的就留着：链接本身 60 秒后已经失效） */
-  private static final java.util.concurrent.ScheduledExecutorService DELETER = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-    Thread t = new Thread(r, "tg-link-delete");
-    t.setDaemon(true);
-    return t;
-  });
-
-  /** 一次性链接消息多久后删（和链接有效期 60 秒一样；测试里改短） */
-  static volatile long linkDeleteMillis = 60_000;
 
   private final TelegramAccountApi accounts;
   private final AccountApi account;
@@ -200,7 +189,10 @@ public class UpdateHandler {
     syncUsername(a, from);
     String cmd = text == null ? "" : text.strip();
     if (cmd.startsWith("/settings")) send(chat, prefsText(), prefsKeyboard(a.userId()));
-    else send(chat, menuText(a), menuKeyboard(a.userId()));
+    // 11/28 Amos 定：网页没有有效会话时显示「回到机器人继续」，深链接 /start open（安全事件后是 /start reauth）；
+    // 这时发一整套新的菜单，「打开交易」换成 60 秒一次性链接「进入交易 ›」，别的按钮照常——客户只要看最新这一条
+    else if (START_FRESH.contains(cmd)) sendMenu(chat, a, true);
+    else sendMenu(chat, a, false);
   }
 
   // ---------- 按钮 ----------
@@ -263,56 +255,23 @@ public class UpdateHandler {
     if (CB_REAUTH.equals(data)) {
       accounts.reauthorize(a.userId());
       edit(chat, messageId, "已重新授权。", null);
-      send(chat, menuText(a), menuKeyboard(a.userId()));
+      // 重新授权以后网页会话都已作废：这一套菜单的「打开交易」带一次性链接
+      sendMenu(chat, a, true);
       return;
     }
     if (!gate(chat, a)) return;
     if (CB_SIGNUP.equals(data) || CB_MENU.equals(data)) {
       // 已经开过户又点了旧的「授权开户」：不再开户，回主菜单
       send(chat, menuText(a), menuKeyboard(a.userId()));
+    } else if (data.startsWith(CB_OPEN)) {
+      // 以前一次性链接模式的回调按钮（旧消息上的）：给点的人（回调里的 from，不管消息是谁转发来的）发一整套新的菜单，带他自己的一次性链接
+      sendMenu(chat, a, true);
     } else if (CB_PREFS.equals(data)) {
       send(chat, prefsText(), prefsKeyboard(a.userId()));
     } else if (data.startsWith(CB_PREF)) {
       togglePref(chat, messageId, a, data.substring(CB_PREF.length()));
-    } else if (data.startsWith(CB_OPEN)) {
-      openLink(chat, a, data.substring(CB_OPEN.length()));
     } else if (!CB_DECLINE.equals(data) && !CB_NOOP.equals(data)) {
       send(chat, menuText(a), menuKeyboard(a.userId()));
-    }
-  }
-
-  /**
-   * 退路模式（FX_TG_LOGIN_MODE=link）：现做一条 60 秒、只能用一次的链接，令牌放在网址 # 后面（不进服务器日志、不随请求发出），
-   * 网页读出来用 POST 换会话；这条消息 60 秒后删掉。不排队、直接发（要拿到消息编号才能删）
-   */
-  private void openLink(long chat, TgAccount a, String path) {
-    if (!props.linkMode() || !props.hasWebUrl()) {
-      send(chat, menuText(a), menuKeyboard(a.userId()));
-      return;
-    }
-    String token;
-    try {
-      token = accounts.createLoginLink(a.userId(), path);
-    } catch (RuntimeException e) {
-      log.warn("做一次性链接失败：{}", e.toString());
-      send(chat, TEXT_FAILED, null);
-      return;
-    }
-    InlineKeyboardButton b = InlineKeyboardButton.builder().text("打开").url(props.base() + "/tg-link#t=" + token).build();
-    try {
-      Message m = api.execute(SendMessage.builder().chatId(chat).text(TEXT_LINK).replyMarkup(keyboard(List.of(row(b)))).build());
-      if (m != null && m.getMessageId() != null) {
-        Integer id = m.getMessageId();
-        DELETER.schedule(() -> {
-          try {
-            api.execute(DeleteMessage.builder().chatId(chat).messageId(id).build());
-          } catch (Exception e) {
-            log.debug("删一次性链接消息失败：{}", props.scrub(e.toString()));
-          }
-        }, linkDeleteMillis, java.util.concurrent.TimeUnit.MILLISECONDS);
-      }
-    } catch (Exception e) {
-      log.warn("发一次性链接失败：{}", props.scrub(e.toString()));
     }
   }
 
@@ -398,7 +357,8 @@ public class UpdateHandler {
       return;
     }
     edit(chat, messageId, "已授权开户。", null);
-    send(chat, welcomeText(a), menuKeyboard(a.userId()));
+    // 刚开户还没有网页会话：欢迎卡片的「打开交易」带一次性链接
+    send(chat, welcomeText(a) + freshHint(), menuKeyboard(a.userId(), true));
   }
 
   private void togglePref(long chat, Integer messageId, TgAccount a, String code) {
@@ -511,9 +471,35 @@ public class UpdateHandler {
 
   /** 欢迎卡片 / 主菜单：「打开交易」和快捷入口是 login_url 按钮（网页地址没配置时不显示），「通知设置」 */
   private InlineKeyboardMarkup menuKeyboard(long userId) {
+    return menuKeyboard(userId, false);
+  }
+
+  /** 进网页的深链接参数：这两种 /start 发一整套带一次性链接的新菜单 */
+  static final java.util.Set<String> START_FRESH = java.util.Set.of("/start open", "/start reauth");
+
+  /** 主菜单；fresh 时（客户这时多半没有网页会话）「打开交易」换成 60 秒一次性链接「进入交易 ›」 */
+  private void sendMenu(long chat, TgAccount a, boolean fresh) {
+    InlineKeyboardMarkup kb = menuKeyboard(a.userId(), fresh);
+    send(chat, menuText(a) + (fresh && freshLink(kb) ? freshHint() : ""), kb);
+  }
+
+  private static boolean freshLink(InlineKeyboardMarkup kb) {
+    return kb.getKeyboard().stream().flatMap(List::stream).anyMatch(b -> TEXT_ENTER.equals(b.getText()));
+  }
+
+  private String freshHint() {
+    return props.linkMode() && props.hasWebUrl() ? "\n\n点「" + TEXT_ENTER + "」进入网页（60 秒内有效，只能用一次，别转发）。之后 7 天内用过网页，下面的按钮都直接进入。" : "";
+  }
+
+  /** 一次性链接按钮上的字 */
+  static final String TEXT_ENTER = "进入交易 ›";
+
+  /** 主菜单键盘；fresh 时（一次性链接模式）「打开交易」换成一次性链接按钮，别的按钮照常（普通网址按钮，没有令牌） */
+  private InlineKeyboardMarkup menuKeyboard(long userId, boolean fresh) {
     List<InlineKeyboardRow> rows = new ArrayList<>();
     if (props.hasWebUrl()) {
-      rows.add(row(login("打开交易", "/trade")));
+      InlineKeyboardButton enter = fresh && props.linkMode() ? enterButton(userId, "/trade") : null;
+      rows.add(row(enter != null ? enter : login("打开交易", "/trade")));
       rows.add(row(login("行情", "/markets"), login("持仓", "/positions")));
       rows.add(row(login("充值", "/assets"), login("提现", "/assets/withdraw")));
     }
@@ -530,6 +516,17 @@ public class UpdateHandler {
     // 验收反馈 B：不再每次登录都发"刚在浏览器里登录"；「当前网页会话」随时能看，旁边就是「退出所有网页会话」
     rows.add(row(cb("当前网页会话", CB_SESSIONS), cb("退出所有网页会话", CB_LOGOUT_ALL)));
     return keyboard(rows);
+  }
+
+  /** 60 秒、只能用一次的链接按钮（令牌在网址 # 后面，库里只存哈希，绑定这个客户）；做不出来时返回 null（用普通按钮） */
+  private InlineKeyboardButton enterButton(long userId, String path) {
+    try {
+      String token = accounts.createLoginLink(userId, path);
+      return InlineKeyboardButton.builder().text(TEXT_ENTER).url(props.base() + "/tg-link#t=" + token).build();
+    } catch (RuntimeException e) {
+      log.warn("做一次性链接失败：{}", e.toString());
+      return null;
+    }
   }
 
   private InlineKeyboardMarkup prefsKeyboard(long userId) {

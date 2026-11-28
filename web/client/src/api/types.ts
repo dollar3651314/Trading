@@ -24,7 +24,8 @@ export type TelegramWidgetUser = Record<string, string | number>;
 
 /** 从机器人进入网页没有成功的原因（后端 TelegramWebLogin.Outcome，提示页 /tg?r=… 按它显示文案） */
 /** security（第 4 批）：刚出了安全事件（设置 / 修改提现密码、第一次提交 KYC 等），网页会话已全部作废 */
-export type TgLoginReason = 'refused' | 'invalid' | 'expired' | 'used' | 'no_account' | 'frozen' | 'reauth' | 'disabled' | 'security';
+/** continue（11/28）：从机器人的普通按钮进来、这个浏览器里没有有效会话（第一次、7 天没用、退出过）——回机器人点最新一条里的「进入交易 ›」 */
+export type TgLoginReason = 'refused' | 'invalid' | 'expired' | 'used' | 'no_account' | 'frozen' | 'reauth' | 'disabled' | 'security' | 'continue';
 
 export interface Session {
   /** 只有原型（mock 模式）有；真实环境的令牌在 HttpOnly Cookie 里，前端拿不到 */

@@ -90,7 +90,7 @@ class TelegramLoginController {
         .header(HttpHeaders.CACHE_CONTROL, "no-store")
         .header("Referrer-Policy", "no-referrer");
     if (r.outcome() == TelegramWebLogin.Outcome.OK) {
-      b.header(HttpHeaders.SET_COOKIE, AuthController.sessionCookie(props, r.token(), Duration.ofHours(props.botSessionMaxHours())));
+      b.header(HttpHeaders.SET_COOKIE, AuthController.sessionCookie(props, r.token(), props.botSessionTtl()));
       b.header(HttpHeaders.LOCATION, r.next());
     } else {
       b.header(HttpHeaders.LOCATION, hint(r.outcome()));
@@ -110,7 +110,7 @@ class TelegramLoginController {
     }
     return ResponseEntity.ok()
         .header(HttpHeaders.CACHE_CONTROL, "no-store")
-        .header(HttpHeaders.SET_COOKIE, AuthController.sessionCookie(props, r.token(), Duration.ofHours(props.botSessionMaxHours())))
+        .header(HttpHeaders.SET_COOKIE, AuthController.sessionCookie(props, r.token(), props.botSessionTtl()))
         .body(new LinkResult(r.next()));
   }
 

@@ -793,7 +793,7 @@ apply() {
   if wait_healthy "$(current_rev)"; then ok "已生效，健康检查通过"; else bad "改完后健康检查没通过（看 sudo trading status，截图给主会话）"; return 1; fi
 }
 
-SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED FX_TG_BOT_USERNAME FX_TG_WEB_URL FX_TG_LOGIN_MODE FX_PHASE1_TELEGRAM_ONLY FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID TR_MEM_APP TR_META_APP"
+SET_ALLOWED="FX_TOPUP_BASE_URL FX_MAIL_HOST FX_MAIL_PORT FX_MAIL_SECURITY FX_MAIL_USERNAME FX_MAIL_FROM FX_ALERT_EMAILS FX_RISK_ALERT_EMAILS FX_QUOTE_BINANCE_ENABLED FX_TG_BOT_USERNAME FX_TG_WEB_URL FX_TG_LOGIN_MODE FX_PHASE1_TELEGRAM_ONLY FX_TG_LOGIN_BOT_USERNAME FX_ADMIN_OWNER_ID FX_BOT_SESSION_DAYS TR_MEM_APP TR_META_APP"
 # 只有生产能改的：真实 IP（实测平台网关后打开，两项都填才开）、报价对外端口 8085 绑在哪（127.0.0.1 = 不对外，0.0.0.0 = 平台上发布时）
 SET_PROD="TR_REAL_IP_FROM TR_REAL_IP_HEADER TR_QUOTE_BIND"
 
@@ -988,10 +988,12 @@ cmd_set() {
   case "$1" in
     # TG 机器人第 2 批：机器人按钮打开的网页地址（https://域名，不带路径；一键登录要先在 BotFather /setdomain 绑这个域名）
     FX_TG_WEB_URL) [[ "$v" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]] || die "FX_TG_WEB_URL 要写成 https://域名（例：https://$(envget APP_DOMAIN)）" ;;
-    FX_TG_LOGIN_MODE) [[ "$v" =~ ^(login-url|link)$ ]] || die "FX_TG_LOGIN_MODE 只能是 login-url（一键登录）或 link（一次性链接，绑不上域名时的退路）" ;;
+    FX_TG_LOGIN_MODE) [[ "$v" =~ ^(login-url|link)$ ]] || die "FX_TG_LOGIN_MODE 只能是 link（一次性链接，默认：同一条消息上换成 60 秒链接，在 Telegram 里打开）或 login-url（login_url 一键登录）" ;;
     FX_PHASE1_TELEGRAM_ONLY) [[ "$v" =~ ^(true|false)$ ]] || die "FX_PHASE1_TELEGRAM_ONLY 只能是 true（只走 Telegram）或 false" ;;
     # 第 5 批：应急开关的登录机器人用户名（和交易机器人不是同一个）；能在后台开关的后台账号编号（Amos 的，正整数）
     FX_TG_LOGIN_BOT_USERNAME) v=${v#@}; [[ "$v" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$ ]] || die "FX_TG_LOGIN_BOT_USERNAME 不像机器人用户名：$2" ;;
+    # 11/28：从机器人进网页的会话的滑动有效期（天，1～30，默认 7）
+    FX_BOT_SESSION_DAYS) [[ "$v" =~ ^([1-9]|[12][0-9]|30)$ ]] || die "FX_BOT_SESSION_DAYS 要写 1～30 的天数（默认 7）" ;;
     FX_ADMIN_OWNER_ID) [[ "$v" =~ ^[1-9][0-9]{0,18}$ ]] || die "FX_ADMIN_OWNER_ID 要写 Amos 后台账号的编号（正整数，后台\"管理员\"页能看到），不写用户名" ;;
   esac
   if [ "$1" = TR_MEM_APP ] || [ "$1" = TR_META_APP ]; then

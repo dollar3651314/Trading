@@ -49,6 +49,8 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (checking) return <Loading rows={4} />;
   // 验收反馈 1b：会话是因为安全事件没的，去"回机器人点「重新授权」"的提示页，不去登录页
   if (!session && securityLogout) return <Navigate to="/tg?r=security" replace />;
+  // 11/28：从机器人的普通按钮进来（?from=tg）、这个浏览器里没有有效会话：短页「回到机器人继续」（深链接 /start open）
+  if (!session && new URLSearchParams(location.search).get('from') === 'tg') return <Navigate to="/tg?r=continue" replace />;
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }

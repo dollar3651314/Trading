@@ -25,8 +25,8 @@ describe('第一阶段只走 Telegram', () => {
       </Routes>,
       '/login',
     );
-    // 验收反馈 1c：深链接 ?start=reauth（机器人会回重新授权提示或主菜单）
-    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=reauth');
+    // 深链接（11/28 起普通提示页是 ?start=open：机器人发一整套带一次性链接的新菜单；安全事件后是 ?start=reauth）
+    expect(await screen.findByTestId('tg-open')).toHaveAttribute('href', 'https://t.me/TradingAssistTestBot?start=open');
     expect(screen.queryByText('邮箱登录表单')).toBeNull();
     expect(screen.getByRole('img', { name: '打开机器人的二维码' })).toBeInTheDocument();
     expect(screen.getByTestId('tg-freeze')).toHaveAttribute('href', '/tg/freeze');
@@ -62,7 +62,8 @@ describe('第一阶段只走 Telegram', () => {
     expect(botLink(null)).toBeNull();
     expect(botLink('evil.com/x')).toBeNull();
     expect(botLink('a')).toBeNull();
-    expect(botStartLink('TradingAssistBot')).toBe('https://t.me/TradingAssistBot?start=reauth');
+    expect(botStartLink('TradingAssistBot')).toBe('https://t.me/TradingAssistBot?start=open');
+    expect(botStartLink('TradingAssistBot', 'reauth')).toBe('https://t.me/TradingAssistBot?start=reauth');
     expect(botStartLink('evil.com/x')).toBeNull();
   });
 

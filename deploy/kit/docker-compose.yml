@@ -136,10 +136,12 @@ services:
       FX_TG_BOT_TOKEN: ${FX_TG_BOT_TOKEN:-}
       FX_TG_BOT_USERNAME: ${FX_TG_BOT_USERNAME:-TradingAssistTestBot}
       FX_TG_WEB_URL: ${FX_TG_WEB_URL:-}
-      # 第 2 批：进入网页的方式 login-url（一键登录，默认；要先在 BotFather /setdomain 绑上 FX_TG_WEB_URL 的域名，绑好再填 FX_TG_WEB_URL）或 link（绑不上时的退路）；
+      # 进入网页的方式：link（一次性链接，默认，验收反馈方案 ②：点了按钮在同一条消息上换成 60 秒链接，iOS 上一直在 Telegram 里打开）或 login-url（login_url 一键登录，要先 /setdomain）；
       # 第一阶段只走 Telegram（TB-33）：关注册、邮箱登录、忘记密码，网页没有会话时显示"请在 Telegram 打开"。
       # 默认关（第 2 批审查 🟡1），Amos 统一验收时 sudo trading set FX_PHASE1_TELEGRAM_ONLY true 打开
-      FX_TG_LOGIN_MODE: ${FX_TG_LOGIN_MODE:-login-url}
+      FX_TG_LOGIN_MODE: ${FX_TG_LOGIN_MODE:-link}
+      # 11/28 Amos 定：从机器人进网页的会话 7 天滑动有效期（7 天内用过就从那时再续 7 天）；sudo trading set FX_BOT_SESSION_DAYS 改（1～30）
+      FX_BOT_SESSION_DAYS: ${FX_BOT_SESSION_DAYS:-7}
       FX_PHASE1_TELEGRAM_ONLY: ${FX_PHASE1_TELEGRAM_ONLY:-false}
       # 第 5 批应急开关（TB-34）：另一个只管登录的机器人（网页「用 Telegram 登录」）。用户名 sudo trading set FX_TG_LOGIN_BOT_USERNAME，
       # 令牌只由 Amos 用 sudo trading set-key FX_TG_LOGIN_BOT_TOKEN 填；都没填 = 开关打开了网页也不显示「用 Telegram 登录」。

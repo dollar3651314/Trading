@@ -61,11 +61,23 @@ public class TelegramSenderImpl implements TelegramSender {
   }
 
   /**
-   * 打开网页的按钮（第 2 批）：一键登录模式是 login_url 按钮（落地页验过身份后直达 path）；
-   * 退路模式是回调按钮 {@code open:path}，点了机器人现发一条 60 秒一次性链接。网页地址没配置时调用方不加这个按钮
+   * 打开网页的按钮（第 2 批；11/28 Amos 定最终做法）：
+   * <ul>
+   *   <li>一次性链接模式（默认）：<b>普通网址按钮，不带令牌</b>（{@code 网页地址/path?from=tg}），按客户"在应用内打开链接"的设置在 Telegram 里打开；
+   *       7 天内用过网页（机器人会话 7 天滑动有效期）就直接进入。没有有效会话时网页显示「回到机器人继续」，深链接 /start open 让机器人发一整套新菜单，
+   *       其中「打开交易」是 60 秒一次性链接（{@link UpdateHandler}）。</li>
+   *   <li>一键登录模式：login_url 按钮（落地页验过身份后直达 path）。</li>
+   * </ul>
+   * 网页地址没配置时调用方不加这个按钮
    */
   static InlineKeyboardButton open(TelegramProperties props, String text, String path) {
-    if (props.linkMode()) return InlineKeyboardButton.builder().text(text).callbackData(UpdateHandler.CB_OPEN + path).build();
+    if (props.linkMode()) return InlineKeyboardButton.builder().text(text).url(plainUrl(props, path)).build();
     return InlineKeyboardButton.builder().text(text).loginUrl(new LoginUrl(props.loginUrl(path))).build();
+  }
+
+  /** 普通网址：网页地址 + path，再加 from=tg（网页据此在没有会话时显示「回到机器人继续」） */
+  static String plainUrl(TelegramProperties props, String path) {
+    String p = path == null || path.isBlank() || !path.startsWith("/") ? "/" : path;
+    return props.base() + p + (p.contains("?") ? "&" : "?") + "from=tg";
   }
 }

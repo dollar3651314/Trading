@@ -134,10 +134,10 @@ interface AuthMapper {
 
   SessionRow findActiveSession(@Param("tokenHash") String tokenHash);
 
-  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours, @Param("botIdleMinutes") int botIdleMinutes);
+  int extendSession(@Param("id") long id, @Param("ttlHours") int ttlHours, @Param("botDays") long botDays);
 
   int insertBotSession(@Param("userId") long userId, @Param("tokenHash") String tokenHash, @Param("ip") String ip, @Param("userAgent") String userAgent,
-      @Param("idleMinutes") int idleMinutes, @Param("maxHours") int maxHours);
+      @Param("botDays") long botDays);
 
   int revokeSession(@Param("tokenHash") String tokenHash);
 
